@@ -17,13 +17,14 @@ async function bootstrap(): Promise<void> {
 
   app.use(helmet());
   app.use(cookieParser());
+
+  const corsOrigin = config.get('corsOrigin', { infer: true });
   app.enableCors({
-    origin: config.get('corsOrigin', { infer: true }),
+    origin: corsOrigin || true, // Suporta a origem configurada ou aceita a origem da requisição
     credentials: true,
   });
+
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-  // Validation is registered as a global APP_PIPE in AppModule (StrictValidationPipe)
-  // instead of here, so it can read @AllowExtraFields() metadata via Reflector.
 
   const env = config.get('env', { infer: true });
   if (env !== 'production') {
@@ -39,9 +40,10 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.setup('docs', app, document);
   }
 
-  const port = config.get('port', { infer: true });
-  await app.listen(port);
-  new Logger('Bootstrap').log(`API listening on port ${port} (env=${env})`);
+  const port = config.get('port', { infer: true }) || process.env.PORT || 4000;
+
+  await app.listen(port, '0.0.0.0');
+  new Logger('Bootstrap').log(`API listening on 0.0.0.0:${port} (env=${env})`);
 }
 
 bootstrap();
