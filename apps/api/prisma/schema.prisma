@@ -1,0 +1,696 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  TRIAL
+  CANCELLED
+}
+
+enum BranchStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+  INVITED
+}
+
+enum RoleName {
+  OWNER
+  ADMIN
+  MANAGER
+  CASHIER
+  WAITER
+  KITCHEN
+  DELIVERY
+  VIEWER
+}
+
+model Tenant {
+  id        String       @id @default(uuid())
+  name      String
+  legalName String
+  document  String       @unique
+  slug      String       @unique
+  status    TenantStatus @default(TRIAL)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  branches          Branch[]
+  users             User[]
+  userRoles         UserRole[]
+  auditLogs         AuditLog[]
+  categories        Category[]
+  products          Product[]
+  orders            Order[]
+  cashSessions      CashRegisterSession[]
+  cashMovements     CashMovement[]
+  diningTables      DiningTable[]
+  tabs              Tab[]
+  payments          Payment[]
+  inventoryItems    InventoryItem[]
+  inventoryBalances InventoryBalance[]
+  stockMovements    StockMovement[]
+  productRecipes    ProductRecipe[]
+  inventoryCounts   InventoryCount[]
+
+  @@map("tenants")
+}
+
+model Branch {
+  id                 String       @id @default(uuid())
+  tenantId           String
+  name               String
+  code               String
+  document           String?
+  phone              String?
+  email              String?
+  address            String?
+  number             String?
+  complement         String?
+  neighborhood       String?
+  city               String?
+  state              String?
+  zipCode            String?
+  status             BranchStatus @default(ACTIVE)
+  allowNegativeStock Boolean      @default(false)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userBranches      UserBranch[]
+  orders            Order[]
+  cashSessions      CashRegisterSession[]
+  diningTables      DiningTable[]
+  tabs              Tab[]
+  inventoryBalances InventoryBalance[]
+  stockMovements    StockMovement[]
+  inventoryCounts   InventoryCount[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("branches")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  tenantId     String
+  name         String
+  email        String     @unique
+  phone        String?
+  passwordHash String
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userRoles          UserRole[]
+  userBranches       UserBranch[]
+  refreshTokens      RefreshToken[]
+  auditLogs          AuditLog[]
+  openedCashSessions CashRegisterSession[] @relation("CashSessionOpenedBy")
+  closedCashSessions CashRegisterSession[] @relation("CashSessionClosedBy")
+  cashMovements      CashMovement[]
+  stockMovements     StockMovement[]
+  inventoryCounts    InventoryCount[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model UserBranch {
+  id        String   @id @default(uuid())
+  userId    String
+  branchId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, branchId])
+  @@map("user_branches")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleName @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String @id @default(uuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  tenantId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, tenantId])
+  @@index([tenantId])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid())
+  userId     String
+  tokenHash  String    @unique
+  userAgent  String?
+  ip         String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String?
+  userId     String?
+  action     String
+  entity     String
+  entityId   String?
+  beforeData Json?
+  afterData  Json?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
+
+model Category {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  description  String?
+  active       Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@index([tenantId])
+  @@map("categories")
+}
+
+model Product {
+  id           String   @id @default(uuid())
+  tenantId     String
+  categoryId   String
+  name         String
+  description  String?
+  priceCents   Int
+  imageUrl     String?
+  active       Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category   Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  orderItems OrderItem[]
+  tabItems   TabItem[]
+  recipe     ProductRecipe?
+
+  @@index([tenantId])
+  @@index([categoryId])
+  @@map("products")
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum FulfillmentType {
+  DELIVERY
+  PICKUP
+  DINE_IN
+}
+
+enum OrderSource {
+  ONLINE
+  COUNTER
+  TABLE
+}
+
+enum PaymentMethod {
+  CASH
+  PIX
+  CARD
+}
+
+model Order {
+  id              String          @id @default(uuid())
+  tenantId        String
+  branchId        String
+  orderNumber     String          @unique
+  status          OrderStatus     @default(PENDING)
+  source          OrderSource     @default(ONLINE)
+  customerName    String?
+  customerPhone   String?
+  fulfillmentType FulfillmentType
+  paymentMethod   PaymentMethod
+  notes           String?
+
+  street       String?
+  number       String?
+  complement   String?
+  neighborhood String?
+  city         String?
+  state        String?
+  zipCode      String?
+
+  subtotalCents Int
+  totalCents    Int
+
+  tabId          String? @unique
+  idempotencyKey String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  tab          Tab?          @relation(fields: [tabId], references: [id], onDelete: Restrict)
+  items        OrderItem[]
+  cashMovement CashMovement?
+  payment      Payment?
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, branchId, createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+
+  productId           String
+  productNameSnapshot String
+  unitPriceCents      Int
+  quantity            Int
+  subtotalCents       Int
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum CashMovementType {
+  WITHDRAWAL
+  SUPPLY
+  SALE
+}
+
+model CashRegisterSession {
+  id                          String            @id @default(uuid())
+  tenantId                    String
+  branchId                    String
+  openedByUserId              String
+  closedByUserId              String?
+  status                      CashSessionStatus @default(OPEN)
+  openingBalanceCents         Int
+  expectedClosingBalanceCents Int?
+  countedClosingBalanceCents  Int?
+  differenceCents             Int?
+  openedAt                    DateTime          @default(now())
+  closedAt                    DateTime?
+  notes                       String?
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  openedBy  User           @relation("CashSessionOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  closedBy  User?          @relation("CashSessionClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  movements CashMovement[]
+
+  @@index([tenantId, branchId, status])
+  @@index([tenantId, openedAt])
+  @@map("cash_register_sessions")
+}
+
+model CashMovement {
+  id              String           @id @default(uuid())
+  sessionId       String
+  tenantId        String
+  type            CashMovementType
+  amountCents     Int
+  reason          String?
+  orderId         String?          @unique
+  createdByUserId String
+  createdAt       DateTime         @default(now())
+
+  session   CashRegisterSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order     Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdBy User                @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([sessionId, createdAt])
+  @@map("cash_movements")
+}
+
+enum TabStatus {
+  OPEN
+  CLOSED
+}
+
+model DiningTable {
+  id        String   @id @default(uuid())
+  tenantId  String
+  branchId  String
+  number    Int
+  name      String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tabs   Tab[]
+
+  @@unique([branchId, number])
+  @@index([tenantId])
+  @@map("dining_tables")
+}
+
+model Tab {
+  id           String    @id @default(uuid())
+  tenantId     String
+  branchId     String
+  tableId      String
+  status       TabStatus @default(OPEN)
+  customerName String?
+  openedAt     DateTime  @default(now())
+  closedAt     DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  table  DiningTable @relation(fields: [tableId], references: [id], onDelete: Restrict)
+  items  TabItem[]
+  order  Order?
+
+  @@index([tenantId, branchId, status])
+  @@index([tableId, status])
+  @@map("tabs")
+}
+
+model TabItem {
+  id                     String   @id @default(uuid())
+  tenantId               String
+  tabId                  String
+  productId              String
+  productNameSnapshot    String
+  unitPriceCentsSnapshot Int
+  quantity               Int
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  tab     Tab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tabId])
+  @@index([productId])
+  @@map("tab_items")
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+enum PaymentProvider {
+  INTERNAL
+}
+
+model Payment {
+  id          String          @id @default(uuid())
+  tenantId    String
+  orderId     String          @unique
+  method      PaymentMethod
+  status      PaymentStatus
+  provider    PaymentProvider @default(INTERNAL)
+  amountCents Int
+  externalId  String?
+  confirmedAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt])
+  @@map("payments")
+}
+
+enum InventoryUnit {
+  UNIT
+  KG
+  G
+  L
+  ML
+}
+
+enum StockMovementType {
+  ENTRY
+  EXIT
+  ADJUSTMENT
+  SALE
+  REVERSAL
+}
+
+enum StockMovementOrigin {
+  PURCHASE
+  MANUAL
+  ORDER
+  INVENTORY
+  REVERSAL
+}
+
+enum StockExitReason {
+  CONSUMPTION
+  LOSS
+  DAMAGE
+  ADJUSTMENT
+  OTHER
+}
+
+enum StockReferenceType {
+  ORDER
+  INVENTORY_COUNT
+}
+
+model InventoryItem {
+  id           String        @id @default(uuid())
+  tenantId     String
+  name         String
+  sku          String?
+  unit         InventoryUnit
+  minStock     Decimal       @default(0) @db.Decimal(14, 3)
+  maxStock     Decimal?      @db.Decimal(14, 3)
+  tracksExpiry Boolean       @default(false)
+  notes        String?
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  balances    InventoryBalance[]
+  movements   StockMovement[]
+  recipeItems ProductRecipeItem[]
+  countItems  InventoryCountItem[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId])
+  @@map("inventory_items")
+}
+
+model InventoryBalance {
+  id               String   @id @default(uuid())
+  tenantId         String
+  branchId         String
+  inventoryItemId  String
+  quantity         Decimal  @default(0) @db.Decimal(14, 3)
+  averageCostCents Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch        @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@unique([branchId, inventoryItemId])
+  @@index([tenantId, branchId])
+  @@map("inventory_balances")
+}
+
+model StockMovement {
+  id              String              @id @default(uuid())
+  tenantId        String
+  branchId        String
+  inventoryItemId String
+  type            StockMovementType
+  origin          StockMovementOrigin
+  quantity        Decimal             @db.Decimal(14, 3)
+  balanceAfter    Decimal             @db.Decimal(14, 3)
+  unitCostCents   Int?
+  exitReason      StockExitReason?
+  notes           String?
+  supplierName    String?
+  documentNumber  String?
+  lotCode         String?
+  expiresAt       DateTime?           @db.Date
+  referenceType   StockReferenceType?
+  referenceId     String?
+  createdByUserId String?
+  createdAt       DateTime            @default(now())
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch        Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem       @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  createdBy     User?               @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  countItem     InventoryCountItem?
+
+  @@unique([referenceType, referenceId, inventoryItemId, type])
+  @@index([tenantId, branchId, createdAt])
+  @@index([inventoryItemId, createdAt])
+  @@index([branchId, inventoryItemId, expiresAt])
+  @@map("stock_movements")
+}
+
+model ProductRecipe {
+  id        String   @id @default(uuid())
+  tenantId  String
+  productId String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  items   ProductRecipeItem[]
+
+  @@index([tenantId])
+  @@map("product_recipes")
+}
+
+model ProductRecipeItem {
+  id              String        @id @default(uuid())
+  recipeId        String
+  inventoryItemId String
+  quantity        Decimal       @db.Decimal(14, 3)
+  inputUnit       InventoryUnit
+
+  recipe        ProductRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@unique([recipeId, inventoryItemId])
+  @@map("product_recipe_items")
+}
+
+model InventoryCount {
+  id              String   @id @default(uuid())
+  tenantId        String
+  branchId        String
+  notes           String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch    Branch               @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  createdBy User                 @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  items     InventoryCountItem[]
+
+  @@index([tenantId, branchId, createdAt])
+  @@map("inventory_counts")
+}
+
+model InventoryCountItem {
+  id              String  @id @default(uuid())
+  countId         String
+  inventoryItemId String
+  systemQuantity  Decimal @db.Decimal(14, 3)
+  countedQuantity Decimal @db.Decimal(14, 3)
+  difference      Decimal @db.Decimal(14, 3)
+  stockMovementId String? @unique
+
+  count         InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  stockMovement StockMovement? @relation(fields: [stockMovementId], references: [id], onDelete: Restrict)
+
+  @@unique([countId, inventoryItemId])
+  @@map("inventory_count_items")
+}

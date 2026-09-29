@@ -1,0 +1,110 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+ * Identidade visual — única fonte de verdade das cores e da tipografia.
+ * Documentação: docs/UI_DESIGN_SYSTEM.md
+ *
+ * Valores são triplets "R G B" para o Tailwind aplicar alpha (bg-primary/20).
+ * ========================================================================== */
+:root {
+  /* --- Paleta oficial (as ÚNICAS cores de marca) ------------------------- */
+  --brand-primary: 159 97 24; /* #9F6118 CARAMELO — ação principal */
+  --brand-dark: 2 0 1; /* #020001 PRETO — fundo, sidebar */
+  --brand-accent: 200 138 58; /* #C88A3A DOURADO — destaque, seleção */
+  --brand-muted: 229 192 138; /* #E5C08A BEGE — texto secundário, bordas */
+  --brand-light: 246 231 207; /* #F6E7CF CREME — texto principal, títulos */
+
+  /* --- Tipografia -------------------------------------------------------- */
+  --font-sans: Aptos, 'Segoe UI', Arial, sans-serif;
+  --font-heading: Georgia, 'Times New Roman', serif;
+}
+
+/* Tema do app (operador, login e cardápio público). Tudo aqui deriva da
+   paleta acima: as superfícies são BEGE sobre PRETO em baixa opacidade
+   (6% / 10% / 14% / 16% / 28%), sem introduzir uma sexta cor de marca. */
+.theme-app {
+  color-scheme: dark;
+
+  /* Semânticos */
+  --background: var(--brand-dark);
+  --foreground: var(--brand-light);
+
+  --surface: 16 12 9; /* bege 6% sobre preto — cards */
+  --surface-2: 25 19 15; /* bege 10% — inputs, blocos aninhados */
+  --surface-hover: 34 27 20; /* bege 14% — hover */
+  --sidebar: var(--brand-dark);
+
+  --border: 38 31 23; /* bege 16% */
+  --border-strong: 66 54 39; /* bege 28% */
+
+  --primary: var(--brand-primary);
+  --primary-foreground: var(--brand-light);
+  --primary-hover: 134 81 20; /* caramelo 84% sobre preto: cream 5,4:1 */
+
+  --accent: var(--brand-accent);
+  --accent-foreground: var(--brand-dark);
+
+  --muted: 25 19 15; /* fundo neutro suave */
+  --muted-foreground: 184 154 111; /* bege 80% — 7,9:1 sobre preto */
+  --subtle: 157 131 96; /* bege ~68% — terciário / placeholder */
+
+  /* Estados funcionais: só sinalizam significado, não competem com a marca */
+  --success: 98 190 136;
+  --warning: 250 204 21;
+  --danger: 236 96 84;
+  --danger-foreground: var(--brand-dark);
+  --info: 122 168 220;
+
+  background-color: rgb(var(--background));
+  color: rgb(var(--foreground));
+  font-family: var(--font-sans);
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Títulos: Georgia. Todo o resto (interface, tabelas, botões, inputs,
+   badges, navegação): Aptos. Números ficam em Aptos de propósito — Georgia
+   usa algarismos "old-style" que pioram a leitura de preços e saldos. */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+}
+
+body {
+  background-color: rgb(var(--brand-dark));
+  color: rgb(var(--brand-light));
+}
+
+/* Scrollbars discretas dentro do app. */
+.theme-app * {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--border-strong)) transparent;
+}
+
+.theme-app ::selection {
+  background: rgb(var(--accent) / 0.3);
+}
+
+/* Respeita quem pede menos movimento. */
+@media (prefers-reduced-motion: reduce) {
+  .theme-app *,
+  .theme-app *::before,
+  .theme-app *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

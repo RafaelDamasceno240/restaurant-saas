@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+dist/
+.next/
+out/
+.turbo/
+*.log
+.env
+.env.local
+.env.*.local
+!.env.example
+coverage/
+.DS_Store
+apps/api/generated/

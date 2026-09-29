@@ -1,0 +1,233 @@
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Order, OrderItem, OrderStatus, Prisma, StockMovement } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../audit/audit.service';
+import { fromCents } from '../../common/util/money.util';
+import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
+import { isValidOrderStatusTransition } from './order-status.util';
+import { InventoryService } from '../inventory/inventory.service';
+import { statusConsumesStock } from '../inventory/inventory-calculations';
+import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
+import { OrderDetailDto, OrderListItemDto, OrderListResponseDto } from './dto/order-admin-response.dto';
+
+type OrderWithItemsAndCount = Order & { items: OrderItem[]; _count: { items: number } };
+type OrderWithItems = Order & { items: OrderItem[] };
+
+const DEFAULT_PAGE_SIZE = 20;
+
+@Injectable()
+export class OrdersService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+    private readonly inventory: InventoryService,
+  ) {}
+
+  // Every query below is scoped by `tenantId` taken from the caller
+  // (the controller passes it from @CurrentUser(), i.e. the JWT) — never
+  // from a query param, body field, or route param. See docs/multi-tenancy.md.
+  async findAllForTenant(tenantId: string, query: ListOrdersQueryDto): Promise<OrderListResponseDto> {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
+    const where: Prisma.OrderWhereInput = {
+      tenantId,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.branchId ? { branchId: query.branchId } : {}),
+    };
+
+    const [total, orders] = await this.prisma.$transaction([
+      this.prisma.order.count({ where }),
+      this.prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { items: true, _count: { select: { items: true } } },
+      }),
+    ]);
+
+    return {
+      data: orders.map((o) => this.toListItemDto(o)),
+      meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    };
+  }
+
+  async findOneForTenant(tenantId: string, id: string): Promise<OrderDetailDto> {
+    const order = await this.prisma.order.findFirst({
+      where: { id, tenantId },
+      include: { items: true },
+    });
+    if (!order) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
+    }
+    return this.toDetailDto(order);
+  }
+
+  async updateStatus(
+    tenantId: string,
+    id: string,
+    newStatus: OrderStatus,
+    actor: AuthenticatedRequestUser,
+  ): Promise<OrderDetailDto> {
+    // `orders.update` (checked by the controller's guard) is the baseline
+    // gate for this whole endpoint. Cancelling is treated as a stricter
+    // sub-action requiring `orders.cancel` too — a MANAGER without it could
+    // otherwise cancel orders just by having generic update rights.
+    if (newStatus === 'CANCELLED' && !actor.permissions.includes('orders.cancel')) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message: 'Você não tem permissão para cancelar pedidos.',
+      });
+    }
+
+    // Fase 09: the status change and its stock effect are ONE transaction.
+    // The order row is locked first (FOR UPDATE) and its status re-read
+    // after the lock, so two concurrent "confirm" clicks serialize: the
+    // second sees CONFIRMED, fails the transition check, and never consumes
+    // stock a second time. If consumption fails (INSUFFICIENT_STOCK) the
+    // status change rolls back with it — never CONFIRMED without the stock
+    // movement, never a stock movement without CONFIRMED.
+    let result: { before: OrderStatus; movements: StockMovement[] };
+    try {
+      result = await this.prisma.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<{ status: OrderStatus; branchId: string }[]>`
+          SELECT "status", "branchId" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+        if (rows.length === 0) {
+          throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
+        }
+        const before = rows[0].status;
+        if (!isValidOrderStatusTransition(before, newStatus)) {
+          throw new ConflictException({
+            code: 'INVALID_STATUS_TRANSITION',
+            message: `Não é possível mudar o pedido de "${before}" para "${newStatus}".`,
+          });
+        }
+
+        await tx.order.update({ where: { id }, data: { status: newStatus } });
+
+        const order = { id, tenantId, branchId: rows[0].branchId };
+        let movements: StockMovement[] = [];
+        if (!statusConsumesStock(before) && statusConsumesStock(newStatus)) {
+          const items = await tx.orderItem.findMany({
+            where: { orderId: id },
+            select: { productId: true, quantity: true },
+          });
+          movements = await this.inventory.consumeForOrderInTx(tx, { ...order, items }, actor.userId);
+        } else if (newStatus === 'CANCELLED') {
+          movements = await this.inventory.reverseForOrderInTx(tx, order, actor.userId);
+        }
+        return { before, movements };
+      });
+    } catch (error) {
+      // Backstop for the (order, item, type) unique key — unreachable while
+      // the row lock above holds, but never let it surface as a 500.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'ORDER_ALREADY_PROCESSED',
+          message: 'Este pedido já foi processado por outra requisição.',
+        });
+      }
+      throw error;
+    }
+
+    await this.audit.record({
+      tenantId,
+      userId: actor.userId,
+      action: 'ORDER_STATUS_CHANGED',
+      entity: 'Order',
+      entityId: id,
+      beforeData: { status: result.before },
+      afterData: { status: newStatus },
+    });
+    if (result.movements.length > 0) {
+      await this.audit.record({
+        tenantId,
+        userId: actor.userId,
+        action: 'INVENTORY_MOVEMENT_CREATED',
+        entity: 'Order',
+        entityId: id,
+        afterData: {
+          reason: newStatus === 'CANCELLED' ? 'ORDER_CANCELLED' : 'ORDER_CONFIRMED',
+          movements: result.movements.map((m) => ({
+            id: m.id,
+            type: m.type,
+            inventoryItemId: m.inventoryItemId,
+            quantity: m.quantity.toFixed(3),
+          })),
+        },
+      });
+    }
+
+    return this.findOneForTenant(tenantId, id);
+  }
+
+  private toListItemDto(order: OrderWithItemsAndCount): OrderListItemDto {
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      source: order.source,
+      branchId: order.branchId,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      fulfillmentType: order.fulfillmentType,
+      paymentMethod: order.paymentMethod,
+      notes: order.notes,
+      subtotal: fromCents(order.subtotalCents),
+      total: fromCents(order.totalCents),
+      itemCount: order._count.items,
+      items: order.items.map((item) => this.toItemDto(item)),
+      createdAt: order.createdAt,
+    };
+  }
+
+  private toDetailDto(order: OrderWithItems): OrderDetailDto {
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      source: order.source,
+      branchId: order.branchId,
+      customerName: order.customerName,
+      customerPhone: order.customerPhone,
+      fulfillmentType: order.fulfillmentType,
+      address:
+        order.fulfillmentType === 'DELIVERY'
+          ? {
+              street: order.street ?? '',
+              number: order.number ?? '',
+              complement: order.complement,
+              neighborhood: order.neighborhood ?? '',
+              city: order.city ?? '',
+              state: order.state ?? '',
+              zipCode: order.zipCode ?? '',
+            }
+          : null,
+      paymentMethod: order.paymentMethod,
+      notes: order.notes,
+      items: order.items.map((item) => this.toItemDto(item)),
+      subtotal: fromCents(order.subtotalCents),
+      total: fromCents(order.totalCents),
+      createdAt: order.createdAt,
+    };
+  }
+
+  // Shared by both toListItemDto and toDetailDto (fatia 06 added items to
+  // the list response too) — one place that turns an OrderItem row into the
+  // public-shaped item, always from the historical snapshot fields, never
+  // re-reading Product.
+  private toItemDto(item: OrderItem) {
+    return {
+      productId: item.productId,
+      name: item.productNameSnapshot,
+      unitPrice: fromCents(item.unitPriceCents),
+      quantity: item.quantity,
+      subtotal: fromCents(item.subtotalCents),
+    };
+  }
+}
