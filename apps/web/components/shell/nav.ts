@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   BookOpen,
+  Building2,
   ChefHat,
   ClipboardList,
   LayoutDashboard,
@@ -17,11 +18,8 @@ export interface NavItem {
   key: string;
   label: string;
   icon: LucideIcon;
-  /** Omitted for modules that don't exist yet (rendered disabled, "Em breve"). */
   href?: string;
-  /** Exact-match highlighting (dashboard root) instead of prefix match. */
   exact?: boolean;
-  /** UI-only visibility hint. The real gate is always the backend's RBAC. */
   roles?: string[];
   soon?: boolean;
 }
@@ -34,8 +32,6 @@ export interface NavGroup {
 
 const MANAGEMENT = ['OWNER', 'ADMIN', 'MANAGER'];
 
-// Role hints mirror the links the old dashboard already gated (same lists),
-// so no screen becomes visible to a role that couldn't see its link before.
 export const DASHBOARD_NAV: NavGroup[] = [
   {
     key: 'home',
@@ -64,6 +60,7 @@ export const DASHBOARD_NAV: NavGroup[] = [
     items: [
       { key: 'cardapio', label: 'Cardápio', icon: BookOpen, href: '/dashboard/cardapio' },
       { key: 'estoque', label: 'Estoque', icon: Package, href: '/dashboard/estoque', roles: [...MANAGEMENT, 'CASHIER', 'KITCHEN'] },
+      { key: 'restaurante', label: 'Restaurante', icon: Building2, href: '/dashboard/restaurante', roles: MANAGEMENT },
     ],
   },
   {
@@ -102,11 +99,10 @@ export const DEMO_NAV: NavGroup[] = [
     items: [
       { key: 'cardapio', label: 'Cardápio', icon: BookOpen, href: '/demo/cardapio' },
       { key: 'estoque', label: 'Estoque', icon: Package, href: '/demo/estoque' },
+      { key: 'restaurante', label: 'Restaurante', icon: Building2, href: '/demo/restaurante' },
     ],
   },
 ];
-
-/** Drops items (and then empty groups) the user's roles can't see. */
 export function filterNav(groups: NavGroup[], roles: string[] | null): NavGroup[] {
   return groups
     .map((group) => ({

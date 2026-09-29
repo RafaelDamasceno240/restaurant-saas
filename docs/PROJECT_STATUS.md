@@ -2381,3 +2381,29 @@ Problemas encontrados e corrigidos durante a fase:
 - **`/demo/estoque`:** continua com o layout de abas anterior. Não foi alterado nesta fase.
 - **Permissões no token:** usuários logados precisam entrar de novo para receber `inventory.count`.
 - **Fora do escopo:** compras e fornecedores completos, transferência entre unidades, CMV, previsão de demanda e integração contábil.
+
+---
+
+# Perfil do restaurante (Do'cê Hamburgueria e Confeitaria)
+
+Página de perfil de estabelecimento, somente frontend. Detalhes em `docs/RESTAURANT_PROFILE.md`.
+
+- **Rotas:** `/dashboard/restaurante` (real, gestão) e `/demo/restaurante` (apresentação, sem API). Item "Restaurante" adicionado aos menus de `/dashboard` e `/demo`.
+- **Componentes:** `RestaurantProfileView` e `EditProfileDialog` em `components/restaurante/`.
+- **Dados:** nome, slug, razão social e documento vêm de `GET /tenants/current`; vendas, pedidos e ticket médio do dia vêm de `GET /orders`. Endereço, horários, canais, descrição e as demais métricas são demonstrativos e ficam centralizados em `lib/demo/restaurant-profile.ts`, com o selo "Dados demonstrativos".
+- **Edição:** só funciona localmente no modo demo; no modo real o formulário é somente leitura.
+- **Sem alterações** em backend, banco, autenticação, RBAC, multi-tenancy, pedidos, PDV, KDS, caixa ou estoque. Em `nav.ts` foram removidos os comentários existentes.
+
+## Validações
+
+| Comando | Resultado |
+|---|---|
+| `pnpm --filter web typecheck` | ✅ |
+| `pnpm --filter web lint` | ✅ sem avisos |
+| `pnpm --filter web build` | ✅ inclui `/dashboard/restaurante` e `/demo/restaurante` |
+
+## Pendências
+
+- Sem verificação visual no navegador nesta rodada; a validação se apoia em typecheck, lint e build.
+- Persistência do perfil (telefone, e-mail, endereço, horários, redes sociais) exige backend novo, fora do escopo.
+
