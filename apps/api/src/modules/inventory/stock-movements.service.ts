@@ -186,7 +186,7 @@ function originOf(dto: CreateStockMovementDto): StockMovementOrigin {
   return dto.supplierName?.trim() || dto.documentNumber?.trim() ? 'PURCHASE' : 'MANUAL';
 }
 
-function assertEntryRules(item: InventoryItem, dto: CreateStockMovementDto) {
+export function assertEntryRules(item: InventoryItem, dto: { expiresAt?: string | Date | null }) {
   if (item.tracksExpiry && !dto.expiresAt) {
     throw new BadRequestException({
       code: 'EXPIRY_REQUIRED',

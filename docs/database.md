@@ -63,13 +63,14 @@ continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 
 ## Modelos adicionados depois da Fase 01
 
-Existem no schema atual (6 migrations em `prisma/migrations`):
+Existem no schema atual (7 migrations em `prisma/migrations`):
 
 - **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
 - **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
 - **Caixa:** `CashRegisterSession` e `CashMovement`.
 - **Salão:** `DiningTable`, `Tab`, `TabItem`.
 - **Estoque:** `InventoryItem`, `InventoryBalance`, `StockMovement`, `ProductRecipe`, `ProductRecipeItem`, `InventoryCount`, `InventoryCountItem`.
+- **Compras:** `Supplier`, `Purchase`, `PurchaseItem` e `PurchaseSequence` (migration `20260930100000_purchases`). `Purchase` é único por `(tenantId, purchaseNumber)`, tem índices por unidade, data e status, e CHECKs de valores não negativos (`purchases`) e quantidade positiva (`purchase_items`). O enum `StockReferenceType` inclui `PURCHASE`, usado como referência das entradas de estoque de cada item de compra.
 
 Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`.
 
@@ -82,7 +83,8 @@ válidos e idempotentes.
 ## O que NÃO existe
 
 Customer/CRM, Delivery (gestão de entregas), FiscalDocument (NFC-e), gateway de
-pagamento, cobrança SaaS, horários e endereço do restaurante (perfil).
+pagamento, cobrança SaaS, horários e endereço do restaurante (perfil), pedidos
+de compra e contas a pagar.
 
 ## Seed
 

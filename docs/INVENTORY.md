@@ -209,14 +209,14 @@ Controlado por `Branch.allowNegativeStock` (`GET` e `PATCH /v1/inventory/setting
 - **Insumos (`/insumos`):** tabela com estoque, mínimo e máximo, custo médio, valor e status, com as ações Editar, Entrada, Saída e Histórico.
 - **Ficha técnica (`/fichas`):** custo, preço, margem e quanto é produzível. O detalhe mostra insumo, quantidade, unidade, custo e subtotal.
 - **Movimentações (`/movimentacoes`):** filtros e busca.
-- **Compras (`/compras`):** em breve.
+- **Compras (`/dashboard/estoque/compras`):** implementada. Ver `docs/PURCHASES.md`.
 - **Inventário (`/inventario`):** contagem física, com prévia da diferença e confirmação antes do ajuste.
 
 ## Fora do escopo
 
 Ficou para fases futuras:
 
-- compras e fornecedores completos;
+- pedidos de compra, sugestão de compra, contas a pagar e importação de nota fiscal de entrada;
 - transferência entre unidades;
 - FIFO/FEFO;
 - inventário avançado (contagem cega, múltiplos contadores);

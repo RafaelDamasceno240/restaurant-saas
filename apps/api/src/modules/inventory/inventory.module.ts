@@ -34,6 +34,6 @@ import { InventoryOverviewService } from './inventory-overview.service';
     InventoryCountsService,
     InventoryOverviewService,
   ],
-  exports: [InventoryService],
+  exports: [InventoryService, StockLedgerService],
 })
 export class InventoryModule {}

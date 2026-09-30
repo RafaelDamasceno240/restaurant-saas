@@ -29,6 +29,7 @@ import { CashModule } from './modules/cash/cash.module';
 import { TablesModule } from './modules/tables/tables.module';
 import { TabsModule } from './modules/tabs/tabs.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { PurchasesModule } from './modules/purchases/purchases.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
     TablesModule,
     TabsModule,
     InventoryModule,
+    PurchasesModule,
   ],
   providers: [
     // Order matters: auth -> roles -> permissions -> rate limit.

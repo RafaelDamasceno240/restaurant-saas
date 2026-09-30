@@ -13,12 +13,13 @@ const TABS = [
   { href: '/dashboard/estoque/insumos', label: 'Insumos' },
   { href: '/dashboard/estoque/fichas', label: 'Ficha técnica' },
   { href: '/dashboard/estoque/movimentacoes', label: 'Movimentações' },
-  { href: '/dashboard/estoque/compras', label: 'Compras', badge: 'Em breve' },
+  { href: '/dashboard/estoque/compras', label: 'Compras' },
   { href: '/dashboard/estoque/inventario', label: 'Inventário' },
 ];
 
 function EstoqueFrame({ children }: { children: ReactNode }) {
   const { branchId, canManage, openEntry, openExit } = useEstoque();
+  const tabs = canManage ? TABS : TABS.filter((tab) => tab.href !== '/dashboard/estoque/compras');
   return (
     <Page wide>
       <PageHeader
@@ -37,7 +38,7 @@ function EstoqueFrame({ children }: { children: ReactNode }) {
           ) : undefined
         }
       />
-      <TabLinks items={TABS} />
+      <TabLinks items={tabs} />
       {branchId ? children : <LoadingState label="Carregando unidade..." />}
     </Page>
   );

@@ -41,6 +41,14 @@ const PERMISSIONS: string[] = [
   'inventory.movement.create',
   'inventory.recipe.manage',
   'inventory.count',
+  'purchases.read',
+  'purchases.create',
+  'purchases.update',
+  'purchases.receive',
+  'purchases.cancel',
+  'suppliers.read',
+  'suppliers.create',
+  'suppliers.update',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -78,6 +86,14 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'inventory.movement.create',
     'inventory.recipe.manage',
     'inventory.count',
+    'purchases.read',
+    'purchases.create',
+    'purchases.update',
+    'purchases.receive',
+    'purchases.cancel',
+    'suppliers.read',
+    'suppliers.create',
+    'suppliers.update',
   ],
   CASHIER: [
     'orders.read',

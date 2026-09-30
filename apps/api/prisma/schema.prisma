@@ -62,6 +62,9 @@ model Tenant {
   inventoryItems    InventoryItem[]
   inventoryBalances InventoryBalance[]
   stockMovements    StockMovement[]
+  suppliers         Supplier[]
+  purchases         Purchase[]
+  purchaseSequence  PurchaseSequence?
   productRecipes    ProductRecipe[]
   inventoryCounts   InventoryCount[]
 
@@ -97,6 +100,7 @@ model Branch {
   inventoryBalances InventoryBalance[]
   stockMovements    StockMovement[]
   inventoryCounts   InventoryCount[]
+  purchases         Purchase[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -125,6 +129,9 @@ model User {
   cashMovements      CashMovement[]
   stockMovements     StockMovement[]
   inventoryCounts    InventoryCount[]
+  createdPurchases   Purchase[]            @relation("PurchaseCreatedBy")
+  receivedPurchases  Purchase[]            @relation("PurchaseReceivedBy")
+  cancelledPurchases Purchase[]            @relation("PurchaseCancelledBy")
 
   @@index([tenantId])
   @@map("users")
@@ -552,6 +559,7 @@ enum StockExitReason {
 enum StockReferenceType {
   ORDER
   INVENTORY_COUNT
+  PURCHASE
 }
 
 model InventoryItem {
@@ -568,11 +576,12 @@ model InventoryItem {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  balances    InventoryBalance[]
-  movements   StockMovement[]
-  recipeItems ProductRecipeItem[]
-  countItems  InventoryCountItem[]
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  balances      InventoryBalance[]
+  movements     StockMovement[]
+  recipeItems   ProductRecipeItem[]
+  countItems    InventoryCountItem[]
+  purchaseItems PurchaseItem[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
@@ -693,4 +702,94 @@ model InventoryCountItem {
 
   @@unique([countId, inventoryItemId])
   @@map("inventory_count_items")
+}
+
+enum PurchaseStatus {
+  DRAFT
+  RECEIVED
+  CANCELLED
+}
+
+model Supplier {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  document  String?
+  phone     String?
+  email     String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchases Purchase[]
+
+  @@index([tenantId, active])
+  @@map("suppliers")
+}
+
+model PurchaseSequence {
+  tenantId   String @id
+  lastNumber Int    @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("purchase_sequences")
+}
+
+model Purchase {
+  id              String         @id @default(uuid())
+  tenantId        String
+  branchId        String
+  supplierId      String
+  purchaseNumber  String
+  status          PurchaseStatus @default(DRAFT)
+  purchaseDate    DateTime       @db.Date
+  subtotalCents   Int
+  discountCents   Int            @default(0)
+  freightCents    Int            @default(0)
+  otherCostsCents Int            @default(0)
+  totalCents      Int
+  notes           String?
+  createdById     String
+  receivedAt      DateTime?
+  receivedById    String?
+  cancelledAt     DateTime?
+  cancelledById   String?
+  cancelReason    String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier    Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  createdBy   User           @relation("PurchaseCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  receivedBy  User?          @relation("PurchaseReceivedBy", fields: [receivedById], references: [id], onDelete: Restrict)
+  cancelledBy User?          @relation("PurchaseCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  items       PurchaseItem[]
+
+  @@unique([tenantId, purchaseNumber])
+  @@index([tenantId, branchId, purchaseDate])
+  @@index([tenantId, branchId, status])
+  @@index([supplierId])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id              String    @id @default(uuid())
+  purchaseId      String
+  inventoryItemId String
+  quantity        Decimal   @db.Decimal(14, 3)
+  unitCostCents   Int
+  totalCostCents  Int
+  lotCode         String?
+  expiresAt       DateTime? @db.Date
+
+  purchase      Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseId])
+  @@index([inventoryItemId])
+  @@map("purchase_items")
 }

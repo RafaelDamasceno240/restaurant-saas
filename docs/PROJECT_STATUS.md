@@ -22,7 +22,8 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Caixa | IMPLEMENTADO | `cash.e2e-spec`; depende de `pnpm db:constraints` manual |
 | Mesas | IMPLEMENTADO | `tables.e2e-spec` |
 | Comandas | IMPLEMENTADO | `tabs`/`tab-checkout` e2e; checkout idempotente |
-| Estoque | IMPLEMENTADO | `inventory.e2e-spec`; Compras é "Em breve" |
+| Estoque | IMPLEMENTADO | `inventory.e2e-spec` |
+| Compras e fornecedores | IMPLEMENTADO | `purchases.e2e-spec` (29 casos); ver seção "Compras de estoque" |
 | Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
@@ -116,6 +117,20 @@ validado de verdade — só isso ainda não aconteceu neste ambiente.
 > Este arquivo reflete o estado REAL do projeto. Não é atualizado com
 > otimismo — apenas com o que foi de fato implementado, revisado e (quando
 > o ambiente permitiu) executado.
+
+## Compras de estoque (2026-09-30)
+
+Módulo de compras e fornecedores integrado ao estoque profissional. Detalhes em `docs/PURCHASES.md`.
+
+- **Modelo:** `Supplier`, `Purchase`, `PurchaseItem`, `PurchaseSequence` e o enum `PurchaseStatus` (DRAFT, RECEIVED, CANCELLED). Migration `20260930100000_purchases` (aplica em banco vazio; inclui CHECKs de valores não negativos). O enum `StockReferenceType` ganhou o valor `PURCHASE`.
+- **Recebimento:** transação única que trava a compra (`FOR UPDATE`), confere o status e gera uma `ENTRY` por item pelo `StockLedgerService` existente, com custo médio, lote, validade, fornecedor e número da compra. Idempotente: o segundo `receive` devolve a compra com `idempotentReplay: true`, e a unique `(referenceType, referenceId, inventoryItemId, type)` do ledger é a trava no banco.
+- **Cancelamento:** DRAFT cancela sem tocar no estoque. RECEIVED exige motivo e estorna cada entrada com `REVERSAL` pelo ledger; se o saldo não cobre (e a unidade não permite estoque negativo) o estorno é recusado com 409 e nada muda. O custo médio **não** é recalculado no estorno, como em qualquer saída.
+- **Custo:** o estoque usa o custo unitário de cada item. Frete, desconto e outros custos ficam só no total da compra, sem rateio.
+- **API:** `GET/POST /v1/purchases`, `GET/PATCH /v1/purchases/:id`, `POST /v1/purchases/:id/receive`, `POST /v1/purchases/:id/cancel`, `GET/POST /v1/suppliers`, `GET/PATCH /v1/suppliers/:id`.
+- **Permissões:** `purchases.read/create/update/receive/cancel` e `suppliers.read/create/update`, para OWNER, ADMIN e MANAGER. CASHIER, KITCHEN, WAITER, DELIVERY e VIEWER não têm acesso. As permissões novas são criadas pelo seed: rode `pnpm db:seed` em bancos existentes e os usuários precisam entrar de novo.
+- **Frontend:** `/dashboard/estoque/compras` (indicadores, filtros, tabela e ações), `/nova`, `/[id]` e `/[id]/editar`, mais o diálogo de fornecedores.
+- **Testes:** unitários dos cálculos (`purchase-calculations.spec.ts`, `purchases-logic.test.ts`) e `purchases.e2e-spec.ts` (recebimento, idempotência, concorrência, estorno, isolamento por tenant e unidade, permissões, validações e auditoria).
+- **Limitações:** sem pedido de compra, sem contas a pagar, sem rateio de frete, sem conversão de unidade na compra (a quantidade é sempre na unidade de estoque do insumo) e sem importação de nota fiscal.
 
 ## Estado geral (atualizado na Fatia 08)
 
