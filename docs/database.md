@@ -61,10 +61,26 @@ uma venda de balcão pode não ter identificação do cliente; pedidos online
 continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 `docs/PROJECT_STATUS.md` "Fatia 04" e "Fatia 07" para as regras completas.
 
-## O que NÃO existe ainda (proposital)
+## Modelos adicionados depois da Fase 01
 
-Payment, CashRegister, Inventory, Customer, Delivery, Table, FiscalDocument
-— chegam nas fases posteriores.
+Existem no schema atual (5 migrations em `prisma/migrations`):
+
+- **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
+- **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
+- **Caixa:** `CashRegisterSession` e `CashMovement`.
+- **Salão:** `DiningTable`, `Tab`, `TabItem`.
+- **Estoque:** `InventoryItem`, `InventoryBalance`, `StockMovement`, `ProductRecipe`, `ProductRecipeItem`, `InventoryCount`, `InventoryCountItem`.
+
+Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`.
+
+Dois índices/triggers ficam fora das migrations e dependem de scripts manuais
+em `prisma/sql/` (`pnpm db:constraints`, `pnpm db:tabs-constraints`): um caixa
+`OPEN` por unidade, `cash_movements` imutável e uma comanda `OPEN` por mesa.
+
+## O que NÃO existe
+
+Customer/CRM, Delivery (gestão de entregas), FiscalDocument (NFC-e), gateway de
+pagamento, cobrança SaaS, horários e endereço do restaurante (perfil).
 
 ## Seed
 

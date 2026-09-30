@@ -1,5 +1,70 @@
 # PROJECT_STATUS
 
+## AUDITORIA TÉCNICA — 2026-09-30 (estado real, prevalece sobre as seções históricas abaixo)
+
+As seções seguintes são um registro cronológico. Os trechos que dizem que nada
+foi executado no ambiente ("Motivo, sem meias-palavras", "Pendência
+estrutural") descrevem rodadas antigas e **estão superados** pela validação de
+2026-09-28 e por esta auditoria.
+
+### Estado por área
+
+| Área | Estado | Evidência |
+|---|---|---|
+| Auth/RBAC | IMPLEMENTADO | `auth.e2e-spec`, guards globais, refresh com rotação |
+| Multi-tenancy | IMPLEMENTADO | `tenant-isolation.e2e-spec`; `tenantId` sempre vem do JWT |
+| Unidades (branch access) | PARCIAL | `BranchAccessService` usado em caixa, estoque, PDV, mesas e comandas; ausente em `orders` |
+| Cardápio | IMPLEMENTADO | `menu`/`public-menu` e2e |
+| Carrinho | IMPLEMENTADO | `cart-logic` (testes web) |
+| Pedidos | IMPLEMENTADO | `public-orders`, `orders-admin` e2e |
+| KDS | IMPLEMENTADO | `kds.e2e-spec`; atualização por polling, sem websocket |
+| PDV | IMPLEMENTADO | `pos.e2e-spec` |
+| Caixa | IMPLEMENTADO | `cash.e2e-spec`; depende de `pnpm db:constraints` manual |
+| Mesas | IMPLEMENTADO | `tables.e2e-spec` |
+| Comandas | IMPLEMENTADO | `tabs`/`tab-checkout` e2e; checkout idempotente |
+| Estoque | IMPLEMENTADO | `inventory.e2e-spec`; Compras é "Em breve" |
+| Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
+| Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
+| Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
+| Delivery | PARCIAL | `FulfillmentType.DELIVERY` existe no pedido; sem gestão, rotas ou entregadores; PDV marca "Delivery" como em breve |
+| CRM | NÃO IMPLEMENTADO | sem modelo de cliente |
+| Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
+| WhatsApp/IA | NÃO IMPLEMENTADO | |
+| NFC-e | NÃO IMPLEMENTADO | |
+| SaaS Billing | NÃO IMPLEMENTADO | `Tenant.status` existe mas nunca é verificado |
+
+### Validações executadas nesta auditoria (sem alterar código)
+
+| Comando | Resultado |
+|---|---|
+| `pnpm typecheck` | PASSOU (api + web) |
+| `pnpm lint` | PASSOU |
+| `pnpm test` | PASSOU (api 60/60, web 40/40) |
+| `pnpm build` | PASSOU (api + web) |
+| `pnpm --filter api test:e2e` | PASSOU (13 suítes, 144/144), em banco descartável recriado com `migrate deploy` + constraints + seed |
+| `prisma migrate status` / `migrate diff` | banco de desenvolvimento em sincronia; diff schema × banco vazio |
+
+### Problemas concretos encontrados (não corrigidos)
+
+- **Unidade em pedidos:** `GET /orders`, `GET /orders/:id` e `PATCH /orders/:id/status` filtram só por tenant. Um usuário vinculado a uma unidade consegue ler e mudar o status de pedidos de outras unidades do mesmo tenant.
+- **Criação de pedido sem idempotência:** `POST /pos/orders` e `POST /public/orders` não aceitam chave de idempotência; um reenvio duplica pedido, movimento de caixa e baixa de estoque. Só o checkout de comanda é idempotente.
+- **`Tenant.status` ignorado:** tenant SUSPENDED ou CANCELLED continua logando e operando.
+- **Índices fora das migrations:** o índice de uma sessão de caixa aberta por unidade, o trigger de imutabilidade do caixa e o índice de uma comanda aberta por mesa dependem de scripts manuais; `migrate deploy` sozinho não os cria.
+- **Login sem limite próprio:** só o limite global de 100 requisições por minuto, em memória; o Redis é usado apenas no health check.
+- **Refresh token:** sem detecção de reuso e sem atomicidade entre emitir o novo e revogar o antigo; duas chamadas simultâneas com o mesmo token podem ambas passar.
+- **CORS:** `origin: corsOrigin || true` com `credentials: true` reflete qualquer origem se `CORS_ORIGIN` vier vazio.
+- **Permissões por omissão:** endpoint autenticado sem `@RequirePermissions` fica liberado a qualquer usuário logado (hoje só `/auth/me` e `/branches/accessible`, intencionais).
+- **Moeda na borda:** `CreateProductDto.price` chega em reais (`number`) e é convertido; o resto usa centavos.
+- **Artefatos no git:** `MANIFEST.sha256` está desatualizado (199 entradas, 57 divergentes, 335 arquivos rastreados), `apps/web/tsconfig.tsbuildinfo` é rastreado e muda a cada typecheck, e `doce-logo.png` na raiz duplica `apps/web/public/brand/doce-logo.png`.
+- **Perfil do restaurante:** `/dashboard/restaurante` usa `demoRestaurantProfile` como base para endereço, horários e canais (marcados "Dados demonstrativos" na tela).
+
+### Local x GitHub (origin/master)
+
+- Local está 1 commit à frente (`0ba4bac teste 2`: perfil do restaurante e documentação) e 1 atrás (`585d01d`, que apaga `.claude/settings.json` pelo GitHub).
+- Localmente, `.claude/settings.json` também aparece removido (mudança não commitada), igual ao remoto.
+- Nenhum código de estoque, mesas, comandas ou caixa diverge: tudo isso já está em `66f3c34`.
+
+
 ## STATUS: MVP VALIDADO COM PENDÊNCIAS (validação real de 2026-09-28)
 
 > **Atualização mais recente:** em 2026-09-28, pela primeira vez neste

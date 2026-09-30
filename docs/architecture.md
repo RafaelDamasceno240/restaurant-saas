@@ -16,6 +16,16 @@ serviço independente no futuro sem reescrever os demais.
 | `branches` | leitura de unidades do tenant autenticado                      |
 | `audit`    | escrita centralizada de `AuditLog`, best-effort                |
 | `health`   | `/health`, `/health/live`, `/health/ready`                     |
+| `categories`, `products` | cardápio administrativo (preço em centavos no banco)  |
+| `public-menu` | cardápio público por slug, sem autenticação                |
+| `public-orders` | checkout público e acompanhamento do pedido              |
+| `order-creation` | criação de pedido compartilhada (online, PDV, comanda): totais, caixa e estoque na mesma transação |
+| `orders`   | painel de pedidos, KDS e transições de status                  |
+| `pos`      | pedido de balcão (PDV)                                         |
+| `payments` | registro interno do pagamento (`provider = INTERNAL`)          |
+| `cash`     | sessões de caixa, suprimento, sangria, fechamento              |
+| `tables`, `tabs` | mesas e comandas, checkout idempotente da comanda        |
+| `inventory` | insumos, saldos, movimentações, fichas técnicas, inventário   |
 | `prisma`   | `PrismaService` global, injetado nos demais módulos            |
 | `common`   | guards, decorators, filtro de exceções, middleware, logger     |
 
@@ -70,7 +80,7 @@ imediato.
 
 ## Preparação para integrações futuras
 
-Nenhuma interface `PaymentProvider`/`FiscalProvider`/`MessagingProvider`/etc.
-foi criada ainda — o prompt da Fase 01 pede explicitamente para não antecipar
-abstrações vazias. Quando a Fase 11 (Pagamentos) ou 12 (NFC-e) chegar, essas
+Nenhuma interface de provedor de pagamento, fiscal ou de mensageria existe
+(o enum `PaymentProvider` só tem `INTERNAL`) — a Fase 01 pediu explicitamente
+para não antecipar abstrações vazias. Quando a Fase 11 (Pagamentos) ou 12 (NFC-e) chegar, essas
 interfaces devem nascer junto com o primeiro provider real.
