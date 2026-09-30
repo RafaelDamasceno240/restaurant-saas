@@ -49,6 +49,10 @@ export interface OrderCreationInput {
   items: OrderCreationItemInput[];
   customerName: string | null;
   customerPhone: string | null;
+  // Fase 11: optional link to a CRM customer. ALWAYS resolved and validated by the CALLER
+  // (PDV checks tenant + active); the public checkout never sets it. The snapshot above
+  // (customerName/customerPhone) is what the order shows and never changes afterwards.
+  customerId?: string | null;
   fulfillmentType: FulfillmentType;
   address?: OrderCreationAddressInput | null;
   paymentMethod: PaymentMethod;
@@ -196,6 +200,7 @@ export class OrderCreationService {
       existing.fulfillmentType === input.fulfillmentType &&
       existing.customerName === input.customerName &&
       existing.customerPhone === input.customerPhone &&
+      existing.customerId === (input.customerId ?? null) &&
       signature(existing.items) === signature(input.items);
     if (!sameRequest) {
       throw new ConflictException({
@@ -239,6 +244,7 @@ export class OrderCreationService {
         source: input.source,
         customerName: input.customerName,
         customerPhone: input.customerPhone,
+        customerId: input.customerId ?? null,
         fulfillmentType: input.fulfillmentType,
         paymentMethod: input.paymentMethod,
         notes: input.notes ?? undefined,

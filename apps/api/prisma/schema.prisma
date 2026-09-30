@@ -64,6 +64,7 @@ model Tenant {
   inventoryBalances InventoryBalance[]
   stockMovements    StockMovement[]
   suppliers         Supplier[]
+  customers         Customer[]
   purchases         Purchase[]
   purchaseSequence  PurchaseSequence?
   productRecipes    ProductRecipe[]
@@ -328,8 +329,12 @@ model Order {
   orderNumber     String          @unique
   status          OrderStatus     @default(PENDING)
   source          OrderSource     @default(ONLINE)
+  // Snapshot of who ordered, exactly as typed at order time. Never rewritten by the CRM.
   customerName    String?
   customerPhone   String?
+  // Optional link to the CRM customer (Fase 11). NULL for guest/public orders and for
+  // every order that existed before the CRM. Independent of the snapshot above.
+  customerId      String?
   fulfillmentType FulfillmentType
   paymentMethod   PaymentMethod
   notes           String?
@@ -361,10 +366,12 @@ model Order {
   cashMovement CashMovement?
   payment      Payment?
   delivery     Delivery?
+  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, createdAt])
   @@index([tenantId, branchId, createdAt])
+  @@index([tenantId, customerId, createdAt])
   @@map("orders")
 }
 
@@ -807,6 +814,32 @@ model Supplier {
 
   @@index([tenantId, active])
   @@map("suppliers")
+}
+
+// CRM customer (Fase 11). Per TENANT: a customer can order in any branch.
+// `phone` is stored as digits only and `cpf` as 11 digits (normalized in the
+// application); `email` is lower-cased. Uniqueness lives in partial unique
+// indexes created in SQL (not expressible here):
+//   - (tenantId, phone) WHERE active            -> one ACTIVE customer per phone
+//   - (tenantId, cpf)   WHERE cpf IS NOT NULL   -> a CPF identifies one person
+// Customers are never deleted: they are deactivated, so order history keeps its link.
+model Customer {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  phone     String
+  email     String?
+  cpf       String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@index([tenantId, active, name])
+  @@map("customers")
 }
 
 model PurchaseSequence {

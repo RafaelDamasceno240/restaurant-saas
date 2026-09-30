@@ -5,8 +5,8 @@
 > cardápio administrativo e público, carrinho, checkout público, pedidos, KDS,
 > PDV, caixa, mesas, comandas, estoque e compras. **PARCIAL:** pagamentos (só registro
 > interno, sem gateway), delivery (taxa, despacho, falha/reentrega, confirmação, entregador interno e histórico; sem mapas/GPS nem entregador externo),
-> perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
-> NFC-e, CRM/fidelidade, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
+> CRM (só a base de clientes: cadastro, histórico e métricas; sem fidelidade/campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
+> NFC-e, fidelidade/cashback, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
 > evidências em `docs/PROJECT_STATUS.md`.
 
 ## Visão geral
@@ -101,7 +101,7 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 21 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras e delivery
+pnpm --filter api test:e2e    # e2e: 23 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery e clientes
 ```
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do
@@ -128,7 +128,7 @@ Ver `docs/architecture.md` para a árvore completa e as decisões por trás dela
 - `docs/PROJECT_STATUS.md` — relatório técnico do estado real do projeto
 - `docs/DEMO_MODE.md` — modo demonstração (`/demo/*`, dados fictícios, sem API)
 - `docs/RESTAURANT_PROFILE.md` — perfil do restaurante (real x demonstrativo)
-- `docs/INVENTORY.md`, `docs/PURCHASES.md`, `docs/DELIVERY.md`, `docs/CASH_REGISTER_PLAN.md`, `docs/UI_DESIGN_SYSTEM.md`
+- `docs/INVENTORY.md`, `docs/PURCHASES.md`, `docs/DELIVERY.md`, `docs/CRM.md`, `docs/CASH_REGISTER_PLAN.md`, `docs/UI_DESIGN_SYSTEM.md`
 
 ## Roadmap (não implementar sem aprovação explícita)
 

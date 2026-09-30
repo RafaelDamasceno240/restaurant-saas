@@ -5,6 +5,7 @@ import {
   Building2,
   ChefHat,
   ClipboardList,
+  Contact,
   LayoutDashboard,
   LayoutGrid,
   Package,
@@ -60,6 +61,7 @@ export const DASHBOARD_NAV: NavGroup[] = [
     key: 'gestao',
     label: 'Gestão',
     items: [
+      { key: 'clientes', label: 'Clientes', icon: Contact, href: '/dashboard/clientes', roles: [...MANAGEMENT, 'CASHIER'] },
       { key: 'cardapio', label: 'Cardápio', icon: BookOpen, href: '/dashboard/cardapio' },
       { key: 'estoque', label: 'Estoque', icon: Package, href: '/dashboard/estoque', roles: [...MANAGEMENT, 'CASHIER', 'KITCHEN'] },
       { key: 'restaurante', label: 'Restaurante', icon: Building2, href: '/dashboard/restaurante', roles: MANAGEMENT },

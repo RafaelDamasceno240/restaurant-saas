@@ -43,6 +43,13 @@ export class CreatePosOrderDto {
   @ArrayMaxSize(50)
   items!: PosOrderItemDto[];
 
+  // Fase 11: optional CRM customer. Validated server-side against the caller's tenant
+  // (another tenant's id is "not found"); the order snapshot below is still what the order shows.
+  @ApiPropertyOptional({ description: 'Cliente cadastrado (CRM) a vincular ao pedido' })
+  @IsOptional()
+  @IsUUID()
+  customerId?: string;
+
   @ApiPropertyOptional({ example: 'Cliente balcão' })
   @IsOptional()
   @IsString()

@@ -28,7 +28,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
 | Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
-| CRM | NÃO IMPLEMENTADO | sem modelo de cliente |
+| CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV (ver `docs/CRM.md`). Sem cashback, fidelidade, cupons, campanhas, WhatsApp nem segmentação; o PDV (tela) ainda não tem seletor de cliente |
 | Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
 | NFC-e | NÃO IMPLEMENTADO | |
@@ -2507,3 +2507,14 @@ Página de perfil de estabelecimento, somente frontend. Detalhes em `docs/RESTAU
 - **Fatia 3 do Delivery (2026-09-30):** atribuição de entregador interno e histórico operacional de tentativas. `deliveries.courierUserId`/`assignedAt` (migration `20260930140000_delivery_courier`, FK `RESTRICT`, sem backfill); entregador = usuário ativo do tenant com papel `DELIVERY` e acesso à unidade. Endpoints `PUT/DELETE /v1/delivery/:id/courier`, `GET /v1/delivery/couriers`, `GET /v1/delivery/:id/history` e filtro `courier=me|none|<id>` na listagem. Nova permissão `delivery.assign` (OWNER, ADMIN, MANAGER; **não** o DELIVERY): rode `pnpm db:seed` e faça login de novo. Auditoria transacional `DELIVERY_ASSIGNED/REASSIGNED/UNASSIGNED`. O histórico sai do `AuditLog` (sem tabela nova). A atribuição é organizacional e não muda quem pode operar a entrega. Detalhes em `docs/DELIVERY.md`.
 
 - **Hardening final do Delivery (2026-09-30):** revisão de permissões, atribuição, histórico, falha/reentrega, cancelamento, filtros e migrations sem achar defeito de produção; acrescentado `delivery-hardening.e2e-spec.ts` (corridas e cancelamento). Fase 10 fechada tecnicamente. O banco de dev continua com migrations pendentes (as 6 a partir de `20260930000000`): aplique `prisma migrate deploy` e `pnpm db:seed` nele antes de usar. Checklist completo em `docs/DELIVERY.md`.
+
+## CRM — Clientes (2026-09-30)
+
+Primeira fatia da Fase 11. Detalhes e decisões em `docs/CRM.md`.
+
+- **Modelo:** `Customer` (`customers`), por tenant; `phone` só dígitos (obrigatório), `email` minúsculo, `cpf` com dígitos verificadores, `active` (inativação, sem exclusão). Unicidade por tenant em índices parciais: telefone entre ativos e CPF quando informado. `orders.customerId` nullable (FK `SET NULL`), snapshot `customerName/customerPhone` preservado. Migration `20261001100000_customers`, aditiva e sem backfill (todo pedido existente fica sem vínculo).
+- **API:** `GET/POST /v1/customers`, `GET/PATCH /v1/customers/:id`, `GET /v1/customers/:id/orders`; `POST /v1/pos/orders` aceita `customerId` opcional (validado no tenant, ativo, exige `customers.read`). O checkout público não conhece clientes.
+- **Métricas derivadas dos pedidos** (nada armazenado): todos os pedidos exceto `CANCELLED` — mesma regra do dashboard; cancelados ficam à parte.
+- **Permissões:** `customers.read/create/update` (OWNER/ADMIN/MANAGER: todas; CASHIER: read + create). Entram pelo seed: rode `pnpm db:seed` e faça login de novo.
+- **Isolamento:** tenant sempre do token; histórico e métricas limitados às unidades que o usuário acessa; auditoria atômica (`CUSTOMER_CREATED/UPDATED/DEACTIVATED/REACTIVATED`) sem dado pessoal.
+- **Tela:** `/dashboard/clientes` (Clientes, para OWNER/ADMIN/MANAGER/CASHIER).
