@@ -1,4 +1,4 @@
-# Delivery (Fase 10 — fatias 1, 2 e 3)
+# Delivery (Fase 10 — fatias 1, 2 e 3 + hardening final)
 
 Estado real implementado em 2026-09-30. A **fatia 1** trouxe taxa de entrega, configuração por unidade, registro operacional da entrega e o fluxo despachar → entregar. A **fatia 2** acrescentou falha de entrega, reentrega, observação da entrega, filtros/busca e paginação na tela. A **fatia 3** acrescentou a **atribuição de entregador interno** e o **histórico operacional de tentativas** (reconstruído do `AuditLog`). O que não está aqui está listado em "Limitações".
 
@@ -195,3 +195,21 @@ Checkout público: mostra taxa e pedido mínimo, soma a taxa ao total exibido, d
 **Histórico:** `GET /delivery/:id/history` lê o `AuditLog` (`Delivery`/`entityId` + `DELIVERY_CANCELLED`, que é gravado na entidade `Order`), adiciona um evento sintético "criado" e resolve nomes (atores e entregadores) com uma consulta no tenant. Cada evento traz `kind`, `at`, `attempt` (só nos eventos de despacho, falha, reentrega e conclusão), `reason` (falhas), `actor`, `courier`, `previousCourier`. Os eventos de despacho/falha/conclusão/reentrega passaram a gravar também o `courierUserId` vigente (campo aditivo).
 
 **Tela:** coluna **Entregador** ("Sem entregador" quando vazio); filtro de entregador (Todos, Minhas entregas — só para quem tem o papel DELIVERY —, Sem entregador e cada entregador da unidade); usuário com DELIVERY e sem papel de gerência abre em "Minhas entregas" (pode trocar para "Todos"); ações **Atribuir / Reatribuir / Remover** (gerência, com `canAssign` do servidor) e **Histórico** (linha do tempo em diálogo) para todos que veem a tela. Guard síncrono contra cliques duplos também nas novas ações.
+
+## Fechamento da Fase 10 (hardening)
+
+Revisão final sem mudança de comportamento em produção; o que foi acrescentado são testes (`apps/api/test/delivery-hardening.e2e-spec.ts`) e este checklist.
+
+**Nomes reais das permissões:** `delivery.read`, `delivery.update`, `delivery.configure` (configurações da unidade; não existe `delivery.settings`) e `delivery.assign`. Matriz efetiva confirmada no banco após o seed: OWNER/ADMIN/MANAGER têm as quatro; DELIVERY tem `read` e `update`; CASHIER, WAITER, KITCHEN e VIEWER não têm nenhuma.
+
+**Pares válidos (entrega/pedido):** `PENDING/{PENDING,CONFIRMED,PREPARING,READY}`, `OUT_FOR_DELIVERY/OUT_FOR_DELIVERY`, `DELIVERED/DELIVERED`, `FAILED/READY`, `CANCELLED/CANCELLED`. Testado com corridas repetidas: despachar × falhar, despachar × concluir, falhar × concluir, reentrega × cancelar, cancelar × despachar e cancelar × atribuir. Nenhuma combinação deixa um par fora desta lista.
+
+**Cancelamento:** só pelo pedido (`PATCH /orders/:id/status`), com `orders.cancel`. Pedido em rota (`OUT_FOR_DELIVERY`) não cancela (409); pedido `READY` só cancela quando a entrega está `FAILED`. Depois de cancelada, nenhuma operação (despachar, concluir, falhar, reentrega, atribuir, observação, mudança de status do pedido) é aceita: todas respondem 409 e nada é escrito.
+
+**Checklist de deploy:**
+1. `pnpm --filter api exec prisma migrate deploy` (as migrations `20260930120000`, `20260930130000` e `20260930140000` são aditivas; a primeira faz backfill dos pedidos de entrega existentes).
+2. `pnpm db:seed` (cria `delivery.assign` e liga às funções). Sem o seed, ninguém atribui entregador.
+3. Os usuários precisam entrar de novo para receber as permissões novas.
+4. Cadastrar usuários com o papel `DELIVERY` e vínculo com a unidade (ainda não há tela de convite; é feito por seed/banco).
+
+**Limites conhecidos:** histórico de até 500 eventos por entrega (aceito: uma entrega gera poucos eventos); eventos anteriores à fatia 3 não trazem `courierUserId`; validação visual em viewport real de 390 px não foi possível neste ambiente (o teste foi por iframe e medição de overflow).
