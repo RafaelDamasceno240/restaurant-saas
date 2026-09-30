@@ -195,6 +195,13 @@ export default function OrderDetailPage({ params }: PageProps) {
                   <p className="mt-1 text-sm text-foreground">{order.notes}</p>
                 </Card>
               )}
+
+              {order.delivery?.notes && (
+                <Card className="p-4">
+                  <p className="text-xs font-medium text-muted-foreground">Instruções de entrega</p>
+                  <p className="mt-1 text-sm text-foreground">{order.delivery.notes}</p>
+                </Card>
+              )}
             </div>
 
             <div className="space-y-4">

@@ -4,7 +4,7 @@
 > estoque. **IMPLEMENTADO:** autenticação, RBAC, multi-tenancy, unidades,
 > cardápio administrativo e público, carrinho, checkout público, pedidos, KDS,
 > PDV, caixa, mesas, comandas, estoque e compras. **PARCIAL:** pagamentos (só registro
-> interno, sem gateway), delivery (taxa, despacho e confirmação da entrega; sem entregador nem mapas),
+> interno, sem gateway), delivery (taxa, despacho, falha/reentrega e confirmação da entrega; sem entregador nem mapas),
 > perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
 > NFC-e, CRM/fidelidade, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
 > evidências em `docs/PROJECT_STATUS.md`.
@@ -101,7 +101,7 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 17 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras e delivery
+pnpm --filter api test:e2e    # e2e: 18 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras e delivery
 ```
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do

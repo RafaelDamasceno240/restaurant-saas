@@ -43,6 +43,7 @@ export class PublicOrdersService {
       address: dto.address,
       paymentMethod: dto.paymentMethod,
       notes: dto.notes,
+      deliveryNotes: dto.deliveryNotes,
       idempotencyKey: dto.idempotencyKey,
     });
 

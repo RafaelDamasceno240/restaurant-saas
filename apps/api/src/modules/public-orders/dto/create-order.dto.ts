@@ -97,6 +97,13 @@ export class CreateOrderDto {
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) notes?: string;
 
+  // Delivery instructions, distinct from the order's general `notes`. Only used for DELIVERY.
+  @ApiPropertyOptional({ example: 'Portão azul, interfone 204' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  deliveryNotes?: string;
+
   @ApiPropertyOptional({ example: '6f1c2c1e-6d0e-4f4a-9a57-2f3a0a1b9c11' })
   @IsOptional()
   @IsString()

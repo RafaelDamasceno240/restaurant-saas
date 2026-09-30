@@ -55,3 +55,11 @@ export function deliveryFlowRequired() {
     message: 'Pedidos de entrega são concluídos pela tela de Delivery (despachar e confirmar a entrega).',
   });
 }
+
+// The observation of a finished (delivered or cancelled) delivery is history: read-only.
+export function deliveryNotesLocked() {
+  return new ConflictException({
+    code: 'DELIVERY_NOTES_LOCKED',
+    message: 'A observação de uma entrega concluída ou cancelada não pode mais ser alterada.',
+  });
+}

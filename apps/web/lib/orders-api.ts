@@ -37,7 +37,9 @@ export const FULFILLMENT_LABEL: Record<AdminFulfillmentType, string> = {
 // from the commercial OrderStatus: only the Delivery screen moves it.
 export interface AdminOrderDelivery {
   id: string;
-  status: 'PENDING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED';
+  status: 'PENDING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'CANCELLED';
+  // Delivery instructions ("Portão azul"), separate from the order's own `notes`.
+  notes: string | null;
 }
 
 export interface AdminOrderListItem {

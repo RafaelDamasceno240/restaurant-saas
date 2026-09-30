@@ -388,11 +388,14 @@ model OrderItem {
 // Operational state of a delivery, independent of the commercial OrderStatus.
 // For a DELIVERY order only DeliveryService moves the order through
 // READY -> OUT_FOR_DELIVERY -> DELIVERED, always in the same transaction.
+// FAILED: an attempt did not reach the customer; the order goes back to READY
+// (it is NOT cancelled) and the delivery can be re-requested (FAILED -> PENDING).
 enum DeliveryStatus {
   PENDING
   OUT_FOR_DELIVERY
   DELIVERED
   CANCELLED
+  FAILED
 }
 
 // One row per DELIVERY order (1:1). The delivery address stays as the snapshot
@@ -404,11 +407,23 @@ model Delivery {
   orderId  String         @unique
   status   DeliveryStatus @default(PENDING)
 
+  // Delivery-specific instructions ("Portão azul", "Interfone 204"). Independent of
+  // Order.notes (the order's general observation). Max 300 chars (DB CHECK).
+  notes String?
+
+  // Number of dispatches so far (1 = first attempt). The full attempt history lives
+  // in the audit log (DELIVERY_DISPATCHED / DELIVERY_FAILED / DELIVERY_REDELIVERY_REQUESTED).
+  attemptCount Int @default(0)
+
   dispatchedAt       DateTime?
   dispatchedByUserId String?
   deliveredAt        DateTime?
   completedByUserId  String?
   cancelledAt        DateTime?
+
+  // Latest failure only; cleared when a redelivery is requested (history is audited).
+  failedAt      DateTime?
+  failureReason String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

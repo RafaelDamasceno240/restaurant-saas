@@ -1,10 +1,16 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { DeliveryService } from './delivery.service';
-import { DeliverySettingsQueryDto, ListDeliveriesQueryDto, UpdateDeliverySettingsDto } from './dto/delivery.dto';
+import {
+  DeliverySettingsQueryDto,
+  FailDeliveryDto,
+  ListDeliveriesQueryDto,
+  UpdateDeliveryNotesDto,
+  UpdateDeliverySettingsDto,
+} from './dto/delivery.dto';
 
 @ApiTags('delivery')
 @ApiBearerAuth()
@@ -48,5 +54,36 @@ export class DeliveryController {
   @ApiOperation({ summary: 'Confirma a entrega (saiu para entrega -> entregue); idempotente' })
   complete(@CurrentUser() user: AuthenticatedRequestUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.delivery.complete(user, id);
+  }
+
+  @Post(':id/fail')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('delivery.update')
+  @ApiOperation({ summary: 'Registra a falha da entrega em rota; o pedido volta a "pronto" (não é cancelado); idempotente' })
+  fail(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: FailDeliveryDto,
+  ) {
+    return this.delivery.fail(user, id, dto.reason);
+  }
+
+  @Post(':id/redeliver')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('delivery.update')
+  @ApiOperation({ summary: 'Solicita nova tentativa para uma entrega que falhou (falhou -> pendente); idempotente' })
+  redeliver(@CurrentUser() user: AuthenticatedRequestUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.delivery.redeliver(user, id);
+  }
+
+  @Patch(':id/notes')
+  @RequirePermissions('delivery.update')
+  @ApiOperation({ summary: 'Define ou limpa a observação da entrega (separada da observação do pedido)' })
+  updateNotes(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateDeliveryNotesDto,
+  ) {
+    return this.delivery.updateNotes(user, id, dto);
   }
 }

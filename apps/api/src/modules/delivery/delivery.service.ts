@@ -6,13 +6,20 @@ import { BranchAccessService } from '../branches/branch-access.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { Tx } from '../inventory/stock-ledger.service';
 import {
+  deliveryNotesLocked,
   deliveryNotFound,
   deliveryStateInconsistent,
   invalidDeliveryTransition,
   orderNotReadyForDispatch,
 } from './delivery-errors';
-import { isValidDeliveryTransition } from './delivery-status.util';
-import { DeliverySettingsQueryDto, ListDeliveriesQueryDto, UpdateDeliverySettingsDto } from './dto/delivery.dto';
+import { createdAtRange, escapeLike, normalizeNotes } from './delivery-input';
+import { canEditDeliveryNotes, isValidDeliveryTransition } from './delivery-status.util';
+import {
+  DeliverySettingsQueryDto,
+  ListDeliveriesQueryDto,
+  UpdateDeliveryNotesDto,
+  UpdateDeliverySettingsDto,
+} from './dto/delivery.dto';
 
 const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 const DEFAULT_PAGE_SIZE = 20;
@@ -49,11 +56,28 @@ interface LockedOrder {
   orderNumber: string;
 }
 
-type Step = 'dispatch' | 'complete';
+interface LockedDelivery {
+  status: DeliveryStatus;
+  attemptCount: number;
+}
 
-const STEP: Record<Step, { from: DeliveryStatus; to: DeliveryStatus; orderFrom: OrderStatus; orderTo: OrderStatus }> = {
-  dispatch: { from: 'PENDING', to: 'OUT_FOR_DELIVERY', orderFrom: 'READY', orderTo: 'OUT_FOR_DELIVERY' },
-  complete: { from: 'OUT_FOR_DELIVERY', to: 'DELIVERED', orderFrom: 'OUT_FOR_DELIVERY', orderTo: 'DELIVERED' },
+type Step = 'dispatch' | 'complete' | 'fail' | 'redeliver';
+
+interface StepRule {
+  to: DeliveryStatus;
+  orderFrom: OrderStatus;
+  orderTo: OrderStatus;
+  action: string;
+}
+
+// The four operational moves. The order changes only when orderFrom !== orderTo:
+// a failure sends the order back to READY (never to CANCELLED), a redelivery request
+// keeps it READY.
+const STEP: Record<Step, StepRule> = {
+  dispatch: { to: 'OUT_FOR_DELIVERY', orderFrom: 'READY', orderTo: 'OUT_FOR_DELIVERY', action: 'DELIVERY_DISPATCHED' },
+  complete: { to: 'DELIVERED', orderFrom: 'OUT_FOR_DELIVERY', orderTo: 'DELIVERED', action: 'DELIVERY_COMPLETED' },
+  fail: { to: 'FAILED', orderFrom: 'OUT_FOR_DELIVERY', orderTo: 'READY', action: 'DELIVERY_FAILED' },
+  redeliver: { to: 'PENDING', orderFrom: 'READY', orderTo: 'READY', action: 'DELIVERY_REDELIVERY_REQUESTED' },
 };
 
 const EMPTY_SUMMARY = (): Record<DeliveryStatus, number> => ({
@@ -61,6 +85,7 @@ const EMPTY_SUMMARY = (): Record<DeliveryStatus, number> => ({
   OUT_FOR_DELIVERY: 0,
   DELIVERED: 0,
   CANCELLED: 0,
+  FAILED: 0,
 });
 
 @Injectable()
@@ -75,12 +100,32 @@ export class DeliveryService {
     await this.branchAccess.assertAccess(user, query.branchId);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
-    const where: Prisma.DeliveryWhereInput = {
+
+    // Every filter except the delivery status: the tab counters (summary) must describe
+    // the same search/period/order-status the operator is looking at.
+    const search = query.search?.trim();
+    const base: Prisma.DeliveryWhereInput = {
       tenantId: user.tenantId,
       branchId: query.branchId,
-      ...(query.status ? { status: query.status } : {}),
+      ...(createdAtRange(query.dateFrom, query.dateTo) ? { createdAt: createdAtRange(query.dateFrom, query.dateTo) } : {}),
+      ...(query.orderStatus || search
+        ? {
+            order: {
+              ...(query.orderStatus ? { status: query.orderStatus } : {}),
+              ...(search
+                ? {
+                    OR: [
+                      { orderNumber: { contains: escapeLike(search), mode: 'insensitive' } },
+                      { customerName: { contains: escapeLike(search), mode: 'insensitive' } },
+                    ],
+                  }
+                : {}),
+            },
+          }
+        : {}),
     };
-    // Active work first-in-first-out; history newest first.
+    const where: Prisma.DeliveryWhereInput = { ...base, ...(query.status ? { status: query.status } : {}) };
+    // Active work first-in-first-out; history newest first. `id` makes the order total.
     const active = query.status === 'PENDING' || query.status === 'OUT_FOR_DELIVERY';
 
     const [total, rows, grouped] = await this.prisma.$transaction([
@@ -94,7 +139,7 @@ export class DeliveryService {
       }),
       this.prisma.delivery.groupBy({
         by: ['status'],
-        where: { tenantId: user.tenantId, branchId: query.branchId },
+        where: base,
         orderBy: { status: 'asc' },
         _count: { _all: true },
       }),
@@ -118,6 +163,42 @@ export class DeliveryService {
 
   complete(user: AuthenticatedRequestUser, id: string) {
     return this.transition(user, id, 'complete');
+  }
+
+  fail(user: AuthenticatedRequestUser, id: string, reason: string) {
+    return this.transition(user, id, 'fail', reason);
+  }
+
+  redeliver(user: AuthenticatedRequestUser, id: string) {
+    return this.transition(user, id, 'redeliver');
+  }
+
+  // Delivery-specific observation, separate from Order.notes. Same-value writes are a
+  // no-op (200, idempotentReplay=true, no audit); a finished delivery is read-only.
+  async updateNotes(user: AuthenticatedRequestUser, id: string, dto: UpdateDeliveryNotesDto) {
+    await this.loadScoped(user, id);
+    const next = normalizeNotes(dto.notes);
+
+    const replay = await this.prisma.$transaction(async (tx) => {
+      const current = await this.lockDelivery(tx, user.tenantId, id);
+      if (!canEditDeliveryNotes(current.status)) throw deliveryNotesLocked();
+      const before = await tx.delivery.findUniqueOrThrow({ where: { id }, select: { notes: true } });
+      if (before.notes === next) return true;
+
+      await tx.delivery.update({ where: { id }, data: { notes: next } });
+      await this.audit.recordTx(tx, {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        action: 'DELIVERY_NOTES_UPDATED',
+        entity: 'Delivery',
+        entityId: id,
+        beforeData: { notes: before.notes },
+        afterData: { notes: next },
+      });
+      return false;
+    }, TRANSACTION_OPTIONS);
+
+    return { ...(await this.findView(user, id)), idempotentReplay: replay };
   }
 
   async getSettings(user: AuthenticatedRequestUser, query: DeliverySettingsQueryDto) {
@@ -163,63 +244,90 @@ export class DeliveryService {
     return this.toSettings(branch);
   }
 
-  // Dispatch / complete: the delivery row and its order move together, in ONE
+  // The operational moves: the delivery row and its order move together, in ONE
   // transaction. Lock order is always ORDER first, then DELIVERY (the same order
-  // OrdersService uses when it cancels), so the two can never deadlock. The state
-  // is re-read AFTER the locks: a duplicate or concurrent request finds the target
-  // state already reached and answers as a replay (200, idempotentReplay=true,
-  // nothing written); an impossible transition is a 409.
-  private async transition(user: AuthenticatedRequestUser, id: string, step: Step) {
+  // OrdersService uses when it cancels), so the two can never deadlock. The state is
+  // re-read AFTER the locks: a duplicate or concurrent request finds the target state
+  // already reached and answers as a replay (200, idempotentReplay=true, nothing written);
+  // an impossible move is a 409. Idempotency is by STATE, not by attempt: a stale
+  // duplicate of an earlier attempt's request is indistinguishable from a repeat.
+  private async transition(user: AuthenticatedRequestUser, id: string, step: Step, reason?: string) {
     const scoped = await this.loadScoped(user, id);
     const rule = STEP[step];
 
     const replay = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.tenantId, scoped.orderId);
-      const current = await this.lockDeliveryStatus(tx, user.tenantId, id);
+      const current = await this.lockDelivery(tx, user.tenantId, id);
 
-      if (current === rule.to) return true;
-      if (!isValidDeliveryTransition(current, rule.to)) throw invalidDeliveryTransition(current, rule.to);
+      // PENDING is also the initial state: only a delivery that already had an attempt
+      // counts as "redelivery already requested".
+      const alreadyThere = current.status === rule.to && (step !== 'redeliver' || current.attemptCount > 0);
+      if (alreadyThere) return true;
+      if (!isValidDeliveryTransition(current.status, rule.to)) throw invalidDeliveryTransition(current.status, rule.to);
       if (order.status !== rule.orderFrom) {
         if (step === 'dispatch') throw orderNotReadyForDispatch();
         throw deliveryStateInconsistent();
       }
 
       const now = new Date();
-      await tx.delivery.update({
-        where: { id },
-        data:
-          step === 'dispatch'
-            ? { status: rule.to, dispatchedAt: now, dispatchedByUserId: user.userId }
-            : { status: rule.to, deliveredAt: now, completedByUserId: user.userId },
-      });
-      await tx.order.update({ where: { id: scoped.orderId }, data: { status: rule.orderTo } });
+      const data: Prisma.DeliveryUpdateInput = { status: rule.to };
+      if (step === 'dispatch') {
+        data.dispatchedAt = now;
+        data.dispatchedBy = { connect: { id: user.userId } };
+        data.attemptCount = { increment: 1 };
+      } else if (step === 'complete') {
+        data.deliveredAt = now;
+        data.completedBy = { connect: { id: user.userId } };
+      } else if (step === 'fail') {
+        data.failedAt = now;
+        data.failureReason = reason ?? null;
+      } else {
+        data.failedAt = null;
+        data.failureReason = null;
+      }
+      await tx.delivery.update({ where: { id }, data });
+      if (rule.orderFrom !== rule.orderTo) {
+        await tx.order.update({ where: { id: scoped.orderId }, data: { status: rule.orderTo } });
+      }
 
       await this.audit.recordTx(tx, {
         tenantId: user.tenantId,
         userId: user.userId,
-        action: step === 'dispatch' ? 'DELIVERY_DISPATCHED' : 'DELIVERY_COMPLETED',
+        action: rule.action,
         entity: 'Delivery',
         entityId: id,
-        beforeData: { status: current },
-        afterData: { status: rule.to, orderId: scoped.orderId, orderNumber: order.orderNumber },
+        beforeData: { status: current.status },
+        afterData: {
+          status: rule.to,
+          orderId: scoped.orderId,
+          orderNumber: order.orderNumber,
+          attempt: step === 'dispatch' ? current.attemptCount + 1 : current.attemptCount,
+          ...(reason ? { reason } : {}),
+        },
       });
-      await this.audit.recordTx(tx, {
-        tenantId: user.tenantId,
-        userId: user.userId,
-        action: 'ORDER_STATUS_CHANGED',
-        entity: 'Order',
-        entityId: scoped.orderId,
-        beforeData: { status: rule.orderFrom },
-        afterData: { status: rule.orderTo, via: 'DELIVERY' },
-      });
+      if (rule.orderFrom !== rule.orderTo) {
+        await this.audit.recordTx(tx, {
+          tenantId: user.tenantId,
+          userId: user.userId,
+          action: 'ORDER_STATUS_CHANGED',
+          entity: 'Order',
+          entityId: scoped.orderId,
+          beforeData: { status: rule.orderFrom },
+          afterData: { status: rule.orderTo, via: 'DELIVERY' },
+        });
+      }
       return false;
     }, TRANSACTION_OPTIONS);
 
+    return { ...(await this.findView(user, id)), idempotentReplay: replay };
+  }
+
+  private async findView(user: AuthenticatedRequestUser, id: string) {
     const fresh = await this.prisma.delivery.findFirstOrThrow({
       where: { id, tenantId: user.tenantId },
       include: listInclude,
     });
-    return { ...this.toView(fresh), idempotentReplay: replay };
+    return this.toView(fresh);
   }
 
   private async lockOrder(tx: Tx, tenantId: string, orderId: string): Promise<LockedOrder> {
@@ -229,11 +337,11 @@ export class DeliveryService {
     return rows[0];
   }
 
-  private async lockDeliveryStatus(tx: Tx, tenantId: string, id: string): Promise<DeliveryStatus> {
-    const rows = await tx.$queryRaw<{ status: DeliveryStatus }[]>`
-      SELECT "status" FROM "deliveries" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+  private async lockDelivery(tx: Tx, tenantId: string, id: string): Promise<LockedDelivery> {
+    const rows = await tx.$queryRaw<LockedDelivery[]>`
+      SELECT "status", "attemptCount" FROM "deliveries" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
     if (rows.length === 0) throw deliveryNotFound();
-    return rows[0].status;
+    return rows[0];
   }
 
   // Tenant-scoped lookup; a delivery of a branch the caller cannot operate is a
@@ -283,15 +391,23 @@ export class DeliveryService {
         zipCode: order.zipCode ?? '',
       },
       paymentMethod: order.paymentMethod,
-      notes: order.notes,
+      // Two distinct notes: the order's general observation and the delivery instructions.
+      orderNotes: order.notes,
+      deliveryNotes: row.notes,
       itemCount: order._count.items,
       subtotalCents: order.subtotalCents,
       deliveryFeeCents: order.deliveryFeeCents,
       totalCents: order.totalCents,
+      attemptCount: row.attemptCount,
+      failureReason: row.failureReason,
       canDispatch: row.status === 'PENDING' && order.status === 'READY',
+      canFail: row.status === 'OUT_FOR_DELIVERY',
+      canRedeliver: row.status === 'FAILED',
+      canEditNotes: canEditDeliveryNotes(row.status),
       orderCreatedAt: order.createdAt,
       dispatchedAt: row.dispatchedAt,
       deliveredAt: row.deliveredAt,
+      failedAt: row.failedAt,
       cancelledAt: row.cancelledAt,
     };
   }

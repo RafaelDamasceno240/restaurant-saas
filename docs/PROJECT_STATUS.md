@@ -27,7 +27,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
-| Delivery | PARCIAL | primeira fatia da Fase 10 implementada: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador, falha de entrega, mapas/GPS e sem entrega pelo PDV |
+| Delivery | PARCIAL | fatias 1 e 2 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem atribuição de entregador, mapas/GPS, taxa por zona e sem entrega pelo PDV |
 | CRM | NÃO IMPLEMENTADO | sem modelo de cliente |
 | Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
@@ -142,7 +142,8 @@ Primeira fatia da Fase 10. Detalhes em `docs/DELIVERY.md`.
 - **Permissões:** `delivery.read`, `delivery.update` e `delivery.configure` (OWNER, ADMIN, MANAGER; o papel DELIVERY recebe `read` e `update`). Entram pelo seed: rode `pnpm db:seed` em bancos existentes.
 - **Auditoria transacional:** `DELIVERY_DISPATCHED`, `DELIVERY_COMPLETED`, `DELIVERY_CANCELLED`, `DELIVERY_SETTINGS_UPDATED`.
 - **Mudança de comportamento:** o endpoint genérico de status recusa `COMPLETED` para pedido de entrega (`409 DELIVERY_FLOW_REQUIRED`); o KDS e o detalhe do pedido deixam de oferecer "Finalizar" nesses pedidos.
-- **Limitações:** sem entregador, sem falha/reentrega, sem mapas/GPS, taxa única por unidade, PDV sem entrega.
+- **Fatia 2 (2026-09-30):** `DeliveryStatus` ganhou `FAILED`. Falhar uma entrega em rota (`POST /v1/delivery/:id/fail`, motivo obrigatório) devolve o pedido a `READY` — nunca o cancela — e `POST /v1/delivery/:id/redeliver` leva `FAILED → PENDING` no mesmo registro (histórico no `AuditLog`: `DELIVERY_FAILED`, `DELIVERY_REDELIVERY_REQUESTED`, `DELIVERY_DISPATCHED` com o nº da tentativa). Depois de uma falha o pedido `READY` pode ser cancelado (exceção única, exige `orders.cancel`, estorna o estoque). Observação própria da entrega (`Delivery.notes`, ≤ 300, separada de `Order.notes`; `PATCH /v1/delivery/:id/notes`; campo opcional no checkout). Listagem com `search` (nº do pedido/cliente), `orderStatus`, período e paginação limitada (100 por página). Migration `20260930130000_delivery_operations`. Tudo auditado dentro da transação.
+- **Limitações:** sem atribuição de entregador, sem mapas/GPS, taxa única por unidade, PDV sem entrega, sem tabela de histórico de tentativas (só o audit).
 
 ## Estado geral (atualizado na Fatia 08)
 

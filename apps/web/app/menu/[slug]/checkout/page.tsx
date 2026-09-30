@@ -45,6 +45,7 @@ export default function CheckoutPage({ params }: PageProps) {
   const [address, setAddress] = useState(emptyAddress);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [notes, setNotes] = useState('');
+  const [deliveryNotes, setDeliveryNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Delivery terms are informational here; the server is the source of truth and
@@ -130,7 +131,9 @@ export default function CheckoutPage({ params }: PageProps) {
         paymentMethod,
         notes: notes.trim() || undefined,
         idempotencyKey: orderKeyRef.current,
-        ...(fulfillmentType === 'DELIVERY' ? { address } : {}),
+        ...(fulfillmentType === 'DELIVERY'
+          ? { address, deliveryNotes: deliveryNotes.trim() || undefined }
+          : {}),
       };
       const order = await createOrder(input);
       clearCart();
@@ -273,6 +276,15 @@ export default function CheckoutPage({ params }: PageProps) {
                 required
                 value={address.zipCode}
                 onChange={(e) => setAddress({ ...address, zipCode: e.target.value })}
+              />
+              <Textarea
+                className="col-span-2"
+                placeholder="Instruções para a entrega (opcional): portão azul, interfone 204..."
+                aria-label="Instruções para a entrega"
+                maxLength={300}
+                rows={2}
+                value={deliveryNotes}
+                onChange={(e) => setDeliveryNotes(e.target.value)}
               />
             </div>
           )}

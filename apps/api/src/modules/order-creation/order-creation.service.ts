@@ -14,6 +14,7 @@ import { generateOrderNumber } from '../../common/util/order-number.util';
 import { CashRegisterService } from '../cash/cash-register.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
+import { normalizeNotes } from '../delivery/delivery-input';
 import { DeliverySettings, priceDelivery } from '../delivery/delivery-pricing';
 
 export interface OrderCreationItemInput {
@@ -52,6 +53,9 @@ export interface OrderCreationInput {
   address?: OrderCreationAddressInput | null;
   paymentMethod: PaymentMethod;
   notes?: string | null;
+  // Delivery instructions ("Portão azul"), kept on the delivery and separate from `notes`
+  // (the order's general observation). Ignored unless fulfillmentType is DELIVERY.
+  deliveryNotes?: string | null;
   idempotencyKey?: string;
 }
 
@@ -258,7 +262,14 @@ export class OrderCreationService {
     // A DELIVERY order always has its operational record, created in the same
     // transaction (no DELIVERY order without a delivery, and vice versa).
     if (isDelivery) {
-      await tx.delivery.create({ data: { tenantId: input.tenantId, branchId: input.branchId, orderId: order.id } });
+      await tx.delivery.create({
+        data: {
+          tenantId: input.tenantId,
+          branchId: input.branchId,
+          orderId: order.id,
+          notes: normalizeNotes(input.deliveryNotes),
+        },
+      });
     }
 
     const movement = cashSessionId

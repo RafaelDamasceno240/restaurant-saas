@@ -17,7 +17,7 @@ import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { OrderDetailDto, OrderListItemDto, OrderListResponseDto } from './dto/order-admin-response.dto';
 
-type DeliverySummary = { id: string; status: DeliveryStatus } | null;
+type DeliverySummary = { id: string; status: DeliveryStatus; notes: string | null } | null;
 type OrderWithItemsAndCount = Order & {
   items: OrderItem[];
   _count: { items: number };
@@ -25,7 +25,7 @@ type OrderWithItemsAndCount = Order & {
 };
 type OrderWithItems = Order & { items: OrderItem[]; delivery: DeliverySummary };
 
-const deliverySummarySelect = { select: { id: true, status: true } } as const;
+const deliverySummarySelect = { select: { id: true, status: true, notes: true } } as const;
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -133,7 +133,14 @@ export class OrdersService {
           throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
         }
         const before = rows[0].status;
-        if (!isValidOrderStatusTransition(before, newStatus)) {
+        const isDelivery = rows[0].fulfillmentType === 'DELIVERY';
+        // Lock order: ORDER (above), then DELIVERY — the same order DeliveryService uses.
+        const deliveryStatus = isDelivery ? await this.lockDeliveryStatus(tx, tenantId, id) : null;
+        // The one exception to the order flow: after a FAILED delivery the order (READY)
+        // may be cancelled, as an explicit decision (orders.cancel). Anything else keeps
+        // the regular rules, and a failure alone never cancels an order.
+        const cancelAfterFailedDelivery = before === 'READY' && newStatus === 'CANCELLED' && deliveryStatus === 'FAILED';
+        if (!cancelAfterFailedDelivery && !isValidOrderStatusTransition(before, newStatus)) {
           throw new ConflictException({
             code: 'INVALID_STATUS_TRANSITION',
             message: `Não é possível mudar o pedido de "${before}" para "${newStatus}".`,
@@ -142,15 +149,14 @@ export class OrdersService {
 
         // Fase 10: a DELIVERY order is finished by the delivery flow (dispatch ->
         // delivered), never by the generic status endpoint.
-        const isDelivery = rows[0].fulfillmentType === 'DELIVERY';
         if (isDelivery && newStatus === 'COMPLETED') throw deliveryFlowRequired();
 
         await tx.order.update({ where: { id }, data: { status: newStatus } });
-        // Cancelling the order cancels its delivery in the same transaction. A
-        // cancellable order status (PENDING..PREPARING) always has a PENDING delivery.
+        // Cancelling the order cancels its delivery in the same transaction: PENDING for
+        // PENDING..PREPARING orders, FAILED for the explicit cancel after a failed delivery.
         if (isDelivery && newStatus === 'CANCELLED') {
           const cancelled = await tx.delivery.updateMany({
-            where: { orderId: id, tenantId, status: 'PENDING' },
+            where: { orderId: id, tenantId, status: { in: ['PENDING', 'FAILED'] } },
             data: { status: 'CANCELLED', cancelledAt: new Date() },
           });
           if (cancelled.count > 0) {
@@ -160,7 +166,7 @@ export class OrdersService {
               action: 'DELIVERY_CANCELLED',
               entity: 'Order',
               entityId: id,
-              beforeData: { deliveryStatus: 'PENDING' },
+              beforeData: { deliveryStatus },
               afterData: { deliveryStatus: 'CANCELLED', reason: 'ORDER_CANCELLED' },
             });
           }
@@ -220,6 +226,12 @@ export class OrdersService {
     }
 
     return this.findOneForTenant(tenantId, id);
+  }
+
+  private async lockDeliveryStatus(tx: Prisma.TransactionClient, tenantId: string, orderId: string) {
+    const rows = await tx.$queryRaw<{ status: DeliveryStatus }[]>`
+      SELECT "status" FROM "deliveries" WHERE "orderId" = ${orderId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+    return rows[0]?.status ?? null;
   }
 
   private toListItemDto(order: OrderWithItemsAndCount): OrderListItemDto {

@@ -63,7 +63,7 @@ continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 
 ## Modelos adicionados depois da Fase 01
 
-Existem no schema atual (9 migrations em `prisma/migrations`):
+Existem no schema atual (10 migrations em `prisma/migrations`):
 
 - **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
 - **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
@@ -72,7 +72,7 @@ Existem no schema atual (9 migrations em `prisma/migrations`):
 - **Estoque:** `InventoryItem`, `InventoryBalance`, `StockMovement`, `ProductRecipe`, `ProductRecipeItem`, `InventoryCount`, `InventoryCountItem`.
 - **Compras:** `Supplier`, `Purchase`, `PurchaseItem` e `PurchaseSequence` (migration `20260930100000_purchases`). `Purchase` é único por `(tenantId, purchaseNumber)`, tem índices por unidade, data e status, e CHECKs de valores não negativos (`purchases`) e quantidade positiva (`purchase_items`). O enum `StockReferenceType` inclui `PURCHASE`, usado como referência das entradas de estoque de cada item de compra.
 
-- **Delivery:** `Delivery` (`deliveries`, `orderId` único, enum `DeliveryStatus`) e, nas tabelas existentes, `orders.deliveryFeeCents` e `branches.deliveryEnabled/deliveryFeeCents/deliveryMinOrderCents` (migration `20260930120000_delivery`, com CHECKs de valores não negativos e backfill dos pedidos de entrega antigos). O endereço de entrega continua nas colunas do próprio `Order` (snapshot).
+- **Delivery:** `Delivery` (`deliveries`, `orderId` único, enum `DeliveryStatus` com `PENDING`, `OUT_FOR_DELIVERY`, `DELIVERED`, `FAILED`, `CANCELLED`; colunas `notes`, `attemptCount`, `failedAt`, `failureReason` da migration `20260930130000_delivery_operations`, com CHECKs de tamanho e de tentativas) e, nas tabelas existentes, `orders.deliveryFeeCents` e `branches.deliveryEnabled/deliveryFeeCents/deliveryMinOrderCents` (migration `20260930120000_delivery`, com CHECKs de valores não negativos e backfill dos pedidos de entrega antigos). O endereço de entrega continua nas colunas do próprio `Order` (snapshot).
 
 Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`.
 

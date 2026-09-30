@@ -1,4 +1,12 @@
-import { addressSummary, centsToInput, DELIVERY_STATUS_LABEL } from './delivery-logic';
+import {
+  addressSummary,
+  attemptLabel,
+  centsToInput,
+  DELIVERY_STATUS_LABEL,
+  DELIVERY_TABS,
+  isValidFailureReason,
+  localDayRange,
+} from './delivery-logic';
 import { costToCents } from './purchases-logic';
 
 const base = {
@@ -42,8 +50,66 @@ describe('centsToInput', () => {
   });
 });
 
-describe('DELIVERY_STATUS_LABEL', () => {
-  it('has a label for every status', () => {
-    expect(Object.keys(DELIVERY_STATUS_LABEL).sort()).toEqual(['CANCELLED', 'DELIVERED', 'OUT_FOR_DELIVERY', 'PENDING']);
+describe('DELIVERY_STATUS_LABEL / DELIVERY_TABS', () => {
+  it('has a label for every status, including FAILED', () => {
+    expect(Object.keys(DELIVERY_STATUS_LABEL).sort()).toEqual([
+      'CANCELLED',
+      'DELIVERED',
+      'FAILED',
+      'OUT_FOR_DELIVERY',
+      'PENDING',
+    ]);
+  });
+
+  it('shows a tab for every status, with the ones that need action first', () => {
+    expect([...DELIVERY_TABS].sort()).toEqual(Object.keys(DELIVERY_STATUS_LABEL).sort());
+    expect(DELIVERY_TABS.slice(0, 3)).toEqual(['PENDING', 'OUT_FOR_DELIVERY', 'FAILED']);
+  });
+});
+
+describe('localDayRange', () => {
+  it('covers exactly one local day, from 00:00:00.000 to 23:59:59.999', () => {
+    const { from, to } = localDayRange('2026-10-01');
+    const start = new Date(from);
+    const end = new Date(to);
+    expect([start.getFullYear(), start.getMonth(), start.getDate(), start.getHours(), start.getMinutes()]).toEqual([2026, 9, 1, 0, 0]);
+    expect([end.getFullYear(), end.getMonth(), end.getDate(), end.getHours(), end.getMinutes(), end.getMilliseconds()]).toEqual([
+      2026, 9, 1, 23, 59, 999,
+    ]);
+    expect(end.getTime()).toBeGreaterThan(start.getTime());
+  });
+
+  it('returns ISO instants the API accepts', () => {
+    const { from, to } = localDayRange('2026-12-31');
+    expect(from).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(to).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+});
+
+describe('attemptLabel', () => {
+  it('shows nothing for a first attempt', () => {
+    expect(attemptLabel({ status: 'PENDING', attemptCount: 0 })).toBeNull();
+    expect(attemptLabel({ status: 'OUT_FOR_DELIVERY', attemptCount: 1 })).toBeNull();
+    expect(attemptLabel({ status: 'FAILED', attemptCount: 1 })).toBeNull();
+  });
+
+  it('flags a delivery waiting for another attempt', () => {
+    expect(attemptLabel({ status: 'PENDING', attemptCount: 1 })).toBe('Reentrega · 2ª tentativa');
+    expect(attemptLabel({ status: 'PENDING', attemptCount: 2 })).toBe('Reentrega · 3ª tentativa');
+  });
+
+  it('shows the attempt number once there was more than one dispatch', () => {
+    expect(attemptLabel({ status: 'OUT_FOR_DELIVERY', attemptCount: 2 })).toBe('2ª tentativa');
+    expect(attemptLabel({ status: 'DELIVERED', attemptCount: 3 })).toBe('3ª tentativa');
+  });
+});
+
+describe('isValidFailureReason', () => {
+  it('requires 3 to 300 characters after trimming', () => {
+    expect(isValidFailureReason('ab')).toBe(false);
+    expect(isValidFailureReason('   ab   ')).toBe(false);
+    expect(isValidFailureReason('abc')).toBe(true);
+    expect(isValidFailureReason(`  ${'x'.repeat(300)}  `)).toBe(true);
+    expect(isValidFailureReason('x'.repeat(301))).toBe(false);
   });
 });

@@ -25,6 +25,8 @@ export interface CreateOrderInput {
   address?: CheckoutAddressInput;
   paymentMethod: PaymentMethod;
   notes?: string;
+  // Delivery instructions, distinct from `notes` (the order's general observation).
+  deliveryNotes?: string;
   idempotencyKey?: string;
 }
 

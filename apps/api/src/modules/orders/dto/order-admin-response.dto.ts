@@ -18,6 +18,8 @@ import {
 export class OrderDeliverySummaryDto {
   @ApiProperty() id!: string;
   @ApiProperty({ enum: DeliveryStatus }) status!: DeliveryStatus;
+  @ApiPropertyOptional({ nullable: true, description: 'Observação da entrega (separada da observação do pedido)' })
+  notes!: string | null;
 }
 
 export class OrderListItemDto {

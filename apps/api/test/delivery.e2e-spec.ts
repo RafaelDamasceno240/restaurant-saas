@@ -197,7 +197,7 @@ describe('Delivery (e2e)', () => {
       await publicOrder(ctx).expect(201);
 
       const all = (await get(ctx.accessToken, `/v1/delivery?branchId=${ctx.branchId}`).expect(200)).body;
-      expect(all.summary).toEqual({ PENDING: 2, OUT_FOR_DELIVERY: 0, DELIVERED: 0, CANCELLED: 0 });
+      expect(all.summary).toEqual({ PENDING: 2, OUT_FOR_DELIVERY: 0, DELIVERED: 0, CANCELLED: 0, FAILED: 0 });
       expect(all.meta).toMatchObject({ page: 1, total: 2 });
       const row = all.data.find((d: { orderId: string }) => d.orderId === orderId);
       expect(row).toMatchObject({
@@ -312,7 +312,7 @@ describe('Delivery (e2e)', () => {
       const res = await post(ctx.accessToken, `/v1/delivery/${delivery.id}/dispatch`).expect(409);
       expect(res.body.code).toBe('INVALID_DELIVERY_TRANSITION');
       const detail = (await get(ctx.accessToken, `/v1/orders/${order.id}`).expect(200)).body;
-      expect(detail.delivery).toEqual({ id: delivery.id, status: 'CANCELLED' });
+      expect(detail.delivery).toEqual({ id: delivery.id, status: 'CANCELLED', notes: null });
     });
   });
 
