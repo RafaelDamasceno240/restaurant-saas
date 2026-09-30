@@ -153,7 +153,7 @@ export default function ComprasPage() {
         </Select>
       </Card>
 
-      {query.isLoading ? (
+      {query.isPending ? (
         <LoadingState label="Carregando compras..." />
       ) : query.isError ? (
         <ErrorState message="Não foi possível carregar as compras." onRetry={() => void query.refetch()} />

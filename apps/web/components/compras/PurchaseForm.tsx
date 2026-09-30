@@ -189,7 +189,7 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseDetail }) {
     setConfirmOpen(true);
   }
 
-  if (!branchId || itemsQuery.isLoading || suppliersQuery.isLoading) {
+  if (!branchId || itemsQuery.isPending || suppliersQuery.isPending) {
     return <LoadingState label="Carregando..." />;
   }
 
@@ -252,7 +252,7 @@ export function PurchaseForm({ purchase }: { purchase?: PurchaseDetail }) {
                 <Th className="w-[14%]">Lote</Th>
                 <Th className="w-[15%]">Validade</Th>
                 <Th className="w-[12%] text-right">Total</Th>
-                <Th className="w-[7%]">
+                <Th className="relative w-[7%]">
                   <span className="sr-only">Remover</span>
                 </Th>
               </Tr>

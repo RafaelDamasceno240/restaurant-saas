@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Pencil, Plus, Power } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
@@ -57,6 +57,10 @@ export function SuppliersDialog({ open, onClose }: { open: boolean; onClose: () 
     setError(null);
   }
 
+  // Synchronous guard: `isPending` is React state and does not change between
+  // clicks fired in the same tick, so it cannot stop a repeated submit on its own.
+  const saving = useRef(false);
+
   const save = useMutation({
     mutationFn: () => {
       const name = draft.name.trim();
@@ -78,6 +82,9 @@ export function SuppliersDialog({ open, onClose }: { open: boolean; onClose: () 
       setEditing(null);
     },
     onError: (err) => setError(errorMessage(err, 'Não foi possível salvar o fornecedor.')),
+    onSettled: () => {
+      saving.current = false;
+    },
   });
 
   const toggle = useMutation({
@@ -91,7 +98,9 @@ export function SuppliersDialog({ open, onClose }: { open: boolean; onClose: () 
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!save.isPending) save.mutate();
+    if (saving.current) return;
+    saving.current = true;
+    save.mutate();
   }
 
   const set = <K extends keyof Draft>(key: K, value: string) => setDraft((current) => ({ ...current, [key]: value }));
@@ -145,7 +154,7 @@ export function SuppliersDialog({ open, onClose }: { open: boolean; onClose: () 
               Novo fornecedor
             </Button>
           </div>
-          {suppliers.isLoading ? (
+          {suppliers.isPending ? (
             <LoadingState label="Carregando fornecedores..." />
           ) : (suppliers.data ?? []).length === 0 ? (
             <EmptyState title="Nenhum fornecedor cadastrado" description="Cadastre o primeiro para registrar compras." />

@@ -48,7 +48,7 @@ export default function CompraDetalhePage({ params }: { params: { id: string } }
   if (!canManage) {
     return <EmptyState icon={<ShoppingBag />} title="Sem acesso às compras" />;
   }
-  if (query.isLoading) return <LoadingState label="Carregando compra..." />;
+  if (query.isPending) return <LoadingState label="Carregando compra..." />;
   if (query.isError || !query.data) {
     return <ErrorState message="Não foi possível carregar a compra." onRetry={() => void query.refetch()} />;
   }
