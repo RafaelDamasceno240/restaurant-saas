@@ -2,7 +2,20 @@
 
 import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bike, CheckCircle2, PackageCheck, Pencil, RotateCcw, Search, Settings, Truck, XCircle } from 'lucide-react';
+import {
+  Bike,
+  CheckCircle2,
+  History,
+  PackageCheck,
+  Pencil,
+  RotateCcw,
+  Search,
+  Settings,
+  Truck,
+  UserMinus,
+  UserPlus,
+  XCircle,
+} from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { formatCents } from '@/lib/cash-api';
 import { DeliveryItem, DeliveryStatus, deliveryApi } from '@/lib/delivery-api';
@@ -12,6 +25,7 @@ import {
   DELIVERY_STATUS_LABEL,
   DELIVERY_STATUS_TONE,
   DELIVERY_TABS,
+  defaultCourierFilter,
   localDayRange,
 } from '@/lib/delivery-logic';
 import { OrderStatus, updateOrderStatus } from '@/lib/orders-api';
@@ -26,6 +40,7 @@ import { Table, TableWrap, TBody, Td, Th, THead, Tr } from '@/components/ds/Tabl
 import { Tabs } from '@/components/ds/Tabs';
 import { useToast } from '@/components/ds/Toast';
 import { ConfirmDeliveryDialog, DeliveryNotesDialog, FailDeliveryDialog } from '@/components/delivery/DeliveryDialogs';
+import { AssignCourierDialog, DeliveryHistoryDialog } from '@/components/delivery/DeliveryCourierDialogs';
 import { DeliverySettingsDialog } from '@/components/delivery/DeliverySettingsDialog';
 import { useErrorMessage } from '@/components/estoque/use-inventory';
 import { StatusBadge } from '@/components/pedidos/StatusBadge';
@@ -62,10 +77,13 @@ type Modal =
   | { kind: 'notes'; item: DeliveryItem }
   | { kind: 'redeliver'; item: DeliveryItem }
   | { kind: 'cancelOrder'; item: DeliveryItem }
+  | { kind: 'assign'; item: DeliveryItem }
+  | { kind: 'history'; item: DeliveryItem }
   | null;
 
 type Action =
-  | { kind: 'dispatch' | 'complete' | 'redeliver' | 'cancelOrder'; item: DeliveryItem }
+  | { kind: 'dispatch' | 'complete' | 'redeliver' | 'cancelOrder' | 'unassign'; item: DeliveryItem }
+  | { kind: 'assign'; item: DeliveryItem; courierUserId: string }
   | { kind: 'fail'; item: DeliveryItem; reason: string }
   | { kind: 'notes'; item: DeliveryItem; notes: string | null };
 
@@ -80,10 +98,17 @@ export default function DeliveryPage() {
   const canConfigure = roles.some((role) => MANAGEMENT.includes(role));
   // Cancelling an order needs orders.cancel, which management has; the API decides.
   const canCancelOrder = canConfigure;
+  // Assigning needs delivery.assign (management); a courier cannot assign anyone, not even themselves.
+  const canAssign = canConfigure;
+  const isCourier = roles.includes('DELIVERY');
 
   const [status, setStatus] = useState<DeliveryStatus>('PENDING');
   const [searchText, setSearchText] = useState('');
   const [orderStatus, setOrderStatus] = useState<OrderStatus | ''>('');
+  // null = the operator has not chosen yet, so the role's default applies (a courier starts
+  // on their own deliveries). Choosing "Todos" is an explicit '' and sticks.
+  const [courierChoice, setCourierChoice] = useState<string | null>(null);
+  const courierFilter = courierChoice ?? defaultCourierFilter(roles);
   const [day, setDay] = useState('');
   const [page, setPage] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -96,19 +121,20 @@ export default function DeliveryPage() {
   const inFlight = useRef(new Set<string>());
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
 
-  useEffect(() => setPage(1), [status, search, orderStatus, day, branchId]);
+  useEffect(() => setPage(1), [status, search, orderStatus, day, branchId, courierFilter]);
 
   const range = day ? localDayRange(day) : null;
-  const filtersActive = search !== '' || orderStatus !== '' || day !== '';
+  const filtersActive = search !== '' || orderStatus !== '' || day !== '' || courierFilter !== '';
 
   const query = useQuery({
-    queryKey: ['delivery', 'list', branchId, status, search, orderStatus, day, page],
+    queryKey: ['delivery', 'list', branchId, status, search, orderStatus, day, courierFilter, page],
     queryFn: () =>
       deliveryApi.list(accessToken as string, branchId as string, {
         status,
         page,
         search: search || undefined,
         orderStatus: orderStatus || undefined,
+        courier: courierFilter || undefined,
         dateFrom: range?.from,
         dateTo: range?.to,
       }),
@@ -117,10 +143,18 @@ export default function DeliveryPage() {
     placeholderData: (previous) => previous,
   });
 
+  // Courier names for the filter; only management can list them (delivery.assign).
+  const couriers = useQuery({
+    queryKey: ['delivery', 'couriers', branchId],
+    queryFn: () => deliveryApi.listCouriers(accessToken as string, branchId as string),
+    enabled: !!accessToken && !!branchId && canAssign,
+  });
+
   function clearFilters() {
     setSearchText('');
     setOrderStatus('');
     setDay('');
+    setCourierChoice('');
   }
 
   // Runs one action with the per-delivery guard. Resolves true when it succeeded.
@@ -149,6 +183,14 @@ export default function DeliveryPage() {
         case 'redeliver':
           replay = (await deliveryApi.redeliver(token, item.id)).idempotentReplay;
           message = `Nova tentativa solicitada para o pedido ${item.orderNumber}.`;
+          break;
+        case 'assign':
+          replay = (await deliveryApi.assignCourier(token, item.id, action.courierUserId)).idempotentReplay;
+          message = `Entregador atribuído ao pedido ${item.orderNumber}.`;
+          break;
+        case 'unassign':
+          replay = (await deliveryApi.unassignCourier(token, item.id)).idempotentReplay;
+          message = `Entregador removido do pedido ${item.orderNumber}.`;
           break;
         case 'notes':
           replay = (await deliveryApi.updateNotes(token, item.id, action.notes)).idempotentReplay;
@@ -209,7 +251,7 @@ export default function DeliveryPage() {
         items={DELIVERY_TABS.map((key) => ({ key, label: DELIVERY_STATUS_LABEL[key], count: data?.summary[key] }))}
       />
 
-      <Card className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+      <Card className="grid gap-3 p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
         <SearchInput
           placeholder="Buscar nº do pedido ou cliente..."
           aria-label="Buscar entregas"
@@ -230,6 +272,16 @@ export default function DeliveryPage() {
           ))}
         </Select>
         <Input type="date" aria-label="Dia do pedido" value={day} onChange={(event) => setDay(event.target.value)} />
+        <Select aria-label="Entregador" value={courierFilter} onChange={(event) => setCourierChoice(event.target.value)}>
+          <option value="">Todos os entregadores</option>
+          {isCourier && <option value="me">Minhas entregas</option>}
+          <option value="none">Sem entregador</option>
+          {(couriers.data?.data ?? []).map((courier) => (
+            <option key={courier.id} value={courier.id}>
+              {courier.name}
+            </option>
+          ))}
+        </Select>
         <Button variant="ghost" onClick={clearFilters} disabled={!filtersActive}>
           Limpar filtros
         </Button>
@@ -255,7 +307,7 @@ export default function DeliveryPage() {
       ) : (
         <Card className="overflow-hidden">
           <TableWrap>
-            <Table className="min-w-[1080px]">
+            <Table className="min-w-[1200px]">
               <THead>
                 <Tr className="hover:bg-transparent">
                   <Th>Pedido</Th>
@@ -264,6 +316,7 @@ export default function DeliveryPage() {
                   <Th className="text-right">Valor</Th>
                   <Th>Pedido</Th>
                   <Th>Entrega</Th>
+                  <Th>Entregador</Th>
                   {/* `relative` keeps the sr-only label inside the scrolling table wrapper. */}
                   <Th className="relative">
                     <span className="sr-only">Ações</span>
@@ -320,7 +373,44 @@ export default function DeliveryPage() {
                         {attempt && <div className="mt-1 text-xs text-muted-foreground">{attempt}</div>}
                       </Td>
                       <Td>
+                        {item.courier ? (
+                          <span className="font-medium text-foreground">{item.courier.name}</span>
+                        ) : (
+                          <span className="text-muted-foreground">Sem entregador</span>
+                        )}
+                      </Td>
+                      <Td>
                         <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {canAssign && item.canAssign && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              icon={<UserPlus className="h-4 w-4" aria-hidden />}
+                              disabled={isBusy}
+                              onClick={() => setModal({ kind: 'assign', item })}
+                            >
+                              {item.courier ? 'Reatribuir' : 'Atribuir'}
+                            </Button>
+                          )}
+                          {canAssign && item.canAssign && item.courier && (
+                            <Button
+                              size="icon-sm"
+                              variant="ghost"
+                              aria-label={`Remover entregador do pedido ${item.orderNumber}`}
+                              title="Remover entregador"
+                              disabled={isBusy}
+                              icon={<UserMinus className="h-4 w-4" aria-hidden />}
+                              onClick={() => void run({ kind: 'unassign', item })}
+                            />
+                          )}
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Histórico da entrega ${item.orderNumber}`}
+                            title="Histórico"
+                            icon={<History className="h-4 w-4" aria-hidden />}
+                            onClick={() => setModal({ kind: 'history', item })}
+                          />
                           {item.status === 'PENDING' && (
                             <Button
                               size="sm"
@@ -456,6 +546,17 @@ export default function DeliveryPage() {
           O pedido será cancelado e o estoque consumido por ele será estornado. Esta ação não pode ser desfeita.
         </p>
       </ConfirmDeliveryDialog>
+
+      <AssignCourierDialog
+        item={modal?.kind === 'assign' ? modal.item : null}
+        branchId={branchId as string}
+        busy={modalBusy}
+        onClose={() => setModal(null)}
+        onSubmit={(courierUserId) =>
+          modal?.kind === 'assign' ? run({ kind: 'assign', item: modal.item, courierUserId }) : Promise.resolve(false)
+        }
+      />
+      <DeliveryHistoryDialog item={modal?.kind === 'history' ? modal.item : null} onClose={() => setModal(null)} />
 
       {canConfigure && <DeliverySettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} branchId={branchId} />}
     </Page>

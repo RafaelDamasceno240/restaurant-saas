@@ -1,5 +1,5 @@
 import { DeliveryStatus } from '@prisma/client';
-import { canEditDeliveryNotes, isValidDeliveryTransition } from './delivery-status.util';
+import { canAssignCourier, canEditDeliveryNotes, isValidDeliveryTransition } from './delivery-status.util';
 
 const ALL: DeliveryStatus[] = ['PENDING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'CANCELLED', 'FAILED'];
 
@@ -61,5 +61,17 @@ describe('canEditDeliveryNotes', () => {
   it('locks the observation of a delivered or cancelled delivery', () => {
     expect(canEditDeliveryNotes('DELIVERED')).toBe(false);
     expect(canEditDeliveryNotes('CANCELLED')).toBe(false);
+  });
+});
+
+describe('canAssignCourier', () => {
+  it.each([
+    ['PENDING', true],
+    ['OUT_FOR_DELIVERY', true],
+    ['FAILED', true],
+    ['DELIVERED', false],
+    ['CANCELLED', false],
+  ] as const)('%s -> %s', (status, expected) => {
+    expect(canAssignCourier(status as DeliveryStatus)).toBe(expected);
   });
 });

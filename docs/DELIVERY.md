@@ -1,6 +1,6 @@
-# Delivery (Fase 10 — fatias 1 e 2)
+# Delivery (Fase 10 — fatias 1, 2 e 3)
 
-Estado real implementado em 2026-09-30. A **fatia 1** trouxe taxa de entrega, configuração por unidade, registro operacional da entrega e o fluxo despachar → entregar. A **fatia 2** acrescentou falha de entrega, reentrega, observação da entrega, filtros/busca e paginação na tela. O que não está aqui está listado em "Limitações".
+Estado real implementado em 2026-09-30. A **fatia 1** trouxe taxa de entrega, configuração por unidade, registro operacional da entrega e o fluxo despachar → entregar. A **fatia 2** acrescentou falha de entrega, reentrega, observação da entrega, filtros/busca e paginação na tela. A **fatia 3** acrescentou a **atribuição de entregador interno** e o **histórico operacional de tentativas** (reconstruído do `AuditLog`). O que não está aqui está listado em "Limitações".
 
 ## Arquitetura
 
@@ -12,6 +12,7 @@ O pedido (`Order`) já guardava `fulfillmentType = DELIVERY` e o **endereço com
 | `DeliveryStatus` | enum | `PENDING`, `OUT_FOR_DELIVERY`, `DELIVERED`, `FAILED`, `CANCELLED` |
 | `Delivery.notes` | coluna (≤ 300) | **observação da entrega** ("Portão azul"), separada de `Order.notes` |
 | `Delivery.attemptCount`, `failedAt`, `failureReason` | colunas | nº de despachos e **última** falha (o histórico completo fica no `AuditLog`) |
+| `Delivery.courierUserId`, `assignedAt` | colunas (nulas) | entregador responsável (um `User` do mesmo tenant com o papel `DELIVERY`) e quando foi atribuído; FK `RESTRICT` para `users` |
 | `Order.deliveryFeeCents` | coluna | snapshot da taxa cobrada; `totalCents = subtotalCents + deliveryFeeCents` |
 | `Branch.deliveryEnabled`, `deliveryFeeCents`, `deliveryMinOrderCents` | colunas | configuração de entrega por unidade |
 | módulo `delivery` | `apps/api/src/modules/delivery` | listagem, ações, observação e configurações |
@@ -76,17 +77,22 @@ Calculados em `OrderCreationService.createPricedOrderInTx` por `priceDelivery` (
 
 | Método e rota | Permissão | Descrição |
 |---|---|---|
-| `GET /v1/delivery?branchId=&status=&orderStatus=&search=&dateFrom=&dateTo=&page=&pageSize=` | `delivery.read` | lista as entregas da unidade, com `summary` por status |
+| `GET /v1/delivery?branchId=&status=&orderStatus=&search=&courier=&dateFrom=&dateTo=&page=&pageSize=` | `delivery.read` | lista as entregas da unidade, com `summary` por status |
 | `POST /v1/delivery/:id/dispatch` | `delivery.update` | despacha; idempotente |
 | `POST /v1/delivery/:id/complete` | `delivery.update` | confirma a entrega; idempotente |
 | `POST /v1/delivery/:id/fail` | `delivery.update` | registra a falha (`{ reason }`); idempotente |
 | `POST /v1/delivery/:id/redeliver` | `delivery.update` | pede nova tentativa (`FAILED → PENDING`); idempotente |
 | `PATCH /v1/delivery/:id/notes` | `delivery.update` | define/limpa a observação da entrega |
+| `PUT /v1/delivery/:id/courier` | `delivery.assign` | atribui ou reatribui o entregador (`{ courierUserId }`); idempotente |
+| `DELETE /v1/delivery/:id/courier` | `delivery.assign` | remove o entregador; idempotente |
+| `GET /v1/delivery/couriers?branchId=` | `delivery.assign` | entregadores elegíveis da unidade (máx. 200) |
+| `GET /v1/delivery/:id/history` | `delivery.read` | linha do tempo da entrega (tentativas, falhas, atribuições) |
 | `GET /v1/delivery/settings?branchId=` | `delivery.read` | configurações da unidade |
 | `PUT /v1/delivery/settings` | `delivery.configure` | substitui `enabled`, `feeCents` (0–1.000.000) e `minOrderCents` (0–100.000.000) |
 
 **Filtros da listagem** (todos no backend):
 - `status`: status da entrega; `orderStatus`: status do pedido.
+- `courier`: `me` (o usuário logado), `none` (sem entregador) ou o id de um entregador. Outro valor → 400. O `summary` respeita este filtro.
 - `search`: número do pedido **ou** nome do cliente, contém, sem diferenciar maiúsculas (máx. 120 caracteres). `%` e `_` são tratados como texto comum.
 - `dateFrom`/`dateTo`: data de criação, instantes ISO (a tela envia o início e o fim do dia **local**); uma data simples `YYYY-MM-DD` no `dateTo` significa "até o fim desse dia UTC".
 - O `summary` (contadores das abas) respeita todos os filtros **exceto** `status`.
@@ -105,9 +111,10 @@ Nas respostas do módulo `delivery`, valores monetários são **centavos**; nas 
 | `delivery.read` | ✔ | ✔ | ✔ | ✔ | — |
 | `delivery.update` (despachar, concluir, falha, reentrega, observação) | ✔ | ✔ | ✔ | ✔ | — |
 | `delivery.configure` | ✔ | ✔ | ✔ | — | — |
+| `delivery.assign` (atribuir, reatribuir e remover entregador; listar entregadores) | ✔ | ✔ | ✔ | — | — |
 | `orders.cancel` (cancelar o pedido após falha) | ✔ | ✔ | ✔ | — | — |
 
-Nenhuma permissão nova na fatia 2. As permissões entram pelo **seed** (`pnpm db:seed`): depois de migrar um banco existente, rode o seed. Sem ele, ninguém tem acesso ao módulo.
+A fatia 3 criou `delivery.assign`: `delivery.update` e `delivery.configure` não distinguem o entregador da gerência (o papel DELIVERY tem `update`), e o entregador **não pode atribuir ninguém, nem a si mesmo**. Depois de migrar, rode o seed e os usuários precisam entrar de novo. As permissões entram pelo **seed** (`pnpm db:seed`): depois de migrar um banco existente, rode o seed. Sem ele, ninguém tem acesso ao módulo.
 
 ## Isolamento e concorrência
 
@@ -128,12 +135,14 @@ Gravada **dentro da transação** (`AuditService.recordTx`): se a auditoria falh
 | `ORDER_STATUS_CHANGED` (`via: DELIVERY`) | quando o pedido muda junto com a entrega (despacho, conclusão, falha) |
 | `DELIVERY_NOTES_UPDATED` (`Delivery`) | ao alterar a observação (antes/depois) |
 | `DELIVERY_CANCELLED` (entidade `Order`) | ao cancelar um pedido de entrega; `beforeData` traz o status anterior da entrega (`PENDING` ou `FAILED`) |
+| `DELIVERY_ASSIGNED` / `DELIVERY_REASSIGNED` / `DELIVERY_UNASSIGNED` (`Delivery`) | ao atribuir / trocar / remover o entregador; `beforeData.courierUserId` e `afterData` com `courierUserId`, `previousCourierUserId`, `status`, `orderId`, `orderNumber`, `branchId` |
 | `DELIVERY_SETTINGS_UPDATED` (`Branch`) | ao alterar as configurações (antes/depois) |
 
 ## Migrations
 
 - `20260930120000_delivery` (fatia 1): `DeliveryStatus`, `deliveries`, colunas de taxa/configuração, `CHECK`s de valores não negativos e **backfill** dos pedidos de entrega existentes (`CANCELLED → CANCELLED`; `COMPLETED`/`DELIVERED → DELIVERED`; `OUT_FOR_DELIVERY → OUT_FOR_DELIVERY`; demais → `PENDING`; horários e responsáveis históricos ficam nulos).
 - `20260930130000_delivery_operations` (fatia 2): valor `FAILED` no enum, colunas `notes`, `attemptCount`, `failedAt`, `failureReason`, `CHECK`s (observação e motivo ≤ 300, tentativas ≥ 0) e backfill `attemptCount = 1` onde já havia despacho registrado (linhas históricas sem despacho ficam em 0).
+- `20260930140000_delivery_courier` (fatia 3): colunas `courierUserId` e `assignedAt` (nulas), índice `(tenantId, courierUserId)` e FK `RESTRICT` para `users`. Sem backfill: entregas existentes ficam sem entregador.
 - Nenhuma apaga ou reescreve dados existentes.
 
 ## Frontend
@@ -146,9 +155,10 @@ Checkout público: mostra taxa e pedido mínimo, soma a taxa ao total exibido, d
 
 ## Limitações (não implementado)
 
-- Atribuição de entregador, entregador externo, rastreamento/GPS, mapas, raio ou distância.
+- Entregador externo/terceirizado, rastreamento/GPS, mapas, raio ou distância (o entregador é sempre um usuário interno com o papel `DELIVERY`).
 - Taxa por bairro/zona/distância: há UMA taxa por unidade.
-- Histórico de tentativas em tabela própria: só o `AuditLog` (a tela mostra a última falha e o número da tentativa, não a linha do tempo).
+- Histórico de tentativas em tabela própria: não existe; a linha do tempo é reconstruída do `AuditLog` (até 500 eventos por entrega), e o nº da tentativa é **derivado** contando os despachos. Eventos de entregas anteriores ao deploy não trazem `courierUserId` no audit.
+- A atribuição é **organizacional**: não restringe quem pode despachar, falhar ou concluir (comportamento da fatia 2 mantido). "Minhas entregas" é um filtro, não uma barreira de segurança.
 - PDV não cria pedidos de entrega.
 - O checkout público usa sempre a unidade mais antiga e ativa (comportamento anterior); as configurações lidas são as dessa unidade.
 - Cancelar o pedido só é possível a partir de `READY` quando a entrega está `FAILED`; com a entrega `PENDING` após uma reentrega pedida não há cancelamento (despache e, se falhar, cancele).
@@ -161,3 +171,27 @@ Checkout público: mostra taxa e pedido mínimo, soma a taxa ao total exibido, d
 - Falha devolve o pedido a `READY` em vez de deixá-lo "saiu para entrega" ou cancelá-lo: o cliente não vê uma entrega em rota que não existe e ninguém perde o pedido sem decisão humana.
 - Reentrega reutiliza o mesmo registro; o histórico fica no audit (sem tabela de tentativas).
 - Paginação por offset limitada (100 por página, 1000 páginas): suficiente para o volume de uma unidade e mais simples que cursor; o desempate por `id` mantém a ordem estável.
+
+## Atribuição de entregador (fatia 3)
+
+**Quem pode ser entregador:** usuário do **mesmo tenant**, `ACTIVE`, com o papel `DELIVERY` e acesso à unidade da entrega (vínculo em `UserBranch`; OWNER/ADMIN que também tenham o papel `DELIVERY` valem para todas as unidades, como no `BranchAccessService`). O tenant e a unidade vêm da sessão e da própria entrega, nunca do corpo; o cliente só informa o `courierUserId`. Não há tabela de entregadores nem entregador externo.
+
+**Erros:** usuário de outro tenant ou inexistente → `404 COURIER_NOT_FOUND`; usuário do tenant que não serve → `409 COURIER_NOT_ELIGIBLE` com `details.reason` = `INACTIVE`, `NOT_COURIER` ou `NO_BRANCH_ACCESS`; entrega concluída ou cancelada → `409 DELIVERY_ASSIGNMENT_LOCKED`. A elegibilidade é verificada **dentro da transação**, depois dos locks.
+
+**Quando muda:** só enquanto a entrega está viva (`PENDING`, `OUT_FOR_DELIVERY`, `FAILED`). Atribuir o mesmo entregador, ou remover quando não há nenhum, é replay (200, `idempotentReplay: true`, sem auditoria; vale também em entrega concluída). Despachar **não exige** entregador.
+
+**Comportamento do entregador no ciclo de vida:**
+
+| Evento | Entregador |
+|---|---|
+| Falha (`OUT_FOR_DELIVERY → FAILED`) | mantido; o pedido volta a `READY` (fatia 2) |
+| Reentrega (`FAILED → PENDING`) | mantido; pode ser trocado antes de despachar de novo |
+| Conclusão | mantido (registro de quem ficou responsável) e travado |
+| Cancelamento do pedido | mantido e travado; fica no histórico |
+| Reatribuição em rota | permitida; a troca fica no histórico |
+
+**Concorrência:** atribuir/remover usam a mesma ordem de locks dos demais movimentos (pedido e depois entrega, `SELECT … FOR UPDATE`), releem o estado depois do lock e gravam a auditoria na mesma transação. Testado: 10 atribuições simultâneas (mesmo e diferentes entregadores), 10 remoções, e corridas com despachar, falhar, reentrega e cancelamento.
+
+**Histórico:** `GET /delivery/:id/history` lê o `AuditLog` (`Delivery`/`entityId` + `DELIVERY_CANCELLED`, que é gravado na entidade `Order`), adiciona um evento sintético "criado" e resolve nomes (atores e entregadores) com uma consulta no tenant. Cada evento traz `kind`, `at`, `attempt` (só nos eventos de despacho, falha, reentrega e conclusão), `reason` (falhas), `actor`, `courier`, `previousCourier`. Os eventos de despacho/falha/conclusão/reentrega passaram a gravar também o `courierUserId` vigente (campo aditivo).
+
+**Tela:** coluna **Entregador** ("Sem entregador" quando vazio); filtro de entregador (Todos, Minhas entregas — só para quem tem o papel DELIVERY —, Sem entregador e cada entregador da unidade); usuário com DELIVERY e sem papel de gerência abre em "Minhas entregas" (pode trocar para "Todos"); ações **Atribuir / Reatribuir / Remover** (gerência, com `canAssign` do servidor) e **Histórico** (linha do tempo em diálogo) para todos que veem a tela. Guard síncrono contra cliques duplos também nas novas ações.

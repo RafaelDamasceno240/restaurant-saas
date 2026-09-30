@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DeliveryStatus } from '@prisma/client';
+import { CourierIneligibleReason } from './delivery-courier';
 
 export function deliveryNotFound() {
   return new NotFoundException({ code: 'DELIVERY_NOT_FOUND', message: 'Entrega não encontrada.' });
@@ -61,5 +62,33 @@ export function deliveryNotesLocked() {
   return new ConflictException({
     code: 'DELIVERY_NOTES_LOCKED',
     message: 'A observação de uma entrega concluída ou cancelada não pode mais ser alterada.',
+  });
+}
+
+// A user that does not exist in the caller's tenant is "not found" (nothing about other
+// tenants leaks), as opposed to a user of the tenant that cannot work this delivery.
+export function courierNotFound() {
+  return new NotFoundException({ code: 'COURIER_NOT_FOUND', message: 'Entregador não encontrado.' });
+}
+
+const COURIER_REASON_MESSAGE: Record<CourierIneligibleReason, string> = {
+  INACTIVE: 'Este usuário está inativo e não pode receber entregas.',
+  NOT_COURIER: 'Este usuário não tem o papel de entregador.',
+  NO_BRANCH_ACCESS: 'Este entregador não tem acesso à unidade desta entrega.',
+};
+
+export function courierNotEligible(reason: CourierIneligibleReason) {
+  return new ConflictException({
+    code: 'COURIER_NOT_ELIGIBLE',
+    message: COURIER_REASON_MESSAGE[reason],
+    details: { reason },
+  });
+}
+
+// Once a delivery is delivered or cancelled, who was responsible is history.
+export function deliveryAssignmentLocked() {
+  return new ConflictException({
+    code: 'DELIVERY_ASSIGNMENT_LOCKED',
+    message: 'O entregador de uma entrega concluída ou cancelada não pode mais ser alterado.',
   });
 }

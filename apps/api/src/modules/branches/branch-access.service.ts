@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { Branch } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
+import { hasTenantWideRole } from './tenant-wide-role';
 
 // Single source of truth (fatia 08) for "may this user operate this branch?".
 // The active branch is passed explicitly per request (never trusted, never
@@ -14,7 +15,7 @@ export class BranchAccessService {
   constructor(private readonly prisma: PrismaService) {}
 
   private isTenantWide(user: AuthenticatedRequestUser): boolean {
-    return user.roles.includes('OWNER') || user.roles.includes('ADMIN');
+    return hasTenantWideRole(user.roles);
   }
 
   async assertAccess(user: AuthenticatedRequestUser, branchId: string): Promise<Branch> {

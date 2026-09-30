@@ -1,10 +1,25 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { DeliveryService } from './delivery.service';
 import {
+  AssignCourierDto,
+  CouriersQueryDto,
   DeliverySettingsQueryDto,
   FailDeliveryDto,
   ListDeliveriesQueryDto,
@@ -31,6 +46,14 @@ export class DeliveryController {
   @ApiOperation({ summary: 'Configurações de entrega da unidade (habilitada, taxa, pedido mínimo)' })
   getSettings(@CurrentUser() user: AuthenticatedRequestUser, @Query() query: DeliverySettingsQueryDto) {
     return this.delivery.getSettings(user, query);
+  }
+
+  // Static route, declared before the ':id' ones.
+  @Get('couriers')
+  @RequirePermissions('delivery.assign')
+  @ApiOperation({ summary: 'Entregadores elegíveis para a unidade (ativos, papel DELIVERY, com acesso à unidade)' })
+  couriers(@CurrentUser() user: AuthenticatedRequestUser, @Query() query: CouriersQueryDto) {
+    return this.delivery.listCouriers(user, query);
   }
 
   @Put('settings')
@@ -74,6 +97,32 @@ export class DeliveryController {
   @ApiOperation({ summary: 'Solicita nova tentativa para uma entrega que falhou (falhou -> pendente); idempotente' })
   redeliver(@CurrentUser() user: AuthenticatedRequestUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.delivery.redeliver(user, id);
+  }
+
+  @Get(':id/history')
+  @RequirePermissions('delivery.read')
+  @ApiOperation({ summary: 'Histórico operacional da entrega (tentativas, falhas, atribuições), reconstruído da auditoria' })
+  history(@CurrentUser() user: AuthenticatedRequestUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.delivery.history(user, id);
+  }
+
+  @Put(':id/courier')
+  @RequirePermissions('delivery.assign')
+  @ApiOperation({ summary: 'Atribui ou reatribui o entregador da entrega; idempotente' })
+  assignCourier(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AssignCourierDto,
+  ) {
+    return this.delivery.assignCourier(user, id, dto.courierUserId);
+  }
+
+  @Delete(':id/courier')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('delivery.assign')
+  @ApiOperation({ summary: 'Remove o entregador da entrega; idempotente' })
+  unassignCourier(@CurrentUser() user: AuthenticatedRequestUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.delivery.unassignCourier(user, id);
   }
 
   @Patch(':id/notes')

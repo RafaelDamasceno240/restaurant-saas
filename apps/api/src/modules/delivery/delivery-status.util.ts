@@ -26,3 +26,8 @@ export function isValidDeliveryTransition(from: DeliveryStatus, to: DeliveryStat
 export function canEditDeliveryNotes(status: DeliveryStatus): boolean {
   return status !== 'DELIVERED' && status !== 'CANCELLED';
 }
+
+// The courier can be assigned, changed or removed while the delivery is alive.
+export function canAssignCourier(status: DeliveryStatus): boolean {
+  return status !== 'DELIVERED' && status !== 'CANCELLED';
+}

@@ -27,7 +27,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
-| Delivery | PARCIAL | fatias 1 e 2 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem atribuição de entregador, mapas/GPS, taxa por zona e sem entrega pelo PDV |
+| Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
 | CRM | NÃO IMPLEMENTADO | sem modelo de cliente |
 | Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
@@ -2504,3 +2504,4 @@ Página de perfil de estabelecimento, somente frontend. Detalhes em `docs/RESTAU
 - Sem verificação visual no navegador nesta rodada; a validação se apoia em typecheck, lint e build.
 - Persistência do perfil (telefone, e-mail, endereço, horários, redes sociais) exige backend novo, fora do escopo.
 
+- **Fatia 3 do Delivery (2026-09-30):** atribuição de entregador interno e histórico operacional de tentativas. `deliveries.courierUserId`/`assignedAt` (migration `20260930140000_delivery_courier`, FK `RESTRICT`, sem backfill); entregador = usuário ativo do tenant com papel `DELIVERY` e acesso à unidade. Endpoints `PUT/DELETE /v1/delivery/:id/courier`, `GET /v1/delivery/couriers`, `GET /v1/delivery/:id/history` e filtro `courier=me|none|<id>` na listagem. Nova permissão `delivery.assign` (OWNER, ADMIN, MANAGER; **não** o DELIVERY): rode `pnpm db:seed` e faça login de novo. Auditoria transacional `DELIVERY_ASSIGNED/REASSIGNED/UNASSIGNED`. O histórico sai do `AuditLog` (sem tabela nova). A atribuição é organizacional e não muda quem pode operar a entrega. Detalhes em `docs/DELIVERY.md`.

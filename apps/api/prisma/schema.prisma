@@ -135,6 +135,7 @@ model User {
   auditLogs            AuditLog[]
   dispatchedDeliveries Delivery[]            @relation("DeliveryDispatchedBy")
   completedDeliveries  Delivery[]            @relation("DeliveryCompletedBy")
+  courierDeliveries    Delivery[]            @relation("DeliveryCourier")
   openedCashSessions   CashRegisterSession[] @relation("CashSessionOpenedBy")
   closedCashSessions   CashRegisterSession[] @relation("CashSessionClosedBy")
   cashMovements        CashMovement[]
@@ -415,6 +416,14 @@ model Delivery {
   // in the audit log (DELIVERY_DISPATCHED / DELIVERY_FAILED / DELIVERY_REDELIVERY_REQUESTED).
   attemptCount Int @default(0)
 
+  // Internal courier (a User with the DELIVERY role) responsible for this delivery.
+  // Organizational only: it does not gate who may operate the delivery. Kept across
+  // failure, redelivery, completion and cancellation; only assign/unassign change it
+  // (and only while the delivery is alive). Who was assigned at each attempt is in the
+  // audit log.
+  courierUserId String?
+  assignedAt    DateTime?
+
   dispatchedAt       DateTime?
   dispatchedByUserId String?
   deliveredAt        DateTime?
@@ -433,9 +442,11 @@ model Delivery {
   order        Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
   dispatchedBy User?  @relation("DeliveryDispatchedBy", fields: [dispatchedByUserId], references: [id], onDelete: Restrict)
   completedBy  User?  @relation("DeliveryCompletedBy", fields: [completedByUserId], references: [id], onDelete: Restrict)
+  courier      User?  @relation("DeliveryCourier", fields: [courierUserId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, branchId, status])
   @@index([tenantId, createdAt])
+  @@index([tenantId, courierUserId])
   @@map("deliveries")
 }
 

@@ -1,5 +1,5 @@
 import type { BadgeTone } from '@/components/ds/Badge';
-import type { DeliveryAddress, DeliveryItem, DeliveryStatus } from './delivery-api';
+import type { DeliveryAddress, DeliveryHistoryEvent, DeliveryHistoryKind, DeliveryItem, DeliveryStatus } from './delivery-api';
 
 export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
   PENDING: 'Pendente',
@@ -59,4 +59,50 @@ export function attemptLabel(item: Pick<DeliveryItem, 'status' | 'attemptCount'>
 export function isValidFailureReason(reason: string): boolean {
   const length = reason.trim().length;
   return length >= MIN_FAILURE_REASON && length <= MAX_DELIVERY_TEXT;
+}
+
+const MANAGEMENT_ROLES = ['OWNER', 'ADMIN', 'MANAGER'];
+
+// A courier who does not manage the unit starts on their own deliveries; management starts
+// on everything. Only a default: the operator can change the filter, and the API is the
+// one that decides what each role may see and do.
+export function defaultCourierFilter(roles: readonly string[]): string {
+  return roles.includes('DELIVERY') && !roles.some((role) => MANAGEMENT_ROLES.includes(role)) ? 'me' : '';
+}
+
+export const HISTORY_KIND_LABEL: Record<DeliveryHistoryKind, string> = {
+  CREATED: 'Pedido de entrega criado',
+  ASSIGNED: 'Entregador atribuído',
+  REASSIGNED: 'Entregador reatribuído',
+  UNASSIGNED: 'Entregador removido',
+  DISPATCHED: 'Saiu para entrega',
+  FAILED: 'Entrega falhou',
+  REDELIVERY_REQUESTED: 'Reentrega solicitada',
+  COMPLETED: 'Entrega concluída',
+  NOTES_UPDATED: 'Observação da entrega alterada',
+  CANCELLED: 'Entrega cancelada',
+};
+
+const UNKNOWN_PERSON = 'usuário removido';
+
+// One line of detail for a history event ("João", "Maria → João", the failure reason).
+export function historyDetail(event: Pick<DeliveryHistoryEvent, 'kind' | 'reason' | 'courier' | 'previousCourier'>): string | null {
+  const name = (person: DeliveryHistoryEvent['courier']) => (person ? (person.name ?? UNKNOWN_PERSON) : null);
+  switch (event.kind) {
+    case 'ASSIGNED':
+      return name(event.courier);
+    case 'REASSIGNED':
+      return `${name(event.previousCourier) ?? '—'} → ${name(event.courier) ?? '—'}`;
+    case 'UNASSIGNED':
+      return name(event.previousCourier);
+    case 'FAILED':
+      return event.reason;
+    default:
+      return null;
+  }
+}
+
+// "1ª tentativa" shown on the events that belong to an attempt.
+export function historyAttempt(event: Pick<DeliveryHistoryEvent, 'attempt'>): string | null {
+  return event.attempt ? `${event.attempt}ª tentativa` : null;
 }

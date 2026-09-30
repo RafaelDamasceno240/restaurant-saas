@@ -6,15 +6,21 @@ import { BranchAccessService } from '../branches/branch-access.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { Tx } from '../inventory/stock-ledger.service';
 import {
+  courierNotEligible,
+  courierNotFound,
+  deliveryAssignmentLocked,
   deliveryNotesLocked,
   deliveryNotFound,
   deliveryStateInconsistent,
   invalidDeliveryTransition,
   orderNotReadyForDispatch,
 } from './delivery-errors';
+import { courierIneligibleReason, courierWhere } from './delivery-courier';
+import { HISTORY_ACTIONS, buildHistory } from './delivery-history';
 import { createdAtRange, escapeLike, normalizeNotes } from './delivery-input';
-import { canEditDeliveryNotes, isValidDeliveryTransition } from './delivery-status.util';
+import { canAssignCourier, canEditDeliveryNotes, isValidDeliveryTransition } from './delivery-status.util';
 import {
+  CouriersQueryDto,
   DeliverySettingsQueryDto,
   ListDeliveriesQueryDto,
   UpdateDeliveryNotesDto,
@@ -25,6 +31,7 @@ const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 const DEFAULT_PAGE_SIZE = 20;
 
 const listInclude = {
+  courier: { select: { id: true, name: true } },
   order: {
     select: {
       orderNumber: true,
@@ -59,7 +66,11 @@ interface LockedOrder {
 interface LockedDelivery {
   status: DeliveryStatus;
   attemptCount: number;
+  courierUserId: string | null;
 }
+
+const MAX_COURIERS = 200;
+const MAX_HISTORY_EVENTS = 500;
 
 type Step = 'dispatch' | 'complete' | 'fail' | 'redeliver';
 
@@ -107,6 +118,7 @@ export class DeliveryService {
     const base: Prisma.DeliveryWhereInput = {
       tenantId: user.tenantId,
       branchId: query.branchId,
+      ...courierWhere(query.courier, user.userId),
       ...(createdAtRange(query.dateFrom, query.dateTo) ? { createdAt: createdAtRange(query.dateFrom, query.dateTo) } : {}),
       ...(query.orderStatus || search
         ? {
@@ -171,6 +183,159 @@ export class DeliveryService {
 
   redeliver(user: AuthenticatedRequestUser, id: string) {
     return this.transition(user, id, 'redeliver');
+  }
+
+  // Assign / reassign. The client only names the courier: tenant and branch come from the
+  // session and the delivery. Same lock order as every other move (ORDER, then DELIVERY),
+  // state re-read after the locks, eligibility checked INSIDE the transaction so a courier
+  // deactivated or unlinked a moment ago cannot slip through. Same courier = replay.
+  async assignCourier(user: AuthenticatedRequestUser, id: string, courierUserId: string) {
+    const scoped = await this.loadScoped(user, id);
+
+    const replay = await this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOrder(tx, user.tenantId, scoped.orderId);
+      const current = await this.lockDelivery(tx, user.tenantId, id);
+      if (current.courierUserId === courierUserId) return true;
+      if (!canAssignCourier(current.status)) throw deliveryAssignmentLocked();
+      await this.assertEligibleCourier(tx, user.tenantId, courierUserId, scoped.branchId);
+
+      await tx.delivery.update({ where: { id }, data: { courierUserId, assignedAt: new Date() } });
+      await this.audit.recordTx(tx, {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        action: current.courierUserId ? 'DELIVERY_REASSIGNED' : 'DELIVERY_ASSIGNED',
+        entity: 'Delivery',
+        entityId: id,
+        beforeData: { courierUserId: current.courierUserId },
+        afterData: {
+          courierUserId,
+          previousCourierUserId: current.courierUserId,
+          status: current.status,
+          orderId: scoped.orderId,
+          orderNumber: order.orderNumber,
+          branchId: scoped.branchId,
+        },
+      });
+      return false;
+    }, TRANSACTION_OPTIONS);
+
+    return { ...(await this.findView(user, id)), idempotentReplay: replay };
+  }
+
+  async unassignCourier(user: AuthenticatedRequestUser, id: string) {
+    const scoped = await this.loadScoped(user, id);
+
+    const replay = await this.prisma.$transaction(async (tx) => {
+      const order = await this.lockOrder(tx, user.tenantId, scoped.orderId);
+      const current = await this.lockDelivery(tx, user.tenantId, id);
+      if (current.courierUserId === null) return true;
+      if (!canAssignCourier(current.status)) throw deliveryAssignmentLocked();
+
+      await tx.delivery.update({ where: { id }, data: { courierUserId: null, assignedAt: null } });
+      await this.audit.recordTx(tx, {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        action: 'DELIVERY_UNASSIGNED',
+        entity: 'Delivery',
+        entityId: id,
+        beforeData: { courierUserId: current.courierUserId },
+        afterData: {
+          courierUserId: null,
+          status: current.status,
+          orderId: scoped.orderId,
+          orderNumber: order.orderNumber,
+          branchId: scoped.branchId,
+        },
+      });
+      return false;
+    }, TRANSACTION_OPTIONS);
+
+    return { ...(await this.findView(user, id)), idempotentReplay: replay };
+  }
+
+  // Users that can be offered as courier for a branch: same tenant, ACTIVE, role DELIVERY,
+  // linked to the branch (OWNER/ADMIN holding DELIVERY are tenant-wide).
+  async listCouriers(user: AuthenticatedRequestUser, query: CouriersQueryDto) {
+    await this.branchAccess.assertAccess(user, query.branchId);
+    const users = await this.prisma.user.findMany({
+      where: {
+        tenantId: user.tenantId,
+        status: 'ACTIVE',
+        userRoles: { some: { tenantId: user.tenantId, role: { name: 'DELIVERY' } } },
+        OR: [
+          { userBranches: { some: { branchId: query.branchId } } },
+          { userRoles: { some: { tenantId: user.tenantId, role: { name: { in: ['OWNER', 'ADMIN'] } } } } },
+        ],
+      },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      take: MAX_COURIERS,
+      select: { id: true, name: true },
+    });
+    return { data: users };
+  }
+
+  // Operational history rebuilt from the audit log: no table of its own. A cancellation is
+  // recorded against the ORDER, so that one event is read through the order id.
+  async history(user: AuthenticatedRequestUser, id: string) {
+    const scoped = await this.loadScoped(user, id);
+    const delivery = await this.prisma.delivery.findFirstOrThrow({
+      where: { id, tenantId: user.tenantId },
+      select: { createdAt: true },
+    });
+    const rows = await this.prisma.auditLog.findMany({
+      where: {
+        tenantId: user.tenantId,
+        action: { in: [...HISTORY_ACTIONS] },
+        OR: [
+          { entity: 'Delivery', entityId: id },
+          { entity: 'Order', entityId: scoped.orderId, action: 'DELIVERY_CANCELLED' },
+        ],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: MAX_HISTORY_EVENTS,
+      select: { id: true, action: true, createdAt: true, userId: true, beforeData: true, afterData: true },
+    });
+
+    const events = buildHistory(
+      delivery.createdAt,
+      rows.map((r) => ({
+        id: r.id,
+        action: r.action,
+        createdAt: r.createdAt,
+        actor: r.userId ? { id: r.userId, name: '' } : null,
+        beforeData: r.beforeData,
+        afterData: r.afterData,
+      })),
+    );
+
+    // Resolve every referenced user (actors and couriers) with ONE query, inside the tenant.
+    const ids = new Set<string>();
+    for (const e of events) {
+      if (e.actor) ids.add(e.actor.id);
+      if (e.courierUserId) ids.add(e.courierUserId);
+      if (e.previousCourierUserId) ids.add(e.previousCourierUserId);
+    }
+    const people = ids.size
+      ? await this.prisma.user.findMany({
+          where: { id: { in: [...ids] }, tenantId: user.tenantId },
+          select: { id: true, name: true },
+        })
+      : [];
+    const nameOf = new Map(people.map((p) => [p.id, p.name]));
+    const person = (pid: string | null) => (pid ? { id: pid, name: nameOf.get(pid) ?? null } : null);
+
+    return {
+      data: events.map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        at: e.at,
+        attempt: e.attempt,
+        reason: e.reason,
+        actor: e.actor ? person(e.actor.id) : null,
+        courier: person(e.courierUserId),
+        previousCourier: person(e.previousCourierUserId),
+      })),
+    };
   }
 
   // Delivery-specific observation, separate from Order.notes. Same-value writes are a
@@ -302,6 +467,7 @@ export class DeliveryService {
           orderId: scoped.orderId,
           orderNumber: order.orderNumber,
           attempt: step === 'dispatch' ? current.attemptCount + 1 : current.attemptCount,
+          courierUserId: current.courierUserId,
           ...(reason ? { reason } : {}),
         },
       });
@@ -322,6 +488,27 @@ export class DeliveryService {
     return { ...(await this.findView(user, id)), idempotentReplay: replay };
   }
 
+  private async assertEligibleCourier(tx: Tx, tenantId: string, courierUserId: string, branchId: string) {
+    const candidate = await tx.user.findFirst({
+      where: { id: courierUserId, tenantId },
+      select: {
+        status: true,
+        userRoles: { select: { role: { select: { name: true } } } },
+        userBranches: { select: { branchId: true } },
+      },
+    });
+    if (!candidate) throw courierNotFound();
+    const reason = courierIneligibleReason(
+      {
+        status: candidate.status,
+        roles: candidate.userRoles.map((r) => r.role.name),
+        branchIds: candidate.userBranches.map((b) => b.branchId),
+      },
+      branchId,
+    );
+    if (reason) throw courierNotEligible(reason);
+  }
+
   private async findView(user: AuthenticatedRequestUser, id: string) {
     const fresh = await this.prisma.delivery.findFirstOrThrow({
       where: { id, tenantId: user.tenantId },
@@ -339,7 +526,7 @@ export class DeliveryService {
 
   private async lockDelivery(tx: Tx, tenantId: string, id: string): Promise<LockedDelivery> {
     const rows = await tx.$queryRaw<LockedDelivery[]>`
-      SELECT "status", "attemptCount" FROM "deliveries" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      SELECT "status", "attemptCount", "courierUserId" FROM "deliveries" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
     if (rows.length === 0) throw deliveryNotFound();
     return rows[0];
   }
@@ -404,6 +591,9 @@ export class DeliveryService {
       canFail: row.status === 'OUT_FOR_DELIVERY',
       canRedeliver: row.status === 'FAILED',
       canEditNotes: canEditDeliveryNotes(row.status),
+      courier: row.courier,
+      assignedAt: row.assignedAt,
+      canAssign: canAssignCourier(row.status),
       orderCreatedAt: order.createdAt,
       dispatchedAt: row.dispatchedAt,
       deliveredAt: row.deliveredAt,

@@ -52,6 +52,7 @@ const PERMISSIONS: string[] = [
   'delivery.read',
   'delivery.update',
   'delivery.configure',
+  'delivery.assign',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -100,6 +101,7 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'delivery.read',
     'delivery.update',
     'delivery.configure',
+    'delivery.assign',
   ],
   CASHIER: [
     'orders.read',

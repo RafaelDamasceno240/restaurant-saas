@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { DeliveryStatus, OrderStatus } from '@prisma/client';
+import { COURIER_FILTER_PATTERN } from '../delivery-courier';
 import {
   IsBoolean,
   IsDateString,
@@ -12,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  Matches,
   MinLength,
   ValidateIf,
 } from 'class-validator';
@@ -36,6 +38,11 @@ export class ListDeliveriesQueryDto {
   @IsString()
   @MaxLength(120)
   search?: string;
+
+  @ApiPropertyOptional({ description: "'me' (o próprio usuário), 'none' (sem entregador) ou o id de um entregador" })
+  @IsOptional()
+  @Matches(COURIER_FILTER_PATTERN, { message: 'courier deve ser "me", "none" ou o id de um entregador.' })
+  courier?: string;
 
   @ApiPropertyOptional({ example: '2026-10-01T03:00:00.000Z', description: 'Início (inclusive) da data de criação' })
   @IsOptional()
@@ -98,4 +105,16 @@ export class UpdateDeliveryNotesDto {
   @IsString()
   @MaxLength(MAX_DELIVERY_TEXT)
   notes!: string | null;
+}
+
+export class CouriersQueryDto {
+  @ApiProperty() @IsUUID() branchId!: string;
+}
+
+// The courier is the ONLY thing the client chooses: tenant and branch come from the
+// authenticated session and from the delivery itself, never from the body.
+export class AssignCourierDto {
+  @ApiProperty({ description: 'Id do usuário (papel DELIVERY, ativo, com acesso à unidade da entrega)' })
+  @IsUUID()
+  courierUserId!: string;
 }

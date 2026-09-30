@@ -2,8 +2,12 @@ import {
   addressSummary,
   attemptLabel,
   centsToInput,
+  defaultCourierFilter,
   DELIVERY_STATUS_LABEL,
   DELIVERY_TABS,
+  historyAttempt,
+  historyDetail,
+  HISTORY_KIND_LABEL,
   isValidFailureReason,
   localDayRange,
 } from './delivery-logic';
@@ -111,5 +115,42 @@ describe('isValidFailureReason', () => {
     expect(isValidFailureReason('abc')).toBe(true);
     expect(isValidFailureReason(`  ${'x'.repeat(300)}  `)).toBe(true);
     expect(isValidFailureReason('x'.repeat(301))).toBe(false);
+  });
+});
+
+describe('defaultCourierFilter', () => {
+  it('starts a courier on their own deliveries and management on everything', () => {
+    expect(defaultCourierFilter(['DELIVERY'])).toBe('me');
+    expect(defaultCourierFilter(['MANAGER'])).toBe('');
+    expect(defaultCourierFilter(['ADMIN', 'DELIVERY'])).toBe('');
+    expect(defaultCourierFilter(['OWNER'])).toBe('');
+    expect(defaultCourierFilter([])).toBe('');
+  });
+});
+
+describe('history presentation', () => {
+  const ana = { id: '1', name: 'Ana' };
+  const bia = { id: '2', name: 'Bia' };
+
+  it('labels every kind', () => {
+    expect(HISTORY_KIND_LABEL.CREATED).toBe('Pedido de entrega criado');
+    expect(Object.keys(HISTORY_KIND_LABEL)).toHaveLength(10);
+  });
+
+  it('describes assignments and failures', () => {
+    expect(historyDetail({ kind: 'ASSIGNED', reason: null, courier: ana, previousCourier: null })).toBe('Ana');
+    expect(historyDetail({ kind: 'REASSIGNED', reason: null, courier: bia, previousCourier: ana })).toBe('Ana → Bia');
+    expect(historyDetail({ kind: 'UNASSIGNED', reason: null, courier: null, previousCourier: ana })).toBe('Ana');
+    expect(historyDetail({ kind: 'FAILED', reason: 'Cliente ausente', courier: null, previousCourier: null })).toBe('Cliente ausente');
+    expect(historyDetail({ kind: 'COMPLETED', reason: null, courier: null, previousCourier: null })).toBeNull();
+  });
+
+  it('survives a user that no longer resolves', () => {
+    expect(historyDetail({ kind: 'ASSIGNED', reason: null, courier: { id: '9', name: null }, previousCourier: null })).toBe('usuário removido');
+  });
+
+  it('numbers attempts only when there is one', () => {
+    expect(historyAttempt({ attempt: 2 })).toBe('2ª tentativa');
+    expect(historyAttempt({ attempt: null })).toBeNull();
   });
 });
