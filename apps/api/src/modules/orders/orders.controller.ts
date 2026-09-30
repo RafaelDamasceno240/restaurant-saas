@@ -17,14 +17,14 @@ export class OrdersController {
   @RequirePermissions('orders.read')
   @ApiOperation({ summary: 'Lista pedidos do tenant autenticado (paginado, filtrável por status)' })
   findAll(@CurrentUser() user: AuthenticatedRequestUser, @Query() query: ListOrdersQueryDto) {
-    return this.ordersService.findAllForTenant(user.tenantId, query);
+    return this.ordersService.findAllForUser(user, query);
   }
 
   @Get(':id')
   @RequirePermissions('orders.read')
   @ApiOperation({ summary: 'Detalhe de um pedido — 404 se pertencer a outro tenant' })
   findOne(@CurrentUser() user: AuthenticatedRequestUser, @Param('id') id: string) {
-    return this.ordersService.findOneForTenant(user.tenantId, id);
+    return this.ordersService.findOneForUser(user, id);
   }
 
   @Patch(':id/status')

@@ -63,7 +63,7 @@ continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 
 ## Modelos adicionados depois da Fase 01
 
-Existem no schema atual (5 migrations em `prisma/migrations`):
+Existem no schema atual (6 migrations em `prisma/migrations`):
 
 - **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
 - **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
@@ -73,9 +73,11 @@ Existem no schema atual (5 migrations em `prisma/migrations`):
 
 Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`.
 
-Dois índices/triggers ficam fora das migrations e dependem de scripts manuais
-em `prisma/sql/` (`pnpm db:constraints`, `pnpm db:tabs-constraints`): um caixa
-`OPEN` por unidade, `cash_movements` imutável e uma comanda `OPEN` por mesa.
+Os índices parciais (um caixa `OPEN` por unidade, uma comanda `OPEN` por mesa)
+e o trigger que torna `cash_movements` imutável estão na migration
+`20260930000000_partial_indexes_and_cash_immutability`. Os scripts em
+`prisma/sql/` (`pnpm db:constraints`, `pnpm db:tabs-constraints`) continuam
+válidos e idempotentes.
 
 ## O que NÃO existe
 

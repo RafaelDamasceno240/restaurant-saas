@@ -79,9 +79,10 @@ pnpm db:constraints # (fatia 08) índice parcial + trigger de imutabilidade do c
 pnpm db:tabs-constraints # (fatia 09) índice parcial de uma comanda aberta por mesa — rodar após db:migrate
 ```
 
-`db:constraints` e `db:tabs-constraints` NÃO fazem parte das migrations do
-Prisma: `prisma migrate deploy` sozinho não cria esses índices/triggers.
-Rode-os manualmente em todo ambiente novo.
+Os índices parciais e o trigger do caixa agora também estão na migration
+`20260930000000_partial_indexes_and_cash_immutability`, então `prisma migrate
+deploy` já os cria. Os scripts `db:constraints` e `db:tabs-constraints`
+continuam disponíveis e idempotentes.
 
 ## Executando
 

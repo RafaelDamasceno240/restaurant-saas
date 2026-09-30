@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { fromCents } from '../../common/util/money.util';
+import { isTenantBlocked } from '../../common/util/tenant-status.util';
 import { OrderCreationService, OrderWithItems } from '../order-creation/order-creation.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -24,7 +25,7 @@ export class PublicOrdersService {
   // comment for why this was extracted.
   async createOrder(dto: CreateOrderDto): Promise<OrderResponseDto> {
     const tenant = await this.prisma.tenant.findUnique({ where: { slug: dto.restaurantSlug } });
-    if (!tenant) {
+    if (!tenant || isTenantBlocked(tenant.status)) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Restaurante não encontrado.' });
     }
 
@@ -42,6 +43,7 @@ export class PublicOrdersService {
       address: dto.address,
       paymentMethod: dto.paymentMethod,
       notes: dto.notes,
+      idempotencyKey: dto.idempotencyKey,
     });
 
     return this.toDto(order);
@@ -54,7 +56,7 @@ export class PublicOrdersService {
   // full OrderResponseDto — see the comment on that class for why.
   async findPublicOrder(slug: string, orderId: string): Promise<PublicOrderConfirmationDto> {
     const tenant = await this.prisma.tenant.findUnique({ where: { slug } });
-    if (!tenant) {
+    if (!tenant || isTenantBlocked(tenant.status)) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Restaurante não encontrado.' });
     }
 

@@ -11,6 +11,7 @@ import { fromCents } from '../../common/util/money.util';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { isValidOrderStatusTransition } from './order-status.util';
 import { InventoryService } from '../inventory/inventory.service';
+import { BranchAccessService } from '../branches/branch-access.service';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { OrderDetailDto, OrderListItemDto, OrderListResponseDto } from './dto/order-admin-response.dto';
@@ -26,18 +27,31 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
+    private readonly branchAccess: BranchAccessService,
   ) {}
 
   // Every query below is scoped by `tenantId` taken from the caller
   // (the controller passes it from @CurrentUser(), i.e. the JWT) — never
   // from a query param, body field, or route param. See docs/multi-tenancy.md.
-  async findAllForTenant(tenantId: string, query: ListOrdersQueryDto): Promise<OrderListResponseDto> {
+  async findAllForUser(user: AuthenticatedRequestUser, query: ListOrdersQueryDto): Promise<OrderListResponseDto> {
+    const tenantId = user.tenantId;
+    const allowedBranchIds = await this.branchAccess.accessibleBranchIds(user);
+    if (query.branchId && allowedBranchIds && !allowedBranchIds.includes(query.branchId)) {
+      throw new ForbiddenException({
+        code: 'BRANCH_ACCESS_DENIED',
+        message: 'Você não tem acesso a esta unidade.',
+      });
+    }
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
     const where: Prisma.OrderWhereInput = {
       tenantId,
       ...(query.status ? { status: query.status } : {}),
-      ...(query.branchId ? { branchId: query.branchId } : {}),
+      ...(query.branchId
+        ? { branchId: query.branchId }
+        : allowedBranchIds
+          ? { branchId: { in: allowedBranchIds } }
+          : {}),
     };
 
     const [total, orders] = await this.prisma.$transaction([
@@ -55,6 +69,15 @@ export class OrdersService {
       data: orders.map((o) => this.toListItemDto(o)),
       meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
     };
+  }
+
+  async findOneForUser(user: AuthenticatedRequestUser, id: string): Promise<OrderDetailDto> {
+    const detail = await this.findOneForTenant(user.tenantId, id);
+    const allowedBranchIds = await this.branchAccess.accessibleBranchIds(user);
+    if (allowedBranchIds && !allowedBranchIds.includes(detail.branchId)) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
+    }
+    return detail;
   }
 
   async findOneForTenant(tenantId: string, id: string): Promise<OrderDetailDto> {
@@ -92,12 +115,13 @@ export class OrdersService {
     // stock a second time. If consumption fails (INSUFFICIENT_STOCK) the
     // status change rolls back with it — never CONFIRMED without the stock
     // movement, never a stock movement without CONFIRMED.
+    const allowedBranchIds = await this.branchAccess.accessibleBranchIds(actor);
     let result: { before: OrderStatus; movements: StockMovement[] };
     try {
       result = await this.prisma.$transaction(async (tx) => {
         const rows = await tx.$queryRaw<{ status: OrderStatus; branchId: string }[]>`
           SELECT "status", "branchId" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
-        if (rows.length === 0) {
+        if (rows.length === 0 || (allowedBranchIds && !allowedBranchIds.includes(rows[0].branchId))) {
           throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
         }
         const before = rows[0].status;

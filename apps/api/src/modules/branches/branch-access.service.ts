@@ -40,6 +40,15 @@ export class BranchAccessService {
     return branch;
   }
 
+  async accessibleBranchIds(user: AuthenticatedRequestUser): Promise<string[] | null> {
+    if (this.isTenantWide(user)) return null;
+    const links = await this.prisma.userBranch.findMany({
+      where: { userId: user.userId, branch: { tenantId: user.tenantId, status: 'ACTIVE' } },
+      select: { branchId: true },
+    });
+    return links.map((link) => link.branchId);
+  }
+
   listAccessible(user: AuthenticatedRequestUser) {
     return this.prisma.branch.findMany({
       where: {

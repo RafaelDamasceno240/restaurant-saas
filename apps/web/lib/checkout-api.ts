@@ -25,6 +25,7 @@ export interface CreateOrderInput {
   address?: CheckoutAddressInput;
   paymentMethod: PaymentMethod;
   notes?: string;
+  idempotencyKey?: string;
 }
 
 export interface OrderItemResponse {

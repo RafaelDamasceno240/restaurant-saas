@@ -14,6 +14,7 @@ export interface CreatePosOrderInput {
   customerName?: string;
   customerPhone?: string;
   paymentMethod: PaymentMethod;
+  idempotencyKey?: string;
 }
 
 export function createPosOrder(

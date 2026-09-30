@@ -42,6 +42,15 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+let refreshInFlight: Promise<AuthResponse> | null = null;
+
+function refreshSession(): Promise<AuthResponse> {
+  refreshInFlight ??= apiFetch<AuthResponse>('/auth/refresh', { method: 'POST' }).finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
 interface AuthResponse {
   accessToken: string;
   expiresIn: number;
@@ -77,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const refreshed = await apiFetch<AuthResponse>('/auth/refresh', { method: 'POST' });
+        const refreshed = await refreshSession();
         setAccessToken(refreshed.accessToken);
         await fetchMe(refreshed.accessToken);
       } catch {

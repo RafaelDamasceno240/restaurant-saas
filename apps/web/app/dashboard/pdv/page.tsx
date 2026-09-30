@@ -18,6 +18,7 @@ import {
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { categoriesApi, productsApi } from '@/lib/cardapio-api';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { createPosOrder } from '@/lib/pos-api';
 import { useActiveBranch } from '@/lib/use-active-branch';
 import { AdminOrderDetail } from '@/lib/orders-api';
@@ -63,6 +64,7 @@ export default function PdvPage() {
   const { branchId } = useActiveBranch();
   const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
+  const saleKeyRef = useRef<string | null>(null);
 
   // PDV state is deliberately its own — NOT the public CartContext, NOT its
   // localStorage key. A sale here always starts empty and never persists
@@ -105,6 +107,7 @@ export default function PdvPage() {
   }
 
   function resetSale() {
+    saleKeyRef.current = null;
     setCart([]);
     setSearch('');
     setCategoryId(null);
@@ -128,17 +131,21 @@ export default function PdvPage() {
     setError(null);
     setIsSubmitting(true);
     try {
+      saleKeyRef.current ??= createIdempotencyKey();
       const order = await createPosOrder(accessToken as string, {
         branchId,
         items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity })),
         customerName: customerName.trim() || undefined,
         customerPhone: customerPhone.trim() || undefined,
         paymentMethod,
+        idempotencyKey: saleKeyRef.current,
       });
+      saleKeyRef.current = null;
       setConfirmation(order);
       // A CASH sale adds a SALE movement to the open cash session.
       queryClient.invalidateQueries({ queryKey: ['cash-current'] });
     } catch (err) {
+      if (err instanceof ApiError) saleKeyRef.current = null;
       setError(
         err instanceof ApiError
           ? err.code === 'CASH_REGISTER_NOT_OPEN'

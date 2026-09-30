@@ -3,9 +3,10 @@ import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
 import { AuditModule } from '../audit/audit.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { BranchesModule } from '../branches/branches.module';
 
 @Module({
-  imports: [AuditModule, InventoryModule],
+  imports: [AuditModule, InventoryModule, BranchesModule],
   controllers: [OrdersController],
   providers: [OrdersService],
   // Exported in fatia 07 so PosModule can reuse findOneForTenant() to build

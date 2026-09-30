@@ -9,6 +9,7 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
@@ -19,6 +20,8 @@ import { AuthenticatedRequestUser } from '../../common/types/authenticated-reque
 import { AuthService, AuthResult, RequestMeta } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+
+const authRateLimit = (): number => Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE) || 10;
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
 // Path MUST be '/' — not '/auth'. Two independent reasons:
@@ -44,6 +47,7 @@ export class AuthController {
   ) {}
 
   @Public()
+  @Throttle({ default: { limit: authRateLimit, ttl: 60_000 } })
   @Post('register')
   @ApiOperation({ summary: 'Cria Tenant + Branch + User(OWNER) e autentica' })
   async register(
@@ -57,6 +61,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: authRateLimit, ttl: 60_000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Autentica um usuário existente' })
@@ -71,6 +76,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotaciona o refresh token (lido do cookie httpOnly)' })

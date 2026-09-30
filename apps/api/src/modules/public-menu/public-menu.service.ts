@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { fromCents } from '../../common/util/money.util';
+import { isTenantBlocked } from '../../common/util/tenant-status.util';
 import { PublicMenuResponseDto } from './dto/public-menu-response.dto';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class PublicMenuService {
       select: {
         name: true,
         slug: true,
+        status: true,
         categories: {
           where: { active: true },
           orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
@@ -42,7 +44,7 @@ export class PublicMenuService {
       },
     });
 
-    if (!tenant) {
+    if (!tenant || isTenantBlocked(tenant.status)) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Restaurante não encontrado.' });
     }
 

@@ -13,7 +13,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 |---|---|---|
 | Auth/RBAC | IMPLEMENTADO | `auth.e2e-spec`, guards globais, refresh com rotação |
 | Multi-tenancy | IMPLEMENTADO | `tenant-isolation.e2e-spec`; `tenantId` sempre vem do JWT |
-| Unidades (branch access) | PARCIAL | `BranchAccessService` usado em caixa, estoque, PDV, mesas e comandas; ausente em `orders` |
+| Unidades (branch access) | IMPLEMENTADO | `BranchAccessService` usado em caixa, estoque, PDV, mesas, comandas e pedidos |
 | Cardápio | IMPLEMENTADO | `menu`/`public-menu` e2e |
 | Carrinho | IMPLEMENTADO | `cart-logic` (testes web) |
 | Pedidos | IMPLEMENTADO | `public-orders`, `orders-admin` e2e |
@@ -31,7 +31,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
 | NFC-e | NÃO IMPLEMENTADO | |
-| SaaS Billing | NÃO IMPLEMENTADO | `Tenant.status` existe mas nunca é verificado |
+| SaaS Billing | NÃO IMPLEMENTADO | sem cobrança; `Tenant.status` já bloqueia login e cardápio público quando SUSPENDED/CANCELLED |
 
 ### Validações executadas nesta auditoria (sem alterar código)
 
@@ -41,22 +41,26 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | `pnpm lint` | PASSOU |
 | `pnpm test` | PASSOU (api 60/60, web 40/40) |
 | `pnpm build` | PASSOU (api + web) |
-| `pnpm --filter api test:e2e` | PASSOU (13 suítes, 144/144), em banco descartável recriado com `migrate deploy` + constraints + seed |
+| `pnpm --filter api test:e2e` | PASSOU (13 suítes, 144/144) na auditoria; 14 suítes, 161/161 após as correções, em banco descartável recriado com `migrate deploy` + seed |
 | `prisma migrate status` / `migrate diff` | banco de desenvolvimento em sincronia; diff schema × banco vazio |
 
-### Problemas concretos encontrados (não corrigidos)
+### Problemas da auditoria e correções (2026-09-30)
 
-- **Unidade em pedidos:** `GET /orders`, `GET /orders/:id` e `PATCH /orders/:id/status` filtram só por tenant. Um usuário vinculado a uma unidade consegue ler e mudar o status de pedidos de outras unidades do mesmo tenant.
-- **Criação de pedido sem idempotência:** `POST /pos/orders` e `POST /public/orders` não aceitam chave de idempotência; um reenvio duplica pedido, movimento de caixa e baixa de estoque. Só o checkout de comanda é idempotente.
-- **`Tenant.status` ignorado:** tenant SUSPENDED ou CANCELLED continua logando e operando.
-- **Índices fora das migrations:** o índice de uma sessão de caixa aberta por unidade, o trigger de imutabilidade do caixa e o índice de uma comanda aberta por mesa dependem de scripts manuais; `migrate deploy` sozinho não os cria.
-- **Login sem limite próprio:** só o limite global de 100 requisições por minuto, em memória; o Redis é usado apenas no health check.
-- **Refresh token:** sem detecção de reuso e sem atomicidade entre emitir o novo e revogar o antigo; duas chamadas simultâneas com o mesmo token podem ambas passar.
-- **CORS:** `origin: corsOrigin || true` com `credentials: true` reflete qualquer origem se `CORS_ORIGIN` vier vazio.
-- **Permissões por omissão:** endpoint autenticado sem `@RequirePermissions` fica liberado a qualquer usuário logado (hoje só `/auth/me` e `/branches/accessible`, intencionais).
-- **Moeda na borda:** `CreateProductDto.price` chega em reais (`number`) e é convertido; o resto usa centavos.
-- **Artefatos no git:** `MANIFEST.sha256` está desatualizado (199 entradas, 57 divergentes, 335 arquivos rastreados), `apps/web/tsconfig.tsbuildinfo` é rastreado e muda a cada typecheck, e `doce-logo.png` na raiz duplica `apps/web/public/brand/doce-logo.png`.
-- **Perfil do restaurante:** `/dashboard/restaurante` usa `demoRestaurantProfile` como base para endereço, horários e canais (marcados "Dados demonstrativos" na tela).
+| Problema | Situação |
+|---|---|
+| Pedidos sem checagem de unidade (`GET /orders`, `GET /orders/:id`, `PATCH /orders/:id/status`) | CORRIGIDO: quem não é OWNER/ADMIN só lista, lê e altera pedidos das unidades a que está vinculado; filtro por unidade sem acesso retorna 403 e pedido de outra unidade retorna 404 |
+| `POST /pos/orders` e `POST /public/orders` sem idempotência | CORRIGIDO: campo opcional `idempotencyKey`; a mesma chave devolve o mesmo pedido (inclusive em envios simultâneos) e uma chave reutilizada com outro conteúdo retorna 409. PDV e checkout do site geram a chave por tentativa. Sem chave, o comportamento antigo continua |
+| `Tenant.status` ignorado | CORRIGIDO: SUSPENDED e CANCELLED não fazem login nem refresh, e o cardápio e o checkout públicos respondem 404. Um access token já emitido continua válido até expirar (15 min) |
+| Índices parciais e trigger do caixa fora das migrations | CORRIGIDO: migration `20260930000000_partial_indexes_and_cash_immutability` (idempotente). Em bancos que já rodaram `db:constraints`, basta `prisma migrate deploy` para registrá-la |
+| Login sem limite próprio | CORRIGIDO: login e cadastro limitados a `AUTH_RATE_LIMIT_PER_MINUTE` (padrão 10) por IP e refresh a 30 por minuto. O contador continua em memória (por instância da API), não no Redis |
+| Refresh token sem detecção de reuso e não atômico | CORRIGIDO: o token é reivindicado de forma atômica; reuso depois de 10 s revoga todas as sessões do usuário e gera auditoria. O frontend agora evita duas chamadas simultâneas de refresh |
+| CORS refletia qualquer origem com `CORS_ORIGIN` vazio | CORRIGIDO: sem origem configurada o CORS fica desligado; `CORS_ORIGIN` aceita várias origens separadas por vírgula |
+| Endpoint autenticado sem `@RequirePermissions` fica liberado | NÃO ALTERADO: hoje só `/auth/me` e `/branches/accessible`, intencionais |
+| `CreateProductDto.price` em reais | NÃO ALTERADO: mudar exigiria alterar o contrato da API e o frontend |
+| `MANIFEST.sha256`, `tsbuildinfo` rastreado, logo duplicado | NÃO ALTERADO: não é problema de segurança |
+| Perfil do restaurante usa dados demonstrativos como base | NÃO ALTERADO: comportamento intencional, marcado na tela |
+
+Testes dos itens corrigidos: `apps/api/test/security-hardening.e2e-spec.ts` (15 casos). Dois testes existentes (`kds` e `orders-admin`) passaram a vincular o funcionário à unidade, porque agora isso é exigido.
 
 ### Local x GitHub (origin/master)
 

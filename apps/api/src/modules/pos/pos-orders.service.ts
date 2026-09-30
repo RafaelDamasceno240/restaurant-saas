@@ -33,6 +33,7 @@ export class PosOrdersService {
       address: null,
       paymentMethod: dto.paymentMethod,
       notes: null,
+      idempotencyKey: dto.idempotencyKey,
     });
 
     return this.ordersService.findOneForTenant(user.tenantId, order.id);

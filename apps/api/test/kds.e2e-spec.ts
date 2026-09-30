@@ -91,6 +91,10 @@ describe('KDS (kitchen role access) (e2e)', () => {
       data: { tenantId, name: `Staff ${roleName}`, email, passwordHash, status: 'ACTIVE' },
     });
     await prisma.userRole.create({ data: { userId: user.id, roleId: role.id, tenantId } });
+    const branches = await prisma.branch.findMany({ where: { tenantId }, select: { id: true } });
+    for (const branch of branches) {
+      await prisma.userBranch.create({ data: { userId: user.id, branchId: branch.id } });
+    }
     const login = await request(server).post('/v1/auth/login').send({ email, password }).expect(200);
     return login.body.accessToken as string;
   }

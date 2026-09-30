@@ -12,6 +12,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 // environment. Intended for a disposable test database — see
 // docs/architecture.md "Testes" for how to point this at one.
 export async function createTestApp(): Promise<INestApplication> {
+  process.env.AUTH_RATE_LIMIT_PER_MINUTE ??= '10000';
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
   app.use(cookieParser());

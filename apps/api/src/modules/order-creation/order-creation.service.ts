@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import {
   FulfillmentType,
   Order,
@@ -51,6 +51,7 @@ export interface OrderCreationInput {
   address?: OrderCreationAddressInput | null;
   paymentMethod: PaymentMethod;
   notes?: string | null;
+  idempotencyKey?: string;
 }
 
 // An item whose price/name were ALREADY fixed by the caller from a trusted
@@ -104,6 +105,11 @@ export class OrderCreationService {
   ) {}
 
   async createOrder(input: OrderCreationInput): Promise<OrderWithItems> {
+    if (input.idempotencyKey) {
+      const replay = await this.findReplay(input);
+      if (replay) return replay;
+    }
+
     if (input.fulfillmentType === 'DELIVERY' && !input.address) {
       throw new BadRequestException({
         code: 'ADDRESS_REQUIRED',
@@ -142,12 +148,57 @@ export class OrderCreationService {
       };
     });
 
-    const result = await this.prisma.$transaction((tx) =>
-      this.createPricedOrderInTx(tx, { ...input, items: pricedItems }),
-    );
+    let result: OrderCreationResult;
+    try {
+      result = await this.prisma.$transaction((tx) =>
+        this.createPricedOrderInTx(tx, { ...input, items: pricedItems }),
+      );
+    } catch (error) {
+      if (input.idempotencyKey && this.isIdempotencyKeyViolation(error)) {
+        const replay = await this.findReplay(input);
+        if (replay) return replay;
+      }
+      throw error;
+    }
 
     await this.recordCreationAudit(result, input.source, input.recordCashSaleByUserId);
     return result.order;
+  }
+
+  private isIdempotencyKeyViolation(error: unknown): boolean {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') return false;
+    const target = error.meta?.target;
+    return Array.isArray(target) ? target.includes('idempotencyKey') : String(target ?? '').includes('idempotencyKey');
+  }
+
+  private async findReplay(input: OrderCreationInput): Promise<OrderWithItems | null> {
+    const existing = await this.prisma.order.findUnique({
+      where: { tenantId_idempotencyKey: { tenantId: input.tenantId, idempotencyKey: input.idempotencyKey! } },
+      include: { items: true },
+    });
+    if (!existing) return null;
+
+    const signature = (items: { productId: string; quantity: number }[]) =>
+      items
+        .map((item) => `${item.productId}:${item.quantity}`)
+        .sort()
+        .join('|');
+    const sameRequest =
+      existing.tabId === null &&
+      existing.source === input.source &&
+      existing.branchId === input.branchId &&
+      existing.paymentMethod === input.paymentMethod &&
+      existing.fulfillmentType === input.fulfillmentType &&
+      existing.customerName === input.customerName &&
+      existing.customerPhone === input.customerPhone &&
+      signature(existing.items) === signature(input.items);
+    if (!sameRequest) {
+      throw new ConflictException({
+        code: 'IDEMPOTENCY_KEY_REUSED',
+        message: 'Esta chave de idempotência já foi usada em outro pedido.',
+      });
+    }
+    return existing;
   }
 
   async createPricedOrderInTx(tx: Prisma.TransactionClient, input: PricedOrderInput): Promise<OrderCreationResult> {

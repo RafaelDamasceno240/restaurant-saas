@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -11,10 +12,13 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AppConfig } from '../../config/configuration';
 import { AuditService } from '../audit/audit.service';
+import { isTenantBlocked } from '../../common/util/tenant-status.util';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { durationToMs, hashToken } from './token.util';
 import { AccessTokenPayload } from './strategies/jwt.strategy';
+
+const REFRESH_REUSE_GRACE_MS = 10_000;
 
 export interface RequestMeta {
   ip?: string;
@@ -133,7 +137,10 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, meta: RequestMeta): Promise<AuthResult> {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+      include: { tenant: { select: { status: true } } },
+    });
 
     // Same error for "no such user" and "wrong password" to avoid
     // user-enumeration.
@@ -162,6 +169,10 @@ export class AuthService {
         userAgent: meta.userAgent,
       });
       throw invalidCredentials();
+    }
+
+    if (isTenantBlocked(user.tenant.status)) {
+      throw new ForbiddenException({ code: 'TENANT_NOT_ACTIVE', message: 'Este restaurante está suspenso.' });
     }
 
     await this.prisma.user.update({
@@ -198,22 +209,48 @@ export class AuthService {
     const tokenHash = hashToken(rawRefreshToken);
     const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
 
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date() || stored.userId !== payload.sub) {
+    if (!stored || stored.expiresAt < new Date() || stored.userId !== payload.sub) {
       throw invalid();
     }
 
-    const user = await this.prisma.user.findUnique({ where: { id: stored.userId } });
-    if (!user || user.status !== 'ACTIVE') {
+    if (stored.revokedAt) {
+      if (Date.now() - stored.revokedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
+        await this.prisma.refreshToken.updateMany({
+          where: { userId: stored.userId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        await this.audit.record({
+          userId: stored.userId,
+          action: 'REFRESH_TOKEN_REUSE_DETECTED',
+          entity: 'User',
+          entityId: stored.userId,
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+      }
       throw invalid();
     }
 
-    // Rotation: the presented token is single-use. Revoke it and mint a new
-    // pair, linking them via `replacedBy` for forensic traceability.
+    const user = await this.prisma.user.findUnique({
+      where: { id: stored.userId },
+      include: { tenant: { select: { status: true } } },
+    });
+    if (!user || user.status !== 'ACTIVE' || isTenantBlocked(user.tenant.status)) {
+      throw invalid();
+    }
+
+    const claimed = await this.prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      throw invalid();
+    }
+
     const result = await this.issueTokensFor(user, meta);
-    const newTokenHash = hashToken(result.refreshToken);
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
-      data: { revokedAt: new Date(), replacedBy: newTokenHash },
+      data: { replacedBy: hashToken(result.refreshToken) },
     });
 
     return result;

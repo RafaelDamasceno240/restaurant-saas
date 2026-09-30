@@ -1,12 +1,13 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useCart } from '@/lib/cart-context';
+import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { formatCentsAsBRL } from '@/lib/money';
 import { ApiError } from '@/lib/api-client';
 import {
@@ -36,6 +37,7 @@ export default function CheckoutPage({ params }: PageProps) {
   const belongsToThisRestaurant = restaurantSlug === params.slug;
   const visibleItems = belongsToThisRestaurant ? items : [];
 
+  const orderKeyRef = useRef<string | null>(null);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>('PICKUP');
@@ -92,6 +94,7 @@ export default function CheckoutPage({ params }: PageProps) {
 
     setIsSubmitting(true);
     try {
+      orderKeyRef.current ??= createIdempotencyKey();
       // CRITICAL: only productId + quantity travel to the backend. No price,
       // no name, no subtotal, no total — those are recalculated server-side
       // from the database, never trusted from this cart.
@@ -102,12 +105,14 @@ export default function CheckoutPage({ params }: PageProps) {
         fulfillmentType,
         paymentMethod,
         notes: notes.trim() || undefined,
+        idempotencyKey: orderKeyRef.current,
         ...(fulfillmentType === 'DELIVERY' ? { address } : {}),
       };
       const order = await createOrder(input);
       clearCart();
       router.push(`/menu/${params.slug}/pedido/${order.id}`);
     } catch (err) {
+      if (err instanceof ApiError) orderKeyRef.current = null;
       setError(
         err instanceof ApiError
           ? err.message
