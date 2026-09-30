@@ -51,6 +51,7 @@ export interface OrderResponse {
   notes: string | null;
   items: OrderItemResponse[];
   subtotal: number;
+  deliveryFee: number;
   total: number;
   createdAt: string;
 }

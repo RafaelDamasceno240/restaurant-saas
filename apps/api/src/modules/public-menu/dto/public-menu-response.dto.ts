@@ -8,6 +8,14 @@ export class PublicMenuRestaurantDto {
   @ApiProperty() slug!: string;
 }
 
+// Delivery terms of the branch that receives online orders. Informational for
+// the checkout screen only — the server recomputes and enforces them on order.
+export class PublicMenuDeliveryDto {
+  @ApiProperty() enabled!: boolean;
+  @ApiProperty({ example: 5 }) fee!: number;
+  @ApiProperty({ example: 20 }) minOrder!: number;
+}
+
 export class PublicMenuProductDto {
   @ApiProperty() id!: string;
   @ApiProperty() name!: string;
@@ -25,5 +33,6 @@ export class PublicMenuCategoryDto {
 
 export class PublicMenuResponseDto {
   @ApiProperty({ type: PublicMenuRestaurantDto }) restaurant!: PublicMenuRestaurantDto;
+  @ApiProperty({ type: PublicMenuDeliveryDto }) delivery!: PublicMenuDeliveryDto;
   @ApiProperty({ type: [PublicMenuCategoryDto] }) categories!: PublicMenuCategoryDto[];
 }

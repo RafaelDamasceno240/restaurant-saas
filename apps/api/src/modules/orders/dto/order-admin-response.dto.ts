@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { FulfillmentType, OrderSource, OrderStatus, PaymentMethod } from '@prisma/client';
+import { DeliveryStatus, FulfillmentType, OrderSource, OrderStatus, PaymentMethod } from '@prisma/client';
 import {
   OrderAddressResponseDto,
   OrderItemResponseDto,
@@ -14,6 +14,12 @@ import {
 // sale can have no customer identification at all. ONLINE orders (fatia 04
 // checkout) still always populate both — nothing changes for them.
 
+// Operational summary of the order's delivery (null for PICKUP / DINE_IN).
+export class OrderDeliverySummaryDto {
+  @ApiProperty() id!: string;
+  @ApiProperty({ enum: DeliveryStatus }) status!: DeliveryStatus;
+}
+
 export class OrderListItemDto {
   @ApiProperty() id!: string;
   @ApiProperty() orderNumber!: string;
@@ -26,7 +32,9 @@ export class OrderListItemDto {
   @ApiProperty({ enum: PaymentMethod }) paymentMethod!: PaymentMethod;
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
   @ApiProperty({ example: 49.8 }) subtotal!: number;
-  @ApiProperty({ example: 49.8 }) total!: number;
+  @ApiProperty({ example: 5 }) deliveryFee!: number;
+  @ApiProperty({ example: 54.8 }) total!: number;
+  @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;
   @ApiProperty() itemCount!: number;
   // Added in fatia 06: the KDS needs to show items/quantities per card
   // without an extra request per order. Reusing this same list endpoint
@@ -58,6 +66,8 @@ export class OrderDetailDto {
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
   @ApiProperty({ example: 49.8 }) subtotal!: number;
-  @ApiProperty({ example: 49.8 }) total!: number;
+  @ApiProperty({ example: 5 }) deliveryFee!: number;
+  @ApiProperty({ example: 54.8 }) total!: number;
+  @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;
   @ApiProperty() createdAt!: Date;
 }

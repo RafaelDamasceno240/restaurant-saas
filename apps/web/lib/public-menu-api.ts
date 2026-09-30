@@ -18,8 +18,17 @@ export interface PublicMenuCategory {
   products: PublicMenuProduct[];
 }
 
+// Delivery terms shown on the checkout. Informational: the server recomputes the
+// fee and enforces the minimum when the order is created. Values are in reais.
+export interface PublicMenuDelivery {
+  enabled: boolean;
+  fee: number;
+  minOrder: number;
+}
+
 export interface PublicMenuResponse {
   restaurant: { name: string; slug: string };
+  delivery: PublicMenuDelivery;
   categories: PublicMenuCategory[];
 }
 

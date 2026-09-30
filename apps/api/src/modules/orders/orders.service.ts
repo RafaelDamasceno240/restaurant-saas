@@ -4,20 +4,28 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Order, OrderItem, OrderStatus, Prisma, StockMovement } from '@prisma/client';
+import { DeliveryStatus, Order, OrderItem, OrderStatus, Prisma, StockMovement } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { fromCents } from '../../common/util/money.util';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { isValidOrderStatusTransition } from './order-status.util';
+import { deliveryFlowRequired } from '../delivery/delivery-errors';
 import { InventoryService } from '../inventory/inventory.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { OrderDetailDto, OrderListItemDto, OrderListResponseDto } from './dto/order-admin-response.dto';
 
-type OrderWithItemsAndCount = Order & { items: OrderItem[]; _count: { items: number } };
-type OrderWithItems = Order & { items: OrderItem[] };
+type DeliverySummary = { id: string; status: DeliveryStatus } | null;
+type OrderWithItemsAndCount = Order & {
+  items: OrderItem[];
+  _count: { items: number };
+  delivery: DeliverySummary;
+};
+type OrderWithItems = Order & { items: OrderItem[]; delivery: DeliverySummary };
+
+const deliverySummarySelect = { select: { id: true, status: true } } as const;
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -61,7 +69,7 @@ export class OrdersService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { items: true, _count: { select: { items: true } } },
+        include: { items: true, delivery: deliverySummarySelect, _count: { select: { items: true } } },
       }),
     ]);
 
@@ -83,7 +91,7 @@ export class OrdersService {
   async findOneForTenant(tenantId: string, id: string): Promise<OrderDetailDto> {
     const order = await this.prisma.order.findFirst({
       where: { id, tenantId },
-      include: { items: true },
+      include: { items: true, delivery: deliverySummarySelect },
     });
     if (!order) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
@@ -119,8 +127,8 @@ export class OrdersService {
     let result: { before: OrderStatus; movements: StockMovement[] };
     try {
       result = await this.prisma.$transaction(async (tx) => {
-        const rows = await tx.$queryRaw<{ status: OrderStatus; branchId: string }[]>`
-          SELECT "status", "branchId" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+        const rows = await tx.$queryRaw<{ status: OrderStatus; branchId: string; fulfillmentType: string }[]>`
+          SELECT "status", "branchId", "fulfillmentType" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
         if (rows.length === 0 || (allowedBranchIds && !allowedBranchIds.includes(rows[0].branchId))) {
           throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
         }
@@ -132,7 +140,31 @@ export class OrdersService {
           });
         }
 
+        // Fase 10: a DELIVERY order is finished by the delivery flow (dispatch ->
+        // delivered), never by the generic status endpoint.
+        const isDelivery = rows[0].fulfillmentType === 'DELIVERY';
+        if (isDelivery && newStatus === 'COMPLETED') throw deliveryFlowRequired();
+
         await tx.order.update({ where: { id }, data: { status: newStatus } });
+        // Cancelling the order cancels its delivery in the same transaction. A
+        // cancellable order status (PENDING..PREPARING) always has a PENDING delivery.
+        if (isDelivery && newStatus === 'CANCELLED') {
+          const cancelled = await tx.delivery.updateMany({
+            where: { orderId: id, tenantId, status: 'PENDING' },
+            data: { status: 'CANCELLED', cancelledAt: new Date() },
+          });
+          if (cancelled.count > 0) {
+            await this.audit.recordTx(tx, {
+              tenantId,
+              userId: actor.userId,
+              action: 'DELIVERY_CANCELLED',
+              entity: 'Order',
+              entityId: id,
+              beforeData: { deliveryStatus: 'PENDING' },
+              afterData: { deliveryStatus: 'CANCELLED', reason: 'ORDER_CANCELLED' },
+            });
+          }
+        }
 
         const order = { id, tenantId, branchId: rows[0].branchId };
         let movements: StockMovement[] = [];
@@ -203,7 +235,9 @@ export class OrdersService {
       paymentMethod: order.paymentMethod,
       notes: order.notes,
       subtotal: fromCents(order.subtotalCents),
+      deliveryFee: fromCents(order.deliveryFeeCents),
       total: fromCents(order.totalCents),
+      delivery: order.delivery,
       itemCount: order._count.items,
       items: order.items.map((item) => this.toItemDto(item)),
       createdAt: order.createdAt,
@@ -236,7 +270,9 @@ export class OrdersService {
       notes: order.notes,
       items: order.items.map((item) => this.toItemDto(item)),
       subtotal: fromCents(order.subtotalCents),
+      deliveryFee: fromCents(order.deliveryFeeCents),
       total: fromCents(order.totalCents),
+      delivery: order.delivery,
       createdAt: order.createdAt,
     };
   }

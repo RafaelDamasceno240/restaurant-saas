@@ -54,6 +54,7 @@ model Tenant {
   categories        Category[]
   products          Product[]
   orders            Order[]
+  deliveries        Delivery[]
   cashSessions      CashRegisterSession[]
   cashMovements     CashMovement[]
   diningTables      DiningTable[]
@@ -88,12 +89,20 @@ model Branch {
   zipCode            String?
   status             BranchStatus @default(ACTIVE)
   allowNegativeStock Boolean      @default(false)
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+
+  // Delivery settings (Fase 10). Defaults keep the behavior that existed before
+  // the module: delivery accepted, no fee, no minimum.
+  deliveryEnabled       Boolean @default(true)
+  deliveryFeeCents      Int     @default(0)
+  deliveryMinOrderCents Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   userBranches      UserBranch[]
   orders            Order[]
+  deliveries        Delivery[]
   cashSessions      CashRegisterSession[]
   diningTables      DiningTable[]
   tabs              Tab[]
@@ -119,19 +128,21 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant             Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userRoles          UserRole[]
-  userBranches       UserBranch[]
-  refreshTokens      RefreshToken[]
-  auditLogs          AuditLog[]
-  openedCashSessions CashRegisterSession[] @relation("CashSessionOpenedBy")
-  closedCashSessions CashRegisterSession[] @relation("CashSessionClosedBy")
-  cashMovements      CashMovement[]
-  stockMovements     StockMovement[]
-  inventoryCounts    InventoryCount[]
-  createdPurchases   Purchase[]            @relation("PurchaseCreatedBy")
-  receivedPurchases  Purchase[]            @relation("PurchaseReceivedBy")
-  cancelledPurchases Purchase[]            @relation("PurchaseCancelledBy")
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userRoles            UserRole[]
+  userBranches         UserBranch[]
+  refreshTokens        RefreshToken[]
+  auditLogs            AuditLog[]
+  dispatchedDeliveries Delivery[]            @relation("DeliveryDispatchedBy")
+  completedDeliveries  Delivery[]            @relation("DeliveryCompletedBy")
+  openedCashSessions   CashRegisterSession[] @relation("CashSessionOpenedBy")
+  closedCashSessions   CashRegisterSession[] @relation("CashSessionClosedBy")
+  cashMovements        CashMovement[]
+  stockMovements       StockMovement[]
+  inventoryCounts      InventoryCount[]
+  createdPurchases     Purchase[]            @relation("PurchaseCreatedBy")
+  receivedPurchases    Purchase[]            @relation("PurchaseReceivedBy")
+  cancelledPurchases   Purchase[]            @relation("PurchaseCancelledBy")
 
   @@index([tenantId])
   @@map("users")
@@ -330,8 +341,11 @@ model Order {
   state        String?
   zipCode      String?
 
-  subtotalCents Int
-  totalCents    Int
+  subtotalCents    Int
+  // Snapshot of the delivery fee charged on this order (0 for non-delivery).
+  // totalCents = subtotalCents + deliveryFeeCents.
+  deliveryFeeCents Int @default(0)
+  totalCents       Int
 
   tabId          String? @unique
   idempotencyKey String?
@@ -345,6 +359,7 @@ model Order {
   items        OrderItem[]
   cashMovement CashMovement?
   payment      Payment?
+  delivery     Delivery?
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, createdAt])
@@ -368,6 +383,45 @@ model OrderItem {
   @@index([orderId])
   @@index([productId])
   @@map("order_items")
+}
+
+// Operational state of a delivery, independent of the commercial OrderStatus.
+// For a DELIVERY order only DeliveryService moves the order through
+// READY -> OUT_FOR_DELIVERY -> DELIVERED, always in the same transaction.
+enum DeliveryStatus {
+  PENDING
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+// One row per DELIVERY order (1:1). The delivery address stays as the snapshot
+// on the order; this table only carries the operational lifecycle.
+model Delivery {
+  id       String         @id @default(uuid())
+  tenantId String
+  branchId String
+  orderId  String         @unique
+  status   DeliveryStatus @default(PENDING)
+
+  dispatchedAt       DateTime?
+  dispatchedByUserId String?
+  deliveredAt        DateTime?
+  completedByUserId  String?
+  cancelledAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  order        Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dispatchedBy User?  @relation("DeliveryDispatchedBy", fields: [dispatchedByUserId], references: [id], onDelete: Restrict)
+  completedBy  User?  @relation("DeliveryCompletedBy", fields: [completedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, branchId, status])
+  @@index([tenantId, createdAt])
+  @@map("deliveries")
 }
 
 enum CashSessionStatus {

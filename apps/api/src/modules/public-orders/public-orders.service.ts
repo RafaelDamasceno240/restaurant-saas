@@ -110,6 +110,7 @@ export class PublicOrdersService {
         subtotal: fromCents(item.subtotalCents),
       })),
       subtotal: fromCents(order.subtotalCents),
+      deliveryFee: fromCents(order.deliveryFeeCents),
       total: fromCents(order.totalCents),
       createdAt: order.createdAt,
     };

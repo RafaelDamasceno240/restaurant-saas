@@ -39,7 +39,8 @@ export class OrderResponseDto {
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
   @ApiProperty({ example: 49.8 }) subtotal!: number;
-  @ApiProperty({ example: 49.8 }) total!: number;
+  @ApiProperty({ example: 5 }) deliveryFee!: number;
+  @ApiProperty({ example: 54.8 }) total!: number;
   @ApiProperty() createdAt!: Date;
 }
 
@@ -63,6 +64,7 @@ export class PublicOrderConfirmationDto {
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
   @ApiProperty({ example: 49.8 }) subtotal!: number;
-  @ApiProperty({ example: 49.8 }) total!: number;
+  @ApiProperty({ example: 5 }) deliveryFee!: number;
+  @ApiProperty({ example: 54.8 }) total!: number;
   @ApiProperty() createdAt!: Date;
 }

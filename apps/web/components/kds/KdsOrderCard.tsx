@@ -61,7 +61,10 @@ export function KdsOrderCard({
   isAdvancing: boolean;
 }) {
   const minutes = useElapsedMinutes(order.createdAt);
-  const action = ACTION_BY_STATUS[order.status];
+  // A ready DELIVERY order leaves the kitchen through the Delivery screen (the API
+  // refuses "Finalizar" for it), so the card shows a note instead of the button.
+  const awaitingDispatch = order.fulfillmentType === 'DELIVERY' && order.status === 'READY';
+  const action = awaitingDispatch ? undefined : ACTION_BY_STATUS[order.status];
   const isUrgent = order.status !== 'READY' && minutes >= URGENT_AFTER_MINUTES;
   const look = STATUS_LOOK[order.status];
 
@@ -114,6 +117,12 @@ export function KdsOrderCard({
         <p className="flex items-start gap-2 rounded-ctl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
           <StickyNote className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           {order.notes}
+        </p>
+      )}
+
+      {awaitingDispatch && (
+        <p className="rounded-ctl border border-info/30 bg-info/10 px-3 py-2 text-center text-sm font-medium text-info">
+          Aguardando despacho no Delivery
         </p>
       )}
 

@@ -171,6 +171,18 @@ export default function OrderDetailPage({ params }: PageProps) {
                     </li>
                   ))}
                 </ul>
+                {order.fulfillmentType === 'DELIVERY' && (
+                  <div className="space-y-1 border-t border-line px-4 py-3 text-sm text-muted-foreground">
+                    <div className="flex items-center justify-between">
+                      <span>Subtotal</span>
+                      <span>{formatBRL(order.subtotal)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Taxa de entrega</span>
+                      <span>{formatBRL(order.deliveryFee)}</span>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center justify-between border-t border-line px-4 py-3 text-base font-semibold text-foreground">
                   <span>Total</span>
                   <span>{formatBRL(order.total)}</span>
@@ -213,7 +225,18 @@ export default function OrderDetailPage({ params }: PageProps) {
 
               {actionError && <Alert tone="danger">{actionError}</Alert>}
 
-              {ACTIONS[order.status]?.length > 0 && (
+              {/* A delivery order is finished by the Delivery flow (dispatch, then
+                  confirm), never by "Finalizar": the API refuses COMPLETED for it. */}
+              {order.fulfillmentType === 'DELIVERY' && ['READY', 'OUT_FOR_DELIVERY'].includes(order.status) && (
+                <Alert tone="info">
+                  Este pedido segue pelo fluxo de entrega.{' '}
+                  <Link href="/dashboard/delivery" className="font-medium underline">
+                    Abrir Delivery
+                  </Link>
+                </Alert>
+              )}
+
+              {ACTIONS[order.status]?.length > 0 && !(order.fulfillmentType === 'DELIVERY' && order.status === 'READY') && (
                 <div className="flex flex-col gap-2">
                   {ACTIONS[order.status].map((action) => (
                     <Button

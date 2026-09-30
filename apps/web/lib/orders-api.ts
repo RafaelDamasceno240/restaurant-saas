@@ -33,6 +33,13 @@ export const FULFILLMENT_LABEL: Record<AdminFulfillmentType, string> = {
 // "Fatia 05". Both are nullable as of fatia 07 — a COUNTER (PDV) sale can
 // have no customer identification at all; ONLINE orders still always have
 // both.
+// Operational state of the order's delivery (null for PICKUP / DINE_IN). Kept apart
+// from the commercial OrderStatus: only the Delivery screen moves it.
+export interface AdminOrderDelivery {
+  id: string;
+  status: 'PENDING' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED';
+}
+
 export interface AdminOrderListItem {
   id: string;
   orderNumber: string;
@@ -45,7 +52,9 @@ export interface AdminOrderListItem {
   paymentMethod: PaymentMethod;
   notes: string | null;
   subtotal: number;
+  deliveryFee: number;
   total: number;
+  delivery: AdminOrderDelivery | null;
   itemCount: number;
   // Added in fatia 06 — the KDS needs items/quantities per card without an
   // extra request per order; the fatia 05 admin list page keeps using
@@ -81,7 +90,9 @@ export interface AdminOrderDetail {
   notes: string | null;
   items: AdminOrderItem[];
   subtotal: number;
+  deliveryFee: number;
   total: number;
+  delivery: AdminOrderDelivery | null;
   createdAt: string;
 }
 

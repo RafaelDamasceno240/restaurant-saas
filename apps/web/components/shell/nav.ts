@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  Bike,
   BookOpen,
   Building2,
   ChefHat,
@@ -51,6 +52,7 @@ export const DASHBOARD_NAV: NavGroup[] = [
         roles: [...MANAGEMENT, 'WAITER', 'CASHIER'],
       },
       { key: 'cozinha', label: 'Cozinha', icon: ChefHat, href: '/dashboard/cozinha', roles: [...MANAGEMENT, 'KITCHEN'] },
+      { key: 'delivery', label: 'Delivery', icon: Bike, href: '/dashboard/delivery', roles: [...MANAGEMENT, 'DELIVERY'] },
       { key: 'caixa', label: 'Caixa', icon: Wallet, href: '/dashboard/caixa', roles: [...MANAGEMENT, 'CASHIER'] },
     ],
   },

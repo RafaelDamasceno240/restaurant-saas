@@ -2,11 +2,15 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { fromCents } from '../../common/util/money.util';
 import { isTenantBlocked } from '../../common/util/tenant-status.util';
+import { BranchAccessService } from '../branches/branch-access.service';
 import { PublicMenuResponseDto } from './dto/public-menu-response.dto';
 
 @Injectable()
 export class PublicMenuService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly branchAccess: BranchAccessService,
+  ) {}
 
   // Public, unauthenticated lookup — identified ONLY by slug, never by
   // tenantId (there is no JWT here to take one from). A single nested
@@ -18,6 +22,7 @@ export class PublicMenuService {
     const tenant = await this.prisma.tenant.findUnique({
       where: { slug },
       select: {
+        id: true,
         name: true,
         slug: true,
         status: true,
@@ -67,8 +72,21 @@ export class PublicMenuService {
         })),
       }));
 
+    // Online orders go to the tenant's default branch (same resolution as the
+    // order itself), so these are the terms the customer will actually get.
+    const branchId = await this.branchAccess.getDefaultBranchId(tenant.id);
+    const branch = await this.prisma.branch.findUniqueOrThrow({
+      where: { id: branchId },
+      select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+    });
+
     return {
       restaurant: { name: tenant.name, slug: tenant.slug },
+      delivery: {
+        enabled: branch.deliveryEnabled,
+        fee: fromCents(branch.deliveryFeeCents),
+        minOrder: fromCents(branch.deliveryMinOrderCents),
+      },
       categories,
     };
   }

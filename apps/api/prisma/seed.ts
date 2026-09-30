@@ -49,6 +49,9 @@ const PERMISSIONS: string[] = [
   'suppliers.read',
   'suppliers.create',
   'suppliers.update',
+  'delivery.read',
+  'delivery.update',
+  'delivery.configure',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -94,6 +97,9 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'suppliers.read',
     'suppliers.create',
     'suppliers.update',
+    'delivery.read',
+    'delivery.update',
+    'delivery.configure',
   ],
   CASHIER: [
     'orders.read',
@@ -122,7 +128,7 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'tabs.close',
   ],
   KITCHEN: ['orders.read', 'orders.update', 'inventory.read'],
-  DELIVERY: ['orders.read'],
+  DELIVERY: ['orders.read', 'delivery.read', 'delivery.update'],
   VIEWER: [
     'restaurant.read',
     'products.read',

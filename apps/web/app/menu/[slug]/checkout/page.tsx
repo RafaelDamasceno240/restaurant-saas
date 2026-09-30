@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useCart } from '@/lib/cart-context';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { formatCentsAsBRL } from '@/lib/money';
+import { getPublicMenu, PublicMenuDelivery } from '@/lib/public-menu-api';
 import { ApiError } from '@/lib/api-client';
 import {
   createOrder,
@@ -46,6 +47,29 @@ export default function CheckoutPage({ params }: PageProps) {
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Delivery terms are informational here; the server is the source of truth and
+  // recomputes the fee / enforces the minimum on order creation.
+  const [terms, setTerms] = useState<PublicMenuDelivery | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getPublicMenu(params.slug)
+      .then((menu) => {
+        // `?? null`: an older API without the field must not break the checkout.
+        if (active) setTerms(menu.delivery ?? null);
+      })
+      .catch(() => {
+        if (active) setTerms(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [params.slug]);
+
+  const deliveryUnavailable = terms !== null && !terms.enabled;
+  const feeCents = fulfillmentType === 'DELIVERY' && terms?.enabled ? Math.round(terms.fee * 100) : 0;
+  const minOrderCents = terms?.enabled ? Math.round(terms.minOrder * 100) : 0;
+  const belowMinimum = fulfillmentType === 'DELIVERY' && minOrderCents > subtotalCents;
 
   if (visibleItems.length === 0) {
     return (
@@ -152,6 +176,12 @@ export default function CheckoutPage({ params }: PageProps) {
           <span>Subtotal</span>
           <span>{formatCentsAsBRL(subtotalCents)}</span>
         </div>
+        {fulfillmentType === 'DELIVERY' && terms?.enabled && (
+          <div className="mt-1 flex items-center justify-between text-sm text-muted-foreground">
+            <span>Taxa de entrega</span>
+            <span>{feeCents > 0 ? formatCentsAsBRL(feeCents) : 'Grátis'}</span>
+          </div>
+        )}
       </section>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -175,11 +205,29 @@ export default function CheckoutPage({ params }: PageProps) {
               onClick={() => setFulfillmentType('PICKUP')}
             />
             <RadioPill
-              label="Entrega"
+              label={deliveryUnavailable ? 'Entrega indisponível' : 'Entrega'}
               checked={fulfillmentType === 'DELIVERY'}
-              onClick={() => setFulfillmentType('DELIVERY')}
+              onClick={() => {
+                if (!deliveryUnavailable) setFulfillmentType('DELIVERY');
+              }}
             />
           </div>
+          {deliveryUnavailable && (
+            <p className="text-xs text-muted-foreground">
+              Este restaurante não está aceitando entregas agora. Você pode escolher retirada.
+            </p>
+          )}
+          {fulfillmentType === 'DELIVERY' && terms?.enabled && (
+            <p className="text-xs text-muted-foreground">
+              Taxa de entrega: {feeCents > 0 ? formatCentsAsBRL(feeCents) : 'grátis'}
+              {minOrderCents > 0 ? ` · pedido mínimo ${formatCentsAsBRL(minOrderCents)} (sem a taxa)` : ''}
+            </p>
+          )}
+          {belowMinimum && (
+            <p className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
+              Faltam {formatCentsAsBRL(minOrderCents - subtotalCents)} em itens para atingir o pedido mínimo de entrega.
+            </p>
+          )}
 
           {fulfillmentType === 'DELIVERY' && (
             <div className="grid grid-cols-2 gap-3 pt-2">
@@ -271,7 +319,7 @@ export default function CheckoutPage({ params }: PageProps) {
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
             <div>
               <p className="text-xs text-muted-foreground">Total</p>
-              <p className="text-lg font-semibold">{formatCentsAsBRL(subtotalCents)}</p>
+              <p className="text-lg font-semibold">{formatCentsAsBRL(subtotalCents + feeCents)}</p>
             </div>
             <Button type="submit" className="w-auto px-6" disabled={isSubmitting}>
               {isSubmitting ? 'Enviando...' : 'Confirmar pedido'}

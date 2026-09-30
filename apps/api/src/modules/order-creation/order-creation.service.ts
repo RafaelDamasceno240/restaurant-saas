@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
   FulfillmentType,
   Order,
@@ -14,6 +14,7 @@ import { generateOrderNumber } from '../../common/util/order-number.util';
 import { CashRegisterService } from '../cash/cash-register.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
+import { DeliverySettings, priceDelivery } from '../delivery/delivery-pricing';
 
 export interface OrderCreationItemInput {
   productId: string;
@@ -210,9 +211,12 @@ export class OrderCreationService {
       subtotalCents: item.unitPriceCents * item.quantity,
     }));
     const subtotalCents = orderItemsData.reduce((sum, i) => sum + i.subtotalCents, 0);
-    // No delivery fee / discount / tax yet — totalCents mirrors subtotalCents.
-    const totalCents = subtotalCents;
     const isDelivery = input.fulfillmentType === 'DELIVERY';
+    // Fase 10: the delivery fee and minimum order come from the BRANCH settings,
+    // read here on the server — never from the request. No discount / tax yet.
+    const { deliveryFeeCents, totalCents } = isDelivery
+      ? priceDelivery(subtotalCents, await this.readDeliverySettings(tx, input.tenantId, input.branchId))
+      : { deliveryFeeCents: 0, totalCents: subtotalCents };
     const isCashSale = !!input.recordCashSaleByUserId && input.paymentMethod === 'CASH';
 
     // Locked FIRST (FOR UPDATE): a concurrent close waits for this sale to
@@ -242,6 +246,7 @@ export class OrderCreationService {
         state: isDelivery ? input.address!.state : undefined,
         zipCode: isDelivery ? input.address!.zipCode : undefined,
         subtotalCents,
+        deliveryFeeCents,
         totalCents,
         tabId: input.tabId,
         idempotencyKey: input.idempotencyKey,
@@ -249,6 +254,12 @@ export class OrderCreationService {
       },
       include: { items: true },
     });
+
+    // A DELIVERY order always has its operational record, created in the same
+    // transaction (no DELIVERY order without a delivery, and vice versa).
+    if (isDelivery) {
+      await tx.delivery.create({ data: { tenantId: input.tenantId, branchId: input.branchId, orderId: order.id } });
+    }
 
     const movement = cashSessionId
       ? await this.cashRegister.recordSale(tx, {
@@ -275,6 +286,23 @@ export class OrderCreationService {
     return { order, cashMovementId: movement?.id ?? null, stockMovementIds: stockMovements.map((m) => m.id) };
   }
 
+  private async readDeliverySettings(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    branchId: string,
+  ): Promise<DeliverySettings> {
+    const branch = await tx.branch.findFirst({
+      where: { id: branchId, tenantId },
+      select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+    });
+    if (!branch) throw new NotFoundException({ code: 'BRANCH_NOT_FOUND', message: 'Unidade não encontrada.' });
+    return {
+      enabled: branch.deliveryEnabled,
+      feeCents: branch.deliveryFeeCents,
+      minOrderCents: branch.deliveryMinOrderCents,
+    };
+  }
+
   // Best-effort, never blocks the response — same AuditService as every
   // other module. Called only AFTER the transaction committed.
   async recordCreationAudit(result: OrderCreationResult, source: OrderSource, userId?: string) {
@@ -288,6 +316,7 @@ export class OrderCreationService {
         orderNumber: order.orderNumber,
         source,
         totalCents: order.totalCents,
+        deliveryFeeCents: order.deliveryFeeCents,
         itemCount: order.items.length,
       },
     });

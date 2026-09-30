@@ -79,6 +79,12 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
             </li>
           ))}
         </ul>
+        {order.deliveryFee > 0 && (
+          <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-sm text-muted-foreground">
+            <span>Taxa de entrega</span>
+            <span>{formatBRL(order.deliveryFee)}</span>
+          </div>
+        )}
         <div className="mt-2 flex items-center justify-between border-t border-line pt-2 font-semibold">
           <span>Total</span>
           <span>{formatBRL(order.total)}</span>

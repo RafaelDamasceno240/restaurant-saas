@@ -27,7 +27,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
-| Delivery | PARCIAL | `FulfillmentType.DELIVERY` existe no pedido; sem gestão, rotas ou entregadores; PDV marca "Delivery" como em breve |
+| Delivery | PARCIAL | primeira fatia da Fase 10 implementada: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador, falha de entrega, mapas/GPS e sem entrega pelo PDV |
 | CRM | NÃO IMPLEMENTADO | sem modelo de cliente |
 | Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
@@ -131,6 +131,18 @@ Módulo de compras e fornecedores integrado ao estoque profissional. Detalhes em
 - **Frontend:** `/dashboard/estoque/compras` (indicadores, filtros, tabela e ações), `/nova`, `/[id]` e `/[id]/editar`, mais o diálogo de fornecedores.
 - **Testes:** unitários dos cálculos (`purchase-calculations.spec.ts`, `purchases-logic.test.ts`) e `purchases.e2e-spec.ts` (recebimento, idempotência, concorrência, estorno, isolamento por tenant e unidade, permissões, validações e auditoria).
 - **Limitações:** sem pedido de compra, sem contas a pagar, sem rateio de frete, sem conversão de unidade na compra (a quantidade é sempre na unidade de estoque do insumo) e sem importação de nota fiscal.
+
+## Delivery (2026-09-30)
+
+Primeira fatia da Fase 10. Detalhes em `docs/DELIVERY.md`.
+
+- **Modelo:** `Delivery` (1:1 com o pedido, enum `DeliveryStatus`: PENDING, OUT_FOR_DELIVERY, DELIVERED, CANCELLED), `Order.deliveryFeeCents` (snapshot da taxa) e, em `Branch`, `deliveryEnabled`, `deliveryFeeCents` e `deliveryMinOrderCents`. Migration `20260930120000_delivery`, com backfill dos pedidos de entrega já existentes.
+- **Regra central:** o endereço continua como snapshot no pedido. A taxa e o pedido mínimo são calculados só no servidor, em centavos, na criação do pedido. O status do pedido (comercial) e o da entrega (operacional) andam juntos, e para pedidos de entrega só o `DeliveryService` leva `READY → OUT_FOR_DELIVERY → DELIVERED`, na mesma transação.
+- **API:** `GET /v1/delivery`, `POST /v1/delivery/:id/dispatch`, `POST /v1/delivery/:id/complete`, `GET/PUT /v1/delivery/settings`. Despachar/concluir são idempotentes (segunda chamada devolve `idempotentReplay: true`).
+- **Permissões:** `delivery.read`, `delivery.update` e `delivery.configure` (OWNER, ADMIN, MANAGER; o papel DELIVERY recebe `read` e `update`). Entram pelo seed: rode `pnpm db:seed` em bancos existentes.
+- **Auditoria transacional:** `DELIVERY_DISPATCHED`, `DELIVERY_COMPLETED`, `DELIVERY_CANCELLED`, `DELIVERY_SETTINGS_UPDATED`.
+- **Mudança de comportamento:** o endpoint genérico de status recusa `COMPLETED` para pedido de entrega (`409 DELIVERY_FLOW_REQUIRED`); o KDS e o detalhe do pedido deixam de oferecer "Finalizar" nesses pedidos.
+- **Limitações:** sem entregador, sem falha/reentrega, sem mapas/GPS, taxa única por unidade, PDV sem entrega.
 
 ## Estado geral (atualizado na Fatia 08)
 
