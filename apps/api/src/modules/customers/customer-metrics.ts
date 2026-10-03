@@ -14,6 +14,7 @@ export interface StatusGroup {
   status: OrderStatus;
   count: number;
   totalCents: number;
+  firstOrderAt: Date | null;
   lastOrderAt: Date | null;
 }
 
@@ -23,6 +24,8 @@ export interface CustomerMetrics {
   totalSpentCents: number;
   // Integer cents, rounded half up (money is never fractional).
   averageTicketCents: number;
+  // Oldest and newest billable order (same inclusion rule as the totals: everything but CANCELLED).
+  firstOrderAt: Date | null;
   lastOrderAt: Date | null;
 }
 
@@ -31,6 +34,7 @@ export const EMPTY_METRICS: CustomerMetrics = {
   cancelledCount: 0,
   totalSpentCents: 0,
   averageTicketCents: 0,
+  firstOrderAt: null,
   lastOrderAt: null,
 };
 
@@ -39,6 +43,7 @@ export function buildMetrics(groups: readonly StatusGroup[]): CustomerMetrics {
   let ordersCount = 0;
   let cancelledCount = 0;
   let totalSpentCents = 0;
+  let firstOrderAt: Date | null = null;
   let lastOrderAt: Date | null = null;
   for (const group of groups) {
     if (!isBillableOrderStatus(group.status)) {
@@ -47,6 +52,7 @@ export function buildMetrics(groups: readonly StatusGroup[]): CustomerMetrics {
     }
     ordersCount += group.count;
     totalSpentCents += group.totalCents;
+    if (group.firstOrderAt && (!firstOrderAt || group.firstOrderAt < firstOrderAt)) firstOrderAt = group.firstOrderAt;
     if (group.lastOrderAt && (!lastOrderAt || group.lastOrderAt > lastOrderAt)) lastOrderAt = group.lastOrderAt;
   }
   return {
@@ -54,6 +60,7 @@ export function buildMetrics(groups: readonly StatusGroup[]): CustomerMetrics {
     cancelledCount,
     totalSpentCents,
     averageTicketCents: ordersCount ? Math.round(totalSpentCents / ordersCount) : 0,
+    firstOrderAt,
     lastOrderAt,
   };
 }

@@ -110,12 +110,14 @@ export class CustomersService {
       orderBy: { status: 'asc' },
       _count: { _all: true },
       _sum: { totalCents: true },
+      _min: { createdAt: true },
       _max: { createdAt: true },
     });
     const groups: StatusGroup[] = grouped.map((g) => ({
       status: g.status,
       count: typeof g._count === 'object' ? (g._count._all ?? 0) : 0,
       totalCents: g._sum?.totalCents ?? 0,
+      firstOrderAt: g._min?.createdAt ?? null,
       lastOrderAt: g._max?.createdAt ?? null,
     }));
     return { ...toCustomerView(customer), metrics: buildMetrics(groups) };

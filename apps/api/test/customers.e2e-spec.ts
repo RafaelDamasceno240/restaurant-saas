@@ -279,7 +279,7 @@ describe('Customers (e2e)', () => {
       const c = await create(ctx, { cpf: '52998224725', notes: 'nota' });
       const res = await get(ctx.accessToken, `/v1/customers/${c.id}`).expect(200);
       expect(res.body).toMatchObject({ id: c.id, cpf: '52998224725', notes: 'nota' });
-      expect(res.body.metrics).toEqual({ ordersCount: 0, cancelledCount: 0, totalSpentCents: 0, averageTicketCents: 0, lastOrderAt: null });
+      expect(res.body.metrics).toEqual({ ordersCount: 0, cancelledCount: 0, totalSpentCents: 0, averageTicketCents: 0, firstOrderAt: null, lastOrderAt: null });
       const orders = await get(ctx.accessToken, `/v1/customers/${c.id}/orders`).expect(200);
       expect(orders.body).toEqual({ data: [], meta: { page: 1, pageSize: 20, total: 0, totalPages: 1 } });
     });

@@ -107,6 +107,31 @@ pnpm --filter api test:e2e    # e2e: 23 suítes cobrindo auth, tenant, cardápio
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do
 ambiente — aponte para um banco de teste descartável antes de rodá-los.
 
+### Preparar o banco descartável dos e2e
+
+Um banco novo (só com as migrations) **não basta**: as roles e permissões (RBAC)
+precisam estar semeadas. O `POST /v1/auth/register` — usado pelos e2e para criar
+cada tenant de teste — depende delas; sem o seed ele responde `500` e as suítes
+falham em massa (observado na validação do CRM: 41 de 41 testes de clientes
+falharam até o seed ser executado). O seed (`prisma/seed.ts`) cria apenas roles,
+permissões e a ligação entre elas; não cria tenants, usuários nem produtos.
+
+```bash
+# exemplo: banco e Redis separados do DEV (ajuste usuário/senha/porta ao seu ambiente)
+export DATABASE_URL='postgresql://USUARIO:SENHA@localhost:5432/restaurant_saas_e2e?schema=public'
+export REDIS_URL='redis://localhost:6379/1'
+
+pnpm --filter api prisma:deploy             # migrations
+pnpm --filter api prisma:seed               # roles/permissões (obrigatório para os e2e)
+pnpm --filter api prisma:constraints        # scripts SQL de caixa e comandas
+pnpm --filter api prisma:tabs-constraints   # (aplicados na validação do CRM; ver prisma/sql)
+pnpm --filter api test:e2e
+```
+
+Rode o seed novamente sempre que adicionar permissões novas ao `prisma/seed.ts`
+(por exemplo, as `customers.*` do CRM), e nunca aponte os e2e para o banco DEV:
+eles criam tenants e dados a cada execução.
+
 ## Lint, typecheck e build
 
 ```bash

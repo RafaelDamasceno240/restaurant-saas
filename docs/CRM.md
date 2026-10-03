@@ -50,7 +50,7 @@ A lista **não devolve CPF nem observações** (minimização de dados); o detal
 
 Calculadas por `groupBy status` sobre os pedidos do cliente:
 
-- `ordersCount`, `totalSpentCents`, `averageTicketCents` (arredondado ao centavo, meio para cima), `lastOrderAt`: **todos os pedidos exceto `CANCELLED`**.
+- `ordersCount`, `totalSpentCents`, `averageTicketCents` (arredondado ao centavo, meio para cima), `firstOrderAt` (pedido mais antigo) e `lastOrderAt` (mais recente): **todos os pedidos exceto `CANCELLED`**. `firstOrderAt` só existe no detalhe (`GET /customers/:id`), vem do mesmo `groupBy` (`_min`/`_max` de `createdAt`), sem consulta extra; é `null` sem pedidos válidos.
 - `cancelledCount`: pedidos cancelados, mostrados à parte e fora dos valores; o histórico lista os cancelados com `counted: false`.
 
 **Decisão:** é a única regra de "venda" por pedido que o sistema já tem — o dashboard (`use-dashboard-stats.ts`) conta todos os pedidos não cancelados —, então o CRM não contradiz o que o gerente vê na visão geral. Um pedido ainda em andamento conta desde que existe; uma entrega que falhou mantém o pedido `READY` (Fase 10) e continua contando até ser cancelado. O caixa não é usado como fonte: só o PDV em dinheiro gera movimento de caixa.
@@ -71,7 +71,7 @@ O CASHIER lê e cadastra porque o PDV precisa encontrar/criar o cliente no balc�
 
 ## Frontend
 
-`/dashboard/clientes` (menu "Clientes", para OWNER/ADMIN/MANAGER/CASHIER): abas Ativos/Inativos/Todos com contagem, busca (valor adiado com `useDeferredValue`), tabela (cliente + telefone formatado, e-mail, pedidos, total gasto, última compra, situação), paginação, estados de carregando, erro com "Tentar novamente" e vazio (com e sem filtros). "Novo cliente" e edição em diálogo (nome, telefone, e-mail e CPF são validados antes de enviar; o servidor valida de novo); detalhe com os quatro indicadores e o histórico paginado de pedidos; inativar/reativar (gerência). Guard síncrono contra clique duplo em salvar e inativar/reativar.
+`/dashboard/clientes` (menu "Clientes", para OWNER/ADMIN/MANAGER/CASHIER): abas Ativos/Inativos/Todos com contagem, busca (valor adiado com `useDeferredValue`), tabela (cliente + telefone formatado, e-mail, pedidos, total gasto, última compra, situação), paginação, estados de carregando, erro com "Tentar novamente" e vazio (com e sem filtros). "Novo cliente" e edição em diálogo (nome, telefone, e-mail e CPF são validados antes de enviar; o servidor valida de novo); detalhe com os cinco indicadores (pedidos, total gasto, ticket médio, primeira e última compra) e o histórico paginado de pedidos; inativar/reativar (gerência). Guard síncrono contra clique duplo em salvar e inativar/reativar.
 
 ## Limitações desta fatia
 

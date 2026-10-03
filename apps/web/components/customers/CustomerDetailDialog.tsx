@@ -129,10 +129,11 @@ export function CustomerDetailDialog({
           </div>
           {customer.notes && <p className="rounded-ctl border border-line bg-surface-hover/40 px-3 py-2 text-sm text-foreground">{customer.notes}</p>}
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <StatCard label="Pedidos" value={metrics.ordersCount} hint={metrics.cancelledCount > 0 ? `${metrics.cancelledCount} cancelado(s) não contam` : undefined} />
             <StatCard label="Total gasto" value={formatCents(metrics.totalSpentCents)} featured />
             <StatCard label="Ticket médio" value={formatCents(metrics.averageTicketCents)} />
+            <StatCard label="Primeira compra" value={<span className="text-lg">{lastOrderLabel(metrics.firstOrderAt)}</span>} />
             <StatCard label="Última compra" value={<span className="text-lg">{lastOrderLabel(metrics.lastOrderAt)}</span>} />
           </div>
 

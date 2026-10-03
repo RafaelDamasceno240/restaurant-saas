@@ -28,6 +28,7 @@ export interface CustomerMetrics {
   cancelledCount: number;
   totalSpentCents: number;
   averageTicketCents: number;
+  firstOrderAt: string | null;
   lastOrderAt: string | null;
 }
 

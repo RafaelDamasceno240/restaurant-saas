@@ -202,6 +202,9 @@ describe('Customers x orders (e2e)', () => {
       expect(detail.metrics).toMatchObject({ ordersCount: 3, cancelledCount: 0, totalSpentCents: 15000, averageTicketCents: 5000 });
       const last = (await row(third.id)).createdAt;
       expect(new Date(detail.metrics.lastOrderAt).getTime()).toBe(last.getTime());
+      const oldest = (await row(first.id)).createdAt;
+      expect(new Date(detail.metrics.firstOrderAt).getTime()).toBe(oldest.getTime());
+      expect(oldest.getTime()).toBeLessThan(last.getTime()); // first and last are different purchases
 
       const history = (await get(ctx.accessToken, `/v1/customers/${c.id}/orders?pageSize=2`).expect(200)).body;
       expect(history.meta).toMatchObject({ total: 3, totalPages: 2, pageSize: 2 });
@@ -229,10 +232,13 @@ describe('Customers x orders (e2e)', () => {
       const kept = await order(ctx, { customerId: c.id }, 1); // 2500
       const cancelled = await order(ctx, { customerId: c.id }, 4); // 10000
       await patch(ctx.accessToken, `/v1/orders/${cancelled.id}/status`, { status: 'CANCELLED' }).expect(200);
+      // the cancelled order is the OLDEST one: it must not become the first purchase
+      await prisma().order.update({ where: { id: cancelled.id }, data: { createdAt: new Date(Date.now() - 5 * 86_400_000) } });
 
       const m = (await get(ctx.accessToken, `/v1/customers/${c.id}`).expect(200)).body.metrics;
       expect(m).toMatchObject({ ordersCount: 1, cancelledCount: 1, totalSpentCents: 2500, averageTicketCents: 2500 });
       expect(new Date(m.lastOrderAt).getTime()).toBe((await row(kept.id)).createdAt.getTime());
+      expect(new Date(m.firstOrderAt).getTime()).toBe((await row(kept.id)).createdAt.getTime());
 
       const history = (await get(ctx.accessToken, `/v1/customers/${c.id}/orders`).expect(200)).body.data;
       expect(history).toHaveLength(2);
@@ -249,7 +255,17 @@ describe('Customers x orders (e2e)', () => {
       const o = await order(ctx, { customerId: c.id });
       await patch(ctx.accessToken, `/v1/orders/${o.id}/status`, { status: 'CANCELLED' }).expect(200);
       const m = (await get(ctx.accessToken, `/v1/customers/${c.id}`).expect(200)).body.metrics;
-      expect(m).toEqual({ ordersCount: 0, cancelledCount: 1, totalSpentCents: 0, averageTicketCents: 0, lastOrderAt: null });
+      expect(m).toEqual({ ordersCount: 0, cancelledCount: 1, totalSpentCents: 0, averageTicketCents: 0, firstOrderAt: null, lastOrderAt: null });
+    });
+
+    it('a single order is both the first and the last purchase', async () => {
+      const ctx = await setup();
+      const c = await newCustomer(ctx);
+      const only = await order(ctx, { customerId: c.id });
+      const m = (await get(ctx.accessToken, `/v1/customers/${c.id}`).expect(200)).body.metrics;
+      const at = (await row(only.id)).createdAt.getTime();
+      expect(m).toMatchObject({ ordersCount: 1, totalSpentCents: 2500 });
+      expect([new Date(m.firstOrderAt).getTime(), new Date(m.lastOrderAt).getTime()]).toEqual([at, at]);
     });
 
     it('old orders (no link) stay valid and are never attributed to a customer by phone', async () => {
@@ -273,6 +289,22 @@ describe('Customers x orders (e2e)', () => {
       await order(ctx, { customerId: b.id }, 2);
       expect((await get(ctx.accessToken, `/v1/customers/${a.id}`).expect(200)).body.metrics).toMatchObject({ ordersCount: 1, totalSpentCents: 2500 });
       expect((await get(ctx.accessToken, `/v1/customers/${b.id}`).expect(200)).body.metrics).toMatchObject({ ordersCount: 1, totalSpentCents: 5000 });
+    });
+
+    it('first purchase ignores an older order of ANOTHER tenant even if it points at this customer id', async () => {
+      const ctx = await setup();
+      const other = await setup();
+      const c = await newCustomer(ctx);
+      const mine = await order(ctx, { customerId: c.id });
+      // The API never allows this link; it is forced in the database to prove the scope filter.
+      const foreign = await order(other, {});
+      await prisma().order.update({
+        where: { id: foreign.id },
+        data: { customerId: c.id, createdAt: new Date(Date.now() - 30 * 86_400_000) },
+      });
+      const m = (await get(ctx.accessToken, `/v1/customers/${c.id}`).expect(200)).body.metrics;
+      expect(m).toMatchObject({ ordersCount: 1, totalSpentCents: 2500 });
+      expect(new Date(m.firstOrderAt).getTime()).toBe((await row(mine.id)).createdAt.getTime());
     });
 
     it('rejects malformed history filters', async () => {
@@ -309,6 +341,12 @@ describe('Customers x orders (e2e)', () => {
       // ...but each one is measured only on the branches they may access
       expect(m1).toMatchObject({ ordersCount: 1, totalSpentCents: 2500 });
       expect(m2).toMatchObject({ ordersCount: 1, totalSpentCents: 5000 });
+      // first/last purchase follow the same branch scope; the OWNER sees the oldest across branches
+      const t1 = (await row(inBranch1.id)).createdAt.getTime();
+      const t2 = (await row(inBranch2.id)).createdAt.getTime();
+      expect([new Date(m1.firstOrderAt).getTime(), new Date(m1.lastOrderAt).getTime()]).toEqual([t1, t1]);
+      expect([new Date(m2.firstOrderAt).getTime(), new Date(m2.lastOrderAt).getTime()]).toEqual([t2, t2]);
+      expect([new Date(owner.firstOrderAt).getTime(), new Date(owner.lastOrderAt).getTime()]).toEqual([Math.min(t1, t2), Math.max(t1, t2)]);
 
       const h1 = (await get(manager1, `/v1/customers/${c.id}/orders`).expect(200)).body.data.map((o: { id: string }) => o.id);
       const h2 = (await get(manager2, `/v1/customers/${c.id}/orders`).expect(200)).body.data.map((o: { id: string }) => o.id);
