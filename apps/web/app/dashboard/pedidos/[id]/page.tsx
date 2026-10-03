@@ -171,16 +171,24 @@ export default function OrderDetailPage({ params }: PageProps) {
                     </li>
                   ))}
                 </ul>
-                {order.fulfillmentType === 'DELIVERY' && (
+                {(order.fulfillmentType === 'DELIVERY' || order.discount > 0) && (
                   <div className="space-y-1 border-t border-line px-4 py-3 text-sm text-muted-foreground">
                     <div className="flex items-center justify-between">
                       <span>Subtotal</span>
                       <span>{formatBRL(order.subtotal)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span>Taxa de entrega</span>
-                      <span>{formatBRL(order.deliveryFee)}</span>
-                    </div>
+                    {order.discount > 0 && (
+                      <div className="flex items-center justify-between text-success">
+                        <span>Desconto{order.couponCode ? ` (${order.couponCode})` : ''}</span>
+                        <span>− {formatBRL(order.discount)}</span>
+                      </div>
+                    )}
+                    {order.fulfillmentType === 'DELIVERY' && (
+                      <div className="flex items-center justify-between">
+                        <span>Taxa de entrega</span>
+                        <span>{formatBRL(order.deliveryFee)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="flex items-center justify-between border-t border-line px-4 py-3 text-base font-semibold text-foreground">

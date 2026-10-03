@@ -28,7 +28,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
 | Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
-| CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV (ver `docs/CRM.md`). Sem cashback, fidelidade, cupons, campanhas, WhatsApp nem segmentação; o PDV (tela) ainda não tem seletor de cliente |
+| CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV. Fatia 2: cupons e descontos (cálculo e validação no backend, PDV e checkout público, prévia, concorrência e idempotência, tela `/dashboard/cupons`). Ver `docs/CRM.md`. Sem cashback, fidelidade, campanhas, WhatsApp nem segmentação; o PDV (tela) ainda não tem seletor de cliente |
 | Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
 | NFC-e | NÃO IMPLEMENTADO | |
@@ -2518,3 +2518,15 @@ Primeira fatia da Fase 11. Detalhes e decisões em `docs/CRM.md`.
 - **Permissões:** `customers.read/create/update` (OWNER/ADMIN/MANAGER: todas; CASHIER: read + create). Entram pelo seed: rode `pnpm db:seed` e faça login de novo.
 - **Isolamento:** tenant sempre do token; histórico e métricas limitados às unidades que o usuário acessa; auditoria atômica (`CUSTOMER_CREATED/UPDATED/DEACTIVATED/REACTIVATED`) sem dado pessoal.
 - **Tela:** `/dashboard/clientes` (Clientes, para OWNER/ADMIN/MANAGER/CASHIER).
+
+## CRM — Cupons e descontos (2026-10-03)
+
+Segunda fatia da Fase 11. Detalhes e decisões em `docs/CRM.md`.
+
+- **Modelo:** `Coupon` (`coupons`) e `CouponRedemption` (`coupon_redemptions`); `orders.discountCents`, `couponId`, `couponCode`. Migration `20261002100000_coupons`, aditiva. Código canônico (maiúsculas, sem espaços) com índice único **parcial** entre os ativos por tenant; `CHECK`s de forma e de `usageCount <= usageLimit`; no pedido, `totalCents = subtotalCents - discountCents + deliveryFeeCents`.
+- **Regra:** desconto sobre o subtotal dos itens (a taxa de entrega não recebe), em centavos inteiros, nunca acima do subtotal; mínimos avaliados antes do desconto; tudo calculado e validado no servidor, só o código vem do cliente.
+- **Pedidos:** integrado ao `OrderCreationService` (PDV e checkout público), cupom resolvido dentro da transação com `SELECT ... FOR UPDATE`; consumo e trilha na mesma transação; idempotência preservada (replay não consome outro uso; duplicata simultânea recebe o pedido original).
+- **Prévia somente-leitura** para o PDV e para o checkout público; no público, toda recusa tem a mesma resposta.
+- **Permissões:** `coupons.read/create/update/apply` (OWNER/ADMIN/MANAGER: todas; CASHIER: só `apply`). Rode `pnpm db:seed` e faça login de novo.
+- **Limitações:** cancelar o pedido não devolve o uso; limite por cliente só com cliente vinculado (API do PDV); sem restrição por produto/categoria.
+- **Tela:** `/dashboard/cupons` (Cupons, para OWNER/ADMIN/MANAGER); campo de cupom no PDV e no checkout.

@@ -4,7 +4,8 @@ import { fromCents } from '../../common/util/money.util';
 import { isTenantBlocked } from '../../common/util/tenant-status.util';
 import { OrderCreationService, OrderWithItems } from '../order-creation/order-creation.service';
 import { BranchAccessService } from '../branches/branch-access.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, PublicCouponPreviewDto } from './dto/create-order.dto';
+import { toPublicCouponError } from '../coupons/coupon-errors';
 import { OrderResponseDto, PublicOrderConfirmationDto } from './dto/order-response.dto';
 
 @Injectable()
@@ -29,25 +30,54 @@ export class PublicOrdersService {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Restaurante não encontrado.' });
     }
 
-    const order = await this.orderCreation.createOrder({
-      tenantId: tenant.id,
-      // MVP: online orders go to the tenant's default branch (no branch
-      // picker on the public menu yet). No cash-sale flag: online CASH is
-      // paid on delivery/pickup and does not touch the drawer.
-      branchId: await this.branchAccess.getDefaultBranchId(tenant.id),
-      source: 'ONLINE',
-      items: dto.items,
-      customerName: dto.customer.name,
-      customerPhone: dto.customer.phone,
-      fulfillmentType: dto.fulfillmentType,
-      address: dto.address,
-      paymentMethod: dto.paymentMethod,
-      notes: dto.notes,
-      deliveryNotes: dto.deliveryNotes,
-      idempotencyKey: dto.idempotencyKey,
-    });
+    const branchId = await this.branchAccess.getDefaultBranchId(tenant.id);
+    let order: OrderWithItems;
+    try {
+      order = await this.orderCreation.createOrder({
+        tenantId: tenant.id,
+        // MVP: online orders go to the tenant's default branch (no branch
+        // picker on the public menu yet). No cash-sale flag: online CASH is
+        // paid on delivery/pickup and does not touch the drawer.
+        branchId,
+        source: 'ONLINE',
+        items: dto.items,
+        customerName: dto.customer.name,
+        customerPhone: dto.customer.phone,
+        fulfillmentType: dto.fulfillmentType,
+        address: dto.address,
+        paymentMethod: dto.paymentMethod,
+        notes: dto.notes,
+        deliveryNotes: dto.deliveryNotes,
+        couponCode: dto.couponCode ?? null,
+        idempotencyKey: dto.idempotencyKey,
+      });
+    } catch (error) {
+      // Anonymous endpoint: every coupon refusal looks the same (no code enumeration).
+      throw toPublicCouponError(error);
+    }
 
     return this.toDto(order);
+  }
+
+  // Read-only preview for the checkout. Resolves the tenant by slug only, prices the basket on
+  // the server and applies the same rules as the order; nothing is consumed or locked. A guest
+  // has no customer, and any coupon refusal is the same generic answer.
+  async previewCoupon(dto: PublicCouponPreviewDto) {
+    const tenant = await this.prisma.tenant.findUnique({ where: { slug: dto.restaurantSlug } });
+    if (!tenant || isTenantBlocked(tenant.status)) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Restaurante não encontrado.' });
+    }
+    try {
+      return await this.orderCreation.previewCoupon({
+        tenantId: tenant.id,
+        branchId: await this.branchAccess.getDefaultBranchId(tenant.id),
+        items: dto.items,
+        couponCode: dto.code,
+        customerId: null,
+      });
+    } catch (error) {
+      throw toPublicCouponError(error);
+    }
   }
 
   // Used by the confirmation page (GET /public/orders/:slug/:orderId) — also
@@ -111,6 +141,8 @@ export class PublicOrdersService {
         subtotal: fromCents(item.subtotalCents),
       })),
       subtotal: fromCents(order.subtotalCents),
+      discount: fromCents(order.discountCents),
+      couponCode: order.couponCode,
       deliveryFee: fromCents(order.deliveryFeeCents),
       total: fromCents(order.totalCents),
       createdAt: order.createdAt,

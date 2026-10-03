@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -104,6 +104,15 @@ export class CreateOrderDto {
   @MaxLength(300)
   deliveryNotes?: string;
 
+  // Fase 11 (fatia 2): optional coupon CODE. The discount is calculated and validated by the
+  // server; a guest checkout has no customer, so coupons with a per-customer limit never apply.
+  @ApiPropertyOptional({ example: 'PROMO10' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || undefined : value))
+  @IsString()
+  @MaxLength(40)
+  couponCode?: string;
+
   @ApiPropertyOptional({ example: '6f1c2c1e-6d0e-4f4a-9a57-2f3a0a1b9c11' })
   @IsOptional()
   @IsString()
@@ -111,4 +120,25 @@ export class CreateOrderDto {
   @MaxLength(100)
   @Matches(/^[A-Za-z0-9_-]+$/, { message: 'idempotencyKey deve conter apenas letras, números, "-" ou "_".' })
   idempotencyKey?: string;
+}
+
+// Body of the public coupon preview. Prices are never part of it: the server prices the items.
+@AllowExtraFields()
+export class PublicCouponPreviewDto {
+  @ApiProperty({ example: 'doce-hamburgueria' })
+  @IsString()
+  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+  restaurantSlug!: string;
+
+  @ApiProperty({ type: [OrderItemInputDto] })
+  @ValidateNested({ each: true })
+  @Type(() => OrderItemInputDto)
+  @ArrayMinSize(1)
+  @ArrayMaxSize(50)
+  items!: OrderItemInputDto[];
+
+  @ApiProperty({ example: 'PROMO10' })
+  @IsString()
+  @MaxLength(40)
+  code!: string;
 }

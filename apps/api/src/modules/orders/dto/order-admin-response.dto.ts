@@ -34,6 +34,9 @@ export class OrderListItemDto {
   @ApiProperty({ enum: PaymentMethod }) paymentMethod!: PaymentMethod;
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
   @ApiProperty({ example: 49.8 }) subtotal!: number;
+  // Discount from a coupon over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
+  @ApiProperty({ example: 5 }) discount!: number;
+  @ApiPropertyOptional({ nullable: true }) couponCode!: string | null;
   @ApiProperty({ example: 5 }) deliveryFee!: number;
   @ApiProperty({ example: 54.8 }) total!: number;
   @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;
@@ -68,6 +71,9 @@ export class OrderDetailDto {
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
   @ApiProperty({ type: [OrderItemResponseDto] }) items!: OrderItemResponseDto[];
   @ApiProperty({ example: 49.8 }) subtotal!: number;
+  // Discount from a coupon over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
+  @ApiProperty({ example: 5 }) discount!: number;
+  @ApiPropertyOptional({ nullable: true }) couponCode!: string | null;
   @ApiProperty({ example: 5 }) deliveryFee!: number;
   @ApiProperty({ example: 54.8 }) total!: number;
   @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;

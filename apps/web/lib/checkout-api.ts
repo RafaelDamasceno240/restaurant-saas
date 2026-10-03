@@ -1,4 +1,5 @@
 import { apiFetch } from './api-client';
+import type { CouponPreview } from './coupons-api';
 
 export type FulfillmentType = 'DELIVERY' | 'PICKUP';
 export type PaymentMethod = 'CASH' | 'PIX' | 'CARD';
@@ -27,6 +28,8 @@ export interface CreateOrderInput {
   notes?: string;
   // Delivery instructions, distinct from `notes` (the order's general observation).
   deliveryNotes?: string;
+  // Only the CODE travels: the server decides the discount, the limits and the eligibility.
+  couponCode?: string;
   idempotencyKey?: string;
 }
 
@@ -53,6 +56,8 @@ export interface OrderResponse {
   notes: string | null;
   items: OrderItemResponse[];
   subtotal: number;
+  discount: number;
+  couponCode: string | null;
   deliveryFee: number;
   total: number;
   createdAt: string;
@@ -73,4 +78,14 @@ export function getOrder(slug: string, orderId: string): Promise<PublicOrderConf
   return apiFetch<PublicOrderConfirmation>(
     `/public/orders/${encodeURIComponent(slug)}/${encodeURIComponent(orderId)}`,
   );
+}
+
+// Read-only preview of what a coupon would take off this basket. The server prices the items
+// itself; nothing is consumed, so the answer may be stale by the time the order is confirmed.
+export function previewCoupon(input: {
+  restaurantSlug: string;
+  items: { productId: string; quantity: number }[];
+  code: string;
+}): Promise<CouponPreview> {
+  return apiFetch<CouponPreview>('/public/orders/coupon-preview', { method: 'POST', body: input });
 }

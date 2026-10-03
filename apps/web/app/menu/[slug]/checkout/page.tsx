@@ -16,7 +16,10 @@ import {
   CreateOrderInput,
   FulfillmentType,
   PaymentMethod,
+  previewCoupon,
 } from '@/lib/checkout-api';
+import { CouponPreview } from '@/lib/coupons-api';
+import { couponApplyMessage, couponPreviewKey, totalAfterCouponCents } from '@/lib/coupons-logic';
 
 interface PageProps {
   params: { slug: string };
@@ -48,6 +51,14 @@ export default function CheckoutPage({ params }: PageProps) {
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Coupon: only the CODE is sent with the order. The preview is a read-only convenience valid for
+  // the exact basket it was asked for; the order itself is re-validated and recalculated by the
+  // server (and a refusal there is always the same generic message, so codes cannot be probed).
+  const couponBusy = useRef(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [couponPreview, setCouponPreview] = useState<{ key: string; preview: CouponPreview } | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponMessage, setCouponMessage] = useState<string | null>(null);
   // Delivery terms are informational here; the server is the source of truth and
   // recomputes the fee / enforces the minimum on order creation.
   const [terms, setTerms] = useState<PublicMenuDelivery | null>(null);
@@ -71,6 +82,45 @@ export default function CheckoutPage({ params }: PageProps) {
   const feeCents = fulfillmentType === 'DELIVERY' && terms?.enabled ? Math.round(terms.fee * 100) : 0;
   const minOrderCents = terms?.enabled ? Math.round(terms.minOrder * 100) : 0;
   const belowMinimum = fulfillmentType === 'DELIVERY' && minOrderCents > subtotalCents;
+  const couponCode = couponInput.trim();
+  const currentPreviewKey = couponCode
+    ? couponPreviewKey(params.slug, couponCode, visibleItems.map((i) => ({ productId: i.productId, quantity: i.quantity })))
+    : null;
+  const appliedCoupon = couponPreview && couponPreview.key === currentPreviewKey ? couponPreview.preview : null;
+  const discountCents = appliedCoupon?.discountCents ?? 0;
+  // Display only: the order recalculates this on the server (the fee is never discounted).
+  const displayTotalCents = totalAfterCouponCents(subtotalCents, discountCents, feeCents);
+
+  async function applyCoupon() {
+    if (!couponCode || visibleItems.length === 0 || couponBusy.current) return;
+    couponBusy.current = true;
+    setCouponLoading(true);
+    setCouponMessage(null);
+    const itemsPayload = visibleItems.map((item) => ({ productId: item.productId, quantity: item.quantity }));
+    const key = couponPreviewKey(params.slug, couponCode, itemsPayload);
+    try {
+      const preview = await previewCoupon({ restaurantSlug: params.slug, items: itemsPayload, code: couponCode });
+      setCouponPreview({ key, preview });
+    } catch (err) {
+      setCouponPreview(null);
+      setCouponMessage(
+        err instanceof ApiError && err.statusCode === 429
+          ? 'Muitas tentativas. Aguarde um instante e tente de novo.'
+          : err instanceof ApiError
+            ? couponApplyMessage(err.code, err.message)
+            : 'Não foi possível validar o cupom. Tente novamente.',
+      );
+    } finally {
+      couponBusy.current = false;
+      setCouponLoading(false);
+    }
+  }
+
+  function clearCoupon() {
+    setCouponInput('');
+    setCouponPreview(null);
+    setCouponMessage(null);
+  }
 
   if (visibleItems.length === 0) {
     return (
@@ -130,6 +180,7 @@ export default function CheckoutPage({ params }: PageProps) {
         fulfillmentType,
         paymentMethod,
         notes: notes.trim() || undefined,
+        couponCode: couponCode || undefined,
         idempotencyKey: orderKeyRef.current,
         ...(fulfillmentType === 'DELIVERY'
           ? { address, deliveryNotes: deliveryNotes.trim() || undefined }
@@ -179,6 +230,12 @@ export default function CheckoutPage({ params }: PageProps) {
           <span>Subtotal</span>
           <span>{formatCentsAsBRL(subtotalCents)}</span>
         </div>
+        {appliedCoupon && (
+          <div className="mt-1 flex items-center justify-between text-sm text-success">
+            <span>Desconto ({appliedCoupon.code})</span>
+            <span>− {formatCentsAsBRL(discountCents)}</span>
+          </div>
+        )}
         {fulfillmentType === 'DELIVERY' && terms?.enabled && (
           <div className="mt-1 flex items-center justify-between text-sm text-muted-foreground">
             <span>Taxa de entrega</span>
@@ -316,6 +373,66 @@ export default function CheckoutPage({ params }: PageProps) {
         </section>
 
         <section className="space-y-2 rounded-xl border border-line bg-surface p-4">
+          <h2 className="text-sm font-medium text-muted-foreground">Cupom de desconto (opcional)</h2>
+          <div className="flex gap-2">
+            <Input
+              placeholder="Código do cupom"
+              aria-label="Código do cupom"
+              value={couponInput}
+              maxLength={40}
+              autoComplete="off"
+              autoCapitalize="characters"
+              className="min-w-0 flex-1 uppercase"
+              onChange={(e) => {
+                setCouponInput(e.target.value);
+                setCouponMessage(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void applyCoupon();
+                }
+              }}
+            />
+            {/* Plain buttons: the shared Button is w-full and clsx cannot override it, which would
+                squeeze the code field on a phone. */}
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={couponLoading || !couponCode}
+              onClick={() => void applyCoupon()}
+            >
+              {couponLoading ? 'Validando...' : 'Aplicar'}
+            </button>
+            {couponCode && (
+              <button
+                type="button"
+                className="inline-flex shrink-0 items-center justify-center rounded-lg border border-line-strong px-3 py-2 text-sm text-muted-foreground transition hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={couponLoading}
+                onClick={clearCoupon}
+                aria-label="Remover cupom"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          {couponMessage && (
+            <p role="alert" className="text-sm text-danger">
+              {couponMessage}
+            </p>
+          )}
+          {appliedCoupon && (
+            <p role="status" className="text-sm text-success">
+              Cupom {appliedCoupon.code} aplicado: desconto de {formatCentsAsBRL(appliedCoupon.discountCents)}.
+            </p>
+          )}
+          {couponCode && !appliedCoupon && !couponMessage && (
+            <p className="text-xs text-muted-foreground">
+              O cupom é conferido ao confirmar o pedido. Toque em Aplicar para ver o desconto.
+            </p>
+          )}
+        </section>
+        <section className="space-y-2 rounded-xl border border-line bg-surface p-4">
           <h2 className="text-sm font-medium text-muted-foreground">Observações (opcional)</h2>
           <Textarea
             placeholder="Ex.: sem cebola, troco para R$ 50..."
@@ -331,7 +448,7 @@ export default function CheckoutPage({ params }: PageProps) {
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
             <div>
               <p className="text-xs text-muted-foreground">Total</p>
-              <p className="text-lg font-semibold">{formatCentsAsBRL(subtotalCents + feeCents)}</p>
+              <p className="text-lg font-semibold">{formatCentsAsBRL(displayTotalCents)}</p>
             </div>
             <Button type="submit" className="w-auto px-6" disabled={isSubmitting}>
               {isSubmitting ? 'Enviando...' : 'Confirmar pedido'}

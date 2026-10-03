@@ -79,6 +79,12 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
             </li>
           ))}
         </ul>
+        {order.discount > 0 && (
+          <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-sm text-success">
+            <span>Desconto{order.couponCode ? ` (${order.couponCode})` : ''}</span>
+            <span>− {formatBRL(order.discount)}</span>
+          </div>
+        )}
         {order.deliveryFee > 0 && (
           <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-sm text-muted-foreground">
             <span>Taxa de entrega</span>

@@ -16,6 +16,11 @@ import { InventoryService } from '../inventory/inventory.service';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { normalizeNotes } from '../delivery/delivery-input';
 import { DeliverySettings, priceDelivery } from '../delivery/delivery-pricing';
+import { orderTotalTooLarge } from '../delivery/delivery-errors';
+import { CouponRedemptionService } from '../coupons/coupon-redemption.service';
+import { computeOrderTotalCents } from '../coupons/coupon-calculations';
+import { normalizeCouponCode } from '../coupons/coupon-input';
+import { isCouponError } from '../coupons/coupon-errors';
 
 export interface OrderCreationItemInput {
   productId: string;
@@ -60,6 +65,10 @@ export interface OrderCreationInput {
   // Delivery instructions ("Portão azul"), kept on the delivery and separate from `notes`
   // (the order's general observation). Ignored unless fulfillmentType is DELIVERY.
   deliveryNotes?: string | null;
+  // Fase 11 (fatia 2): optional coupon CODE typed by the customer/cashier. It is the only coupon
+  // input there is: the discount, the limits and the eligibility are all decided here, on the
+  // server, inside the order transaction. The caller must have checked coupons.apply (PDV).
+  couponCode?: string | null;
   idempotencyKey?: string;
 }
 
@@ -111,9 +120,15 @@ export class OrderCreationService {
     private readonly audit: AuditService,
     private readonly cashRegister: CashRegisterService,
     private readonly inventory: InventoryService,
+    private readonly coupons: CouponRedemptionService,
   ) {}
 
-  async createOrder(input: OrderCreationInput): Promise<OrderWithItems> {
+  async createOrder(rawInput: OrderCreationInput): Promise<OrderWithItems> {
+    // One canonical spelling from here on: the replay comparison, the lock and the snapshot all
+    // see "PROMO10" whatever was typed. An empty code means no coupon.
+    const couponCode = rawInput.couponCode ? normalizeCouponCode(rawInput.couponCode) || null : null;
+    const input: OrderCreationInput = { ...rawInput, couponCode };
+
     if (input.idempotencyKey) {
       const replay = await this.findReplay(input);
       if (replay) return replay;
@@ -126,36 +141,7 @@ export class OrderCreationService {
       });
     }
 
-    // Every product is re-read from the DB, scoped to THIS tenant and
-    // active=true, in one query. Anything not in this result set — wrong
-    // id, another tenant's product, or inactive — is simply unavailable;
-    // the caller never learns which, to avoid leaking cross-tenant
-    // existence. Client-supplied price/name for any item is structurally
-    // impossible to reach here: OrderCreationItemInput only ever carries
-    // productId + quantity.
-    const productIds = [...new Set(input.items.map((i) => i.productId))];
-    const products = await this.prisma.product.findMany({
-      where: { id: { in: productIds }, tenantId: input.tenantId, active: true },
-    });
-    const productById = new Map(products.map((p) => [p.id, p]));
-
-    const unavailable = input.items.find((item) => !productById.has(item.productId));
-    if (unavailable) {
-      throw new BadRequestException({
-        code: 'PRODUCT_UNAVAILABLE',
-        message: 'Um ou mais produtos do pedido não estão mais disponíveis.',
-      });
-    }
-
-    const pricedItems: PricedOrderItem[] = input.items.map((item) => {
-      const product = productById.get(item.productId)!;
-      return {
-        productId: product.id,
-        productNameSnapshot: product.name,
-        unitPriceCents: product.priceCents,
-        quantity: item.quantity,
-      };
-    });
+    const pricedItems = await this.priceItems(input.tenantId, input.items);
 
     let result: OrderCreationResult;
     try {
@@ -163,7 +149,12 @@ export class OrderCreationService {
         this.createPricedOrderInTx(tx, { ...input, items: pricedItems }),
       );
     } catch (error) {
-      if (input.idempotencyKey && this.isIdempotencyKeyViolation(error)) {
+      // A duplicate of an in-flight request loses the race in one of two ways: it reaches the
+      // order insert and collides on the idempotency key, or - with a limited coupon - it waits
+      // for the coupon lock, then finds the usage already taken by the WINNER (its twin). In both
+      // cases the request is a replay, so it gets the original order (findReplay re-checks that
+      // it really is the same request) and never a spurious "coupon used up".
+      if (input.idempotencyKey && (this.isIdempotencyKeyViolation(error) || isCouponError(error))) {
         const replay = await this.findReplay(input);
         if (replay) return replay;
       }
@@ -172,6 +163,66 @@ export class OrderCreationService {
 
     await this.recordCreationAudit(result, input.source, input.recordCashSaleByUserId);
     return result.order;
+  }
+
+  // Every product is re-read from the DB, scoped to THIS tenant and active=true, in one query.
+  // Anything not in this result set - wrong id, another tenant's product, or inactive - is simply
+  // unavailable; the caller never learns which, to avoid leaking cross-tenant existence.
+  // Client-supplied price/name for any item is structurally impossible to reach here:
+  // OrderCreationItemInput only ever carries productId + quantity. Shared by the order and by
+  // the coupon preview, so both always price the basket the same way.
+  async priceItems(tenantId: string, items: OrderCreationItemInput[]): Promise<PricedOrderItem[]> {
+    const productIds = [...new Set(items.map((i) => i.productId))];
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: productIds }, tenantId, active: true },
+    });
+    const productById = new Map(products.map((p) => [p.id, p]));
+
+    const unavailable = items.find((item) => !productById.has(item.productId));
+    if (unavailable) {
+      throw new BadRequestException({
+        code: 'PRODUCT_UNAVAILABLE',
+        message: 'Um ou mais produtos do pedido não estão mais disponíveis.',
+      });
+    }
+
+    return items.map((item) => {
+      const product = productById.get(item.productId)!;
+      return {
+        productId: product.id,
+        productNameSnapshot: product.name,
+        unitPriceCents: product.priceCents,
+        quantity: item.quantity,
+      };
+    });
+  }
+
+  // Read-only: what the coupon would take off this basket right now. Same pricing and the same
+  // rules as the order; consumes nothing and locks nothing, so it may be stale by the time the
+  // order is created (the order re-validates everything inside its transaction).
+  async previewCoupon(input: {
+    tenantId: string;
+    branchId: string;
+    items: OrderCreationItemInput[];
+    couponCode: string;
+    customerId: string | null;
+  }) {
+    const priced = await this.priceItems(input.tenantId, input.items);
+    const subtotalCents = priced.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
+    const applied = await this.coupons.preview({
+      tenantId: input.tenantId,
+      branchId: input.branchId,
+      code: normalizeCouponCode(input.couponCode),
+      subtotalCents,
+      customerId: input.customerId,
+    });
+    return {
+      code: applied.code,
+      discountType: applied.discountType,
+      subtotalCents,
+      discountCents: applied.discountCents,
+      subtotalAfterDiscountCents: subtotalCents - applied.discountCents,
+    };
   }
 
   private isIdempotencyKeyViolation(error: unknown): boolean {
@@ -201,6 +252,7 @@ export class OrderCreationService {
       existing.customerName === input.customerName &&
       existing.customerPhone === input.customerPhone &&
       existing.customerId === (input.customerId ?? null) &&
+      existing.couponCode === (input.couponCode ?? null) &&
       signature(existing.items) === signature(input.items);
     if (!sameRequest) {
       throw new ConflictException({
@@ -222,10 +274,11 @@ export class OrderCreationService {
     const subtotalCents = orderItemsData.reduce((sum, i) => sum + i.subtotalCents, 0);
     const isDelivery = input.fulfillmentType === 'DELIVERY';
     // Fase 10: the delivery fee and minimum order come from the BRANCH settings,
-    // read here on the server — never from the request. No discount / tax yet.
-    const { deliveryFeeCents, totalCents } = isDelivery
+    // read here on the server — never from the request. The minimum is compared with the
+    // items subtotal BEFORE any coupon discount, and the fee is never discounted.
+    const { deliveryFeeCents } = isDelivery
       ? priceDelivery(subtotalCents, await this.readDeliverySettings(tx, input.tenantId, input.branchId))
-      : { deliveryFeeCents: 0, totalCents: subtotalCents };
+      : { deliveryFeeCents: 0 };
     const isCashSale = !!input.recordCashSaleByUserId && input.paymentMethod === 'CASH';
 
     // Locked FIRST (FOR UPDATE): a concurrent close waits for this sale to
@@ -234,6 +287,29 @@ export class OrderCreationService {
     const cashSessionId = isCashSale
       ? await this.cashRegister.lockOpenSessionForSale(tx, input.tenantId, input.branchId)
       : null;
+
+    // Fase 11 (fatia 2): the coupon is resolved AFTER the cash-session lock (fixed lock order:
+    // cash -> coupon) and BEFORE the order exists: the coupon row is locked FOR UPDATE and every
+    // rule is re-evaluated on it. If anything below fails, this whole transaction rolls back
+    // and the usage is never consumed. Orders without a coupon skip all of this.
+    const couponCode = input.couponCode ? normalizeCouponCode(input.couponCode) || null : null;
+    const applied = couponCode
+      ? await this.coupons.applyInTx(tx, {
+          tenantId: input.tenantId,
+          branchId: input.branchId,
+          code: couponCode,
+          subtotalCents,
+          customerId: input.customerId ?? null,
+        })
+      : null;
+    const discountCents = applied?.discountCents ?? 0;
+    // The single formula: total = subtotal - discount + delivery fee (never negative).
+    let totalCents: number;
+    try {
+      totalCents = computeOrderTotalCents(subtotalCents, discountCents, deliveryFeeCents);
+    } catch {
+      throw orderTotalTooLarge();
+    }
 
     const order = await tx.order.create({
       data: {
@@ -256,6 +332,9 @@ export class OrderCreationService {
         state: isDelivery ? input.address!.state : undefined,
         zipCode: isDelivery ? input.address!.zipCode : undefined,
         subtotalCents,
+        discountCents,
+        couponId: applied?.couponId ?? null,
+        couponCode: applied?.code ?? null,
         deliveryFeeCents,
         totalCents,
         tabId: input.tabId,
@@ -264,6 +343,14 @@ export class OrderCreationService {
       },
       include: { items: true },
     });
+
+    if (applied) {
+      await this.coupons.consumeInTx(tx, applied, {
+        tenantId: input.tenantId,
+        orderId: order.id,
+        customerId: input.customerId ?? null,
+      });
+    }
 
     // A DELIVERY order always has its operational record, created in the same
     // transaction (no DELIVERY order without a delivery, and vice versa).
@@ -333,6 +420,8 @@ export class OrderCreationService {
         orderNumber: order.orderNumber,
         source,
         totalCents: order.totalCents,
+        discountCents: order.discountCents,
+        couponCode: order.couponCode,
         deliveryFeeCents: order.deliveryFeeCents,
         itemCount: order.items.length,
       },

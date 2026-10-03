@@ -1,6 +1,7 @@
 import { apiFetch } from './api-client';
 import { AdminOrderDetail } from './orders-api';
 import { PaymentMethod } from './checkout-api';
+import type { CouponPreview } from './coupons-api';
 
 // Deliberately minimal — only productId + quantity per item, exactly what
 // the backend's CreatePosOrderDto accepts. No price, no name, no subtotal,
@@ -14,6 +15,8 @@ export interface CreatePosOrderInput {
   customerName?: string;
   customerPhone?: string;
   paymentMethod: PaymentMethod;
+  // Only the CODE travels (needs coupons.apply): the server decides everything about the discount.
+  couponCode?: string;
   idempotencyKey?: string;
 }
 
@@ -26,4 +29,12 @@ export function createPosOrder(
     body: input,
     accessToken,
   });
+}
+
+// Read-only preview for the current basket (needs coupons.apply). Prices are never sent.
+export function previewPosCoupon(
+  accessToken: string,
+  input: { branchId: string; items: { productId: string; quantity: number }[]; code: string },
+): Promise<CouponPreview> {
+  return apiFetch<CouponPreview>('/pos/orders/coupon-preview', { method: 'POST', body: input, accessToken });
 }

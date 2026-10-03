@@ -54,6 +54,9 @@ export interface AdminOrderListItem {
   paymentMethod: PaymentMethod;
   notes: string | null;
   subtotal: number;
+  // Coupon discount over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
+  discount: number;
+  couponCode: string | null;
   deliveryFee: number;
   total: number;
   delivery: AdminOrderDelivery | null;
@@ -92,6 +95,9 @@ export interface AdminOrderDetail {
   notes: string | null;
   items: AdminOrderItem[];
   subtotal: number;
+  // Coupon discount over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
+  discount: number;
+  couponCode: string | null;
   deliveryFee: number;
   total: number;
   delivery: AdminOrderDelivery | null;

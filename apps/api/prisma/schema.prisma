@@ -65,6 +65,8 @@ model Tenant {
   stockMovements    StockMovement[]
   suppliers         Supplier[]
   customers         Customer[]
+  coupons           Coupon[]
+  couponRedemptions CouponRedemption[]
   purchases         Purchase[]
   purchaseSequence  PurchaseSequence?
   productRecipes    ProductRecipe[]
@@ -103,6 +105,7 @@ model Branch {
   tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   userBranches      UserBranch[]
   orders            Order[]
+  coupons           Coupon[]
   deliveries        Delivery[]
   cashSessions      CashRegisterSession[]
   diningTables      DiningTable[]
@@ -348,10 +351,17 @@ model Order {
   zipCode      String?
 
   subtotalCents    Int
+  // Discount applied to the ITEMS subtotal by a coupon (Fase 11, fatia 2); 0 without coupon.
+  // Never applies to the delivery fee. CHECK: 0 <= discountCents <= subtotalCents.
+  discountCents    Int     @default(0)
   // Snapshot of the delivery fee charged on this order (0 for non-delivery).
-  // totalCents = subtotalCents + deliveryFeeCents.
-  deliveryFeeCents Int @default(0)
+  // totalCents = subtotalCents - discountCents + deliveryFeeCents (CHECK in the database).
+  deliveryFeeCents Int     @default(0)
   totalCents       Int
+  // Coupon used, if any. couponCode is the canonical code AT ORDER TIME (snapshot, survives
+  // the coupon being edited); couponId becomes NULL only if the coupon row ever disappears.
+  couponId         String?
+  couponCode       String?
 
   tabId          String? @unique
   idempotencyKey String?
@@ -359,19 +369,22 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch       Branch        @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  tab          Tab?          @relation(fields: [tabId], references: [id], onDelete: Restrict)
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  tab          Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
   items        OrderItem[]
   cashMovement CashMovement?
   payment      Payment?
   delivery     Delivery?
-  customer     Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  customer     Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  coupon       Coupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  redemption   CouponRedemption?
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, createdAt])
   @@index([tenantId, branchId, createdAt])
   @@index([tenantId, customerId, createdAt])
+  @@index([couponId])
   @@map("orders")
 }
 
@@ -835,11 +848,82 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orders Order[]
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders      Order[]
+  redemptions CouponRedemption[]
 
   @@index([tenantId, active, name])
   @@map("customers")
+}
+
+enum CouponDiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+// Promotional coupon (Fase 11, fatia 2). Every rule is evaluated by the backend; the client
+// only ever sends the code. `code` is stored in its canonical form (trim + upper case, only
+// A-Z 0-9 - _, 3 to 32 chars: CHECK in the database) and is immutable after creation.
+// Uniqueness lives in a partial unique index created in SQL (not expressible here):
+//   - (tenantId, code) WHERE active   -> never two ACTIVE coupons with the same code in a
+//     tenant, while an old inactive one may share it.
+// Coupons are never deleted: they are deactivated, so used coupons keep their history.
+// value: PERCENTAGE = whole percent 1..100; FIXED = cents. All money is integer cents.
+// usageCount is the number of ORDERS that consumed the coupon; it only changes inside the
+// order transaction while the coupon row is locked FOR UPDATE (CHECK usageCount <= usageLimit
+// is the last barrier). Cancelling an order does NOT give the usage back (known limitation).
+model Coupon {
+  id               String             @id @default(uuid())
+  tenantId         String
+  // NULL = valid at every branch of the tenant.
+  branchId         String?
+  code             String
+  description      String?
+  discountType     CouponDiscountType
+  value            Int
+  minOrderCents    Int                @default(0)
+  // Only for PERCENTAGE: caps the discount in cents.
+  maxDiscountCents Int?
+  startsAt         DateTime?
+  endsAt           DateTime?
+  active           Boolean            @default(true)
+  usageLimit       Int?
+  usageCount       Int                @default(0)
+  // Needs a linked customer (PDV); a guest checkout can never use such a coupon.
+  perCustomerLimit Int?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch      Branch?            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  orders      Order[]
+  redemptions CouponRedemption[]
+
+  @@index([tenantId, active, createdAt])
+  @@index([tenantId, code])
+  @@map("coupons")
+}
+
+// One row per order that used a coupon: the usage trail and the source for the per-customer
+// limit. orderId is unique (an order uses at most one coupon, and a retried transaction
+// cannot record it twice).
+model CouponRedemption {
+  id            String   @id @default(uuid())
+  tenantId      String
+  couponId      String
+  orderId       String   @unique
+  customerId    String?
+  discountCents Int
+  createdAt     DateTime @default(now())
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  coupon   Coupon    @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  order    Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([couponId, customerId])
+  @@index([tenantId, createdAt])
+  @@map("coupon_redemptions")
 }
 
 model PurchaseSequence {

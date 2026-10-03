@@ -5,7 +5,7 @@
 > cardápio administrativo e público, carrinho, checkout público, pedidos, KDS,
 > PDV, caixa, mesas, comandas, estoque e compras. **PARCIAL:** pagamentos (só registro
 > interno, sem gateway), delivery (taxa, despacho, falha/reentrega, confirmação, entregador interno e histórico; sem mapas/GPS nem entregador externo),
-> CRM (só a base de clientes: cadastro, histórico e métricas; sem fidelidade/campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
+> CRM (clientes: cadastro, histórico e métricas; cupons e descontos; sem fidelidade/campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
 > NFC-e, fidelidade/cashback, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
 > evidências em `docs/PROJECT_STATUS.md`.
 
@@ -101,7 +101,7 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 23 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery e clientes
+pnpm --filter api test:e2e    # e2e: 28 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes e cupons
 ```
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do
@@ -129,7 +129,7 @@ pnpm --filter api test:e2e
 ```
 
 Rode o seed novamente sempre que adicionar permissões novas ao `prisma/seed.ts`
-(por exemplo, as `customers.*` do CRM), e nunca aponte os e2e para o banco DEV:
+(por exemplo, as `customers.*` e `coupons.*` do CRM), e nunca aponte os e2e para o banco DEV:
 eles criam tenants e dados a cada execução.
 
 ## Lint, typecheck e build

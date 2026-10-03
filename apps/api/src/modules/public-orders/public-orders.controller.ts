@@ -1,8 +1,9 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../common/decorators/public.decorator';
 import { PublicOrdersService } from './public-orders.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, PublicCouponPreviewDto } from './dto/create-order.dto';
 import { OrderResponseDto, PublicOrderConfirmationDto } from './dto/order-response.dto';
 
 @ApiTags('public-orders')
@@ -19,6 +20,16 @@ export class PublicOrdersController {
   // this on its own.
   createOrder(@Body() dto: CreateOrderDto): Promise<OrderResponseDto> {
     return this.publicOrdersService.createOrder(dto);
+  }
+
+  // Tighter than the global limit: this answers "is this code good?" to anyone, so it must not
+  // be a cheap oracle for guessing codes.
+  @Post('coupon-preview')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Prévia somente-leitura do desconto de um cupom (não consome nada; resposta genérica se recusado)' })
+  previewCoupon(@Body() dto: PublicCouponPreviewDto) {
+    return this.publicOrdersService.previewCoupon(dto);
   }
 
   @Get(':slug/:orderId')

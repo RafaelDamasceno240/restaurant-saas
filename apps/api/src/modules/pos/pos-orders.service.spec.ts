@@ -69,3 +69,69 @@ describe('PosOrdersService customer linking', () => {
     expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ customerName: 'Outro', customerPhone: '11987654321' }));
   });
 });
+
+// Coupons in the PDV (Fase 11, slice 2). The HTTP-level cases live in test/coupons-orders.e2e-spec.ts;
+// this covers the permission gate, which cannot be exercised end to end for "has pos.create but not
+// coupons.apply" without editing the shared role matrix.
+describe('PosOrdersService coupon permission', () => {
+  const user = (permissions: string[]): AuthenticatedRequestUser => ({
+    userId: 'u1',
+    tenantId: 'tenant-1',
+    email: 'x@example.com',
+    roles: ['MANAGER'],
+    permissions,
+  });
+  const dto = (extra: object = {}) => ({
+    branchId: 'b1',
+    items: [{ productId: 'p1', quantity: 1 }],
+    paymentMethod: 'PIX' as const,
+    ...extra,
+  });
+
+  function build() {
+    const createOrder = jest.fn().mockResolvedValue({ id: 'o1' });
+    const previewCoupon = jest.fn().mockResolvedValue({ discountCents: 100 });
+    const assertAccess = jest.fn().mockResolvedValue(undefined);
+    const service = new PosOrdersService(
+      { createOrder, previewCoupon } as never,
+      { findOneForTenant: jest.fn().mockResolvedValue({ id: 'o1' }) } as never,
+      { assertAccess } as never,
+      { customer: { findFirst: jest.fn() } } as never,
+    );
+    return { service, createOrder, previewCoupon, assertAccess };
+  }
+
+  it('refuses a coupon without coupons.apply, before the order service is reached', async () => {
+    const { service, createOrder } = build();
+    await expect(
+      service.createOrder(user(['pos.create']), dto({ couponCode: 'PROMO10' }) as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(createOrder).not.toHaveBeenCalled();
+  });
+
+  it('an order without a coupon does not need coupons.apply', async () => {
+    const { service, createOrder } = build();
+    await service.createOrder(user(['pos.create']), dto() as never);
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ couponCode: null }));
+  });
+
+  it('passes only the typed code on, together with the tenant taken from the user', async () => {
+    const { service, createOrder } = build();
+    await service.createOrder(user(['pos.create', 'coupons.apply']), dto({ couponCode: 'PROMO10' }) as never);
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-1', couponCode: 'PROMO10' }));
+  });
+
+  it('the preview needs coupons.apply and checks the branch before pricing anything', async () => {
+    const { service, previewCoupon, assertAccess } = build();
+    const body = { branchId: 'b1', items: [{ productId: 'p1', quantity: 1 }], code: 'PROMO10' };
+    await expect(service.previewCoupon(user(['pos.create']), body as never)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(assertAccess).not.toHaveBeenCalled();
+    expect(previewCoupon).not.toHaveBeenCalled();
+
+    await service.previewCoupon(user(['coupons.apply']), body as never);
+    expect(assertAccess).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-1' }), 'b1');
+    expect(previewCoupon).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-1', branchId: 'b1', couponCode: 'PROMO10', customerId: null }),
+    );
+  });
+});

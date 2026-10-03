@@ -56,6 +56,10 @@ const PERMISSIONS: string[] = [
   'customers.read',
   'customers.create',
   'customers.update',
+  'coupons.read',
+  'coupons.create',
+  'coupons.update',
+  'coupons.apply',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -108,6 +112,10 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'customers.read',
     'customers.create',
     'customers.update',
+    'coupons.read',
+    'coupons.create',
+    'coupons.update',
+    'coupons.apply',
   ],
   CASHIER: [
     'orders.read',
@@ -125,6 +133,8 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'inventory.read',
     'customers.read',
     'customers.create',
+    // Uses a coupon at the counter; administering coupons stays with management.
+    'coupons.apply',
   ],
   WAITER: [
     'orders.read',

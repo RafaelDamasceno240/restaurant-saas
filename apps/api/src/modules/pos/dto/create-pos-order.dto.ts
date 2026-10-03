@@ -15,6 +15,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
 
 export class PosOrderItemDto {
@@ -49,6 +50,15 @@ export class CreatePosOrderDto {
   @IsOptional()
   @IsUUID()
   customerId?: string;
+
+  // Fase 11 (fatia 2): optional coupon CODE. Only the code travels: the discount, limits and
+  // eligibility are decided by the server. Needs the coupons.apply permission.
+  @ApiPropertyOptional({ example: 'PROMO10' })
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() || undefined : value))
+  @IsString()
+  @MaxLength(40)
+  couponCode?: string;
 
   @ApiPropertyOptional({ example: 'Cliente balcão' })
   @IsOptional()

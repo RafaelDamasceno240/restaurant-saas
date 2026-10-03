@@ -19,7 +19,9 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { categoriesApi, productsApi } from '@/lib/cardapio-api';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
-import { createPosOrder } from '@/lib/pos-api';
+import { createPosOrder, previewPosCoupon } from '@/lib/pos-api';
+import { CouponPreview } from '@/lib/coupons-api';
+import { couponApplyMessage, couponPreviewKey, totalAfterCouponCents } from '@/lib/coupons-logic';
 import { useActiveBranch } from '@/lib/use-active-branch';
 import { AdminOrderDetail } from '@/lib/orders-api';
 import { PaymentMethod } from '@/lib/checkout-api';
@@ -60,11 +62,13 @@ const MODES = [
 ] as const;
 
 export default function PdvPage() {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const { branchId } = useActiveBranch();
   const queryClient = useQueryClient();
   const searchRef = useRef<HTMLInputElement>(null);
   const saleKeyRef = useRef<string | null>(null);
+  // Synchronous guard for the coupon button: two clicks in one tick start only one preview.
+  const couponBusy = useRef(false);
 
   // PDV state is deliberately its own — NOT the public CartContext, NOT its
   // localStorage key. A sale here always starts empty and never persists
@@ -79,6 +83,13 @@ export default function PdvPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<AdminOrderDetail | null>(null);
   const [cartOpen, setCartOpen] = useState(false); // small screens: cart is a full-screen sheet
+  // Coupon: only the CODE is ever sent with the sale. The preview is a read-only convenience that
+  // is valid for the exact basket/branch/code it was asked for; the sale itself re-validates and
+  // recalculates everything on the server, whatever this screen shows.
+  const [couponInput, setCouponInput] = useState('');
+  const [couponPreview, setCouponPreview] = useState<{ key: string; preview: CouponPreview } | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponMessage, setCouponMessage] = useState<string | null>(null);
 
   const categoriesQuery = useQuery({
     queryKey: ['pdv-categories'],
@@ -95,6 +106,13 @@ export default function PdvPage() {
   const visibleProducts = filterPosProducts(products, search, categoryId);
   const subtotalCents = getSubtotalCents(cart);
   const totalQuantity = getTotalQuantity(cart);
+  // Applying coupons needs coupons.apply: OWNER/ADMIN/MANAGER/CASHIER (the API enforces it).
+  const canApplyCoupon = (user?.roles ?? []).some((role) => ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER'].includes(role));
+  const couponCode = couponInput.trim();
+  const currentPreviewKey = branchId && couponCode ? couponPreviewKey(branchId, couponCode, cart) : null;
+  const appliedCoupon = couponPreview && couponPreview.key === currentPreviewKey ? couponPreview.preview : null;
+  const discountCents = appliedCoupon?.discountCents ?? 0;
+  const totalCents = totalAfterCouponCents(subtotalCents, discountCents);
 
   function addProduct(product: { id: string; name: string; price: number }) {
     setCart((prev) =>
@@ -106,8 +124,39 @@ export default function PdvPage() {
     );
   }
 
+  async function applyCoupon() {
+    if (!couponCode || !branchId || cart.length === 0 || couponBusy.current) return;
+    couponBusy.current = true;
+    setCouponLoading(true);
+    setCouponMessage(null);
+    const key = couponPreviewKey(branchId, couponCode, cart);
+    try {
+      const preview = await previewPosCoupon(accessToken as string, {
+        branchId,
+        items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        code: couponCode,
+      });
+      setCouponPreview({ key, preview });
+    } catch (err) {
+      setCouponPreview(null);
+      setCouponMessage(
+        err instanceof ApiError ? couponApplyMessage(err.code, err.message) : 'Não foi possível validar o cupom.',
+      );
+    } finally {
+      couponBusy.current = false;
+      setCouponLoading(false);
+    }
+  }
+
+  function clearCoupon() {
+    setCouponInput('');
+    setCouponPreview(null);
+    setCouponMessage(null);
+  }
+
   function resetSale() {
     saleKeyRef.current = null;
+    clearCoupon();
     setCart([]);
     setSearch('');
     setCategoryId(null);
@@ -138,6 +187,7 @@ export default function PdvPage() {
         customerName: customerName.trim() || undefined,
         customerPhone: customerPhone.trim() || undefined,
         paymentMethod,
+        couponCode: couponCode || undefined,
         idempotencyKey: saleKeyRef.current,
       });
       saleKeyRef.current = null;
@@ -196,6 +246,11 @@ export default function PdvPage() {
           <p className="text-3xl font-bold tracking-tight text-foreground">
             {formatBRL(Math.round(confirmation.total * 100))}
           </p>
+          {confirmation.discount > 0 && (
+            <p className="text-sm text-success">
+              Cupom {confirmation.couponCode}: desconto de {formatBRL(Math.round(confirmation.discount * 100))}
+            </p>
+          )}
           <div className="flex flex-col gap-2">
             <Button size="lg" onClick={resetSale} autoFocus>
               Nova venda
@@ -310,6 +365,60 @@ export default function PdvPage() {
           />
         </div>
 
+        {canApplyCoupon && (
+          <div className="space-y-1.5">
+            <div className="flex gap-2">
+              <Input
+                placeholder="Cupom (opcional)"
+                aria-label="Cupom"
+                value={couponInput}
+                maxLength={40}
+                autoComplete="off"
+                autoCapitalize="characters"
+                className="font-mono uppercase"
+                onChange={(e) => {
+                  setCouponInput(e.target.value);
+                  setCouponMessage(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void applyCoupon();
+                  }
+                }}
+              />
+              <Button
+                variant="outline"
+                onClick={() => void applyCoupon()}
+                loading={couponLoading}
+                disabled={couponLoading || !couponCode || cart.length === 0}
+              >
+                Aplicar
+              </Button>
+              {couponCode && (
+                <Button variant="ghost" aria-label="Remover cupom" onClick={clearCoupon} disabled={couponLoading}>
+                  <X className="h-4 w-4" aria-hidden />
+                </Button>
+              )}
+            </div>
+            {couponMessage && (
+              <p role="alert" className="text-xs text-danger">
+                {couponMessage}
+              </p>
+            )}
+            {appliedCoupon && (
+              <p role="status" className="text-xs text-success">
+                Cupom {appliedCoupon.code} aplicado: desconto de {formatBRL(appliedCoupon.discountCents)}
+              </p>
+            )}
+            {couponCode && !appliedCoupon && !couponMessage && (
+              <p className="text-xs text-muted-foreground">
+                O cupom é conferido pelo servidor ao finalizar. Toque em Aplicar para ver o desconto desta venda.
+              </p>
+            )}
+          </div>
+        )}
+
         <div role="radiogroup" aria-label="Forma de pagamento" className="grid grid-cols-3 gap-2">
           {PAYMENT_OPTIONS.map((option) => {
             const Icon = option.icon;
@@ -335,9 +444,21 @@ export default function PdvPage() {
           })}
         </div>
 
+        {appliedCoupon && (
+          <div className="space-y-0.5 text-sm text-muted-foreground">
+            <div className="flex items-baseline justify-between">
+              <span>Subtotal</span>
+              <span className="tabular-nums">{formatBRL(subtotalCents)}</span>
+            </div>
+            <div className="flex items-baseline justify-between text-success">
+              <span>Desconto ({appliedCoupon.code})</span>
+              <span className="tabular-nums">− {formatBRL(discountCents)}</span>
+            </div>
+          </div>
+        )}
         <div className="flex items-baseline justify-between">
           <span className="text-sm text-muted-foreground">Total</span>
-          <span className="text-2xl font-bold tracking-tight text-foreground">{formatBRL(subtotalCents)}</span>
+          <span className="text-2xl font-bold tracking-tight text-foreground">{formatBRL(totalCents)}</span>
         </div>
 
         {error && <Alert>{error}</Alert>}
@@ -480,7 +601,7 @@ export default function PdvPage() {
       {!cartOpen && (
         <div className="shrink-0 border-t border-line bg-surface p-3 lg:hidden">
           <Button size="lg" fullWidth onClick={() => setCartOpen(true)} icon={<ShoppingCart className="h-5 w-5" />}>
-            Ver venda · {totalQuantity} · {formatBRL(subtotalCents)}
+            Ver venda · {totalQuantity} · {formatBRL(totalCents)}
           </Button>
         </div>
       )}
