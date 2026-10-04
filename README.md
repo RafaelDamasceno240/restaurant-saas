@@ -61,6 +61,11 @@ cp apps/web/.env.example apps/web/.env
 Ajuste os segredos em `apps/api/.env` (`JWT_ACCESS_SECRET` e
 `JWT_REFRESH_SECRET` precisam de ao menos 32 caracteres cada).
 
+O frontend não tem variável pública de API: o navegador chama sempre
+`/api/...` no próprio host do Next, que repassa para a API. `API_URL`
+(`apps/web/.env`, só de servidor) diz onde a API está; sem ela vale
+`http://localhost:4000/v1`. Ver `docs/authentication.md`.
+
 ## Infraestrutura local (Docker)
 
 ```bash
@@ -94,14 +99,15 @@ pnpm dev:web       # somente o frontend
 
 - API: http://localhost:4000/v1
 - Swagger (fora de produção): http://localhost:4000/docs
-- Frontend: http://localhost:3000
+- Frontend: http://localhost:3000 (as chamadas do navegador vão para
+  http://localhost:3000/api/..., repassadas à API pelo Next)
 
 ## Testes
 
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 28 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes e cupons
+pnpm --filter api test:e2e    # e2e: 30 suítes cobrindo auth, sessão, proxy reverso, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes e cupons
 ```
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do
@@ -139,6 +145,54 @@ pnpm lint
 pnpm typecheck
 pnpm build
 ```
+
+O build da API roda `prisma generate` antes do `nest build`. No Windows ele
+falha com `EPERM` se a API estiver rodando (o processo segura o engine do
+Prisma): pare a API antes de buildar.
+
+## Deploy (API + PostgreSQL + Redis, e Next.js em outro host)
+
+O que o código espera da plataforma — nenhum arquivo de configuração de
+provedor é versionado.
+
+**API**
+
+| Etapa | Comando |
+| --- | --- |
+| Build | `pnpm --filter api build` (`prisma generate && nest build`; precisa das devDependencies) |
+| Migrations | `pnpm --filter api prisma:deploy` |
+| Seed de papéis e permissões | `pnpm --filter api prisma:seed:prod` (seed compilado, não precisa de `ts-node`) |
+| Start | `pnpm --filter api start:prod` (`node dist/src/main.js`) |
+
+Variáveis: `NODE_ENV=production` (sem ela o cookie de sessão sai sem `Secure`
+e o Swagger fica público), `DATABASE_URL`, `REDIS_URL`, `JWT_ACCESS_SECRET`,
+`JWT_REFRESH_SECRET`, `CORS_ORIGIN` (origem do frontend), `TRUST_PROXY_HOPS`
+e, opcionais, `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`,
+`AUTH_RATE_LIMIT_PER_MINUTE`. A porta vem de `PORT`. Health checks:
+`/health/live` (processo) e `/health/ready` (PostgreSQL + Redis).
+
+O seed é obrigatório num banco novo — sem papéis e permissões o registro de
+restaurante responde `500` — e é idempotente. Num banco que **já tenha
+pedidos**, rode antes o preflight somente leitura da migration de cupons.
+
+O processo encerra de forma ordenada no `SIGTERM`: termina as requisições em
+andamento e só então desconecta do banco. Isso leva até ~5 s (conexões
+keep-alive), então a plataforma precisa dar esse tempo antes do `SIGKILL`.
+
+**Frontend**
+
+Variável: `API_URL` = URL pública da API **com `/v1`**, definida para o build
+e para a execução. Não existe mais `NEXT_PUBLIC_API_URL`.
+
+**Conferir no ambiente real antes de abrir para usuários**
+
+- `TRUST_PROXY_HOPS`: faça login pelo site e veja `refresh_tokens.ip`. Tem de
+  ser o seu IP público. Se aparecer um endereço do proxy ou da plataforma do
+  frontend, todos os usuários estão dividindo o mesmo limite de requisições
+  (o refresh de sessão aceita 30 por minuto por endereço) — ajuste o número.
+- Cookie de sessão: `refresh_token` guardado para o domínio do **frontend**,
+  com `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
+- `/docs` da API respondendo `404`.
 
 ## Estrutura de pastas (resumo)
 

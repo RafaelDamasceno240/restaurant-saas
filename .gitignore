@@ -6,8 +6,7 @@ out/
 .turbo/
 *.log
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
 coverage/
 .DS_Store

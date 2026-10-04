@@ -4,6 +4,7 @@ export interface AppConfig {
   env: EnvConfig['NODE_ENV'];
   port: number;
   corsOrigin: string;
+  trustProxyHops: number;
   database: {
     url: string;
   };
@@ -24,6 +25,7 @@ export default (): AppConfig => {
     env: env.NODE_ENV,
     port: Number(env.PORT),
     corsOrigin: env.CORS_ORIGIN,
+    trustProxyHops: Number(env.TRUST_PROXY_HOPS) || 0,
     database: { url: env.DATABASE_URL },
     redis: { url: env.REDIS_URL },
     jwt: {

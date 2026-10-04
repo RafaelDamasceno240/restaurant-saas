@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
@@ -6,6 +6,8 @@ import { AppConfig } from '../../config/configuration';
 
 @Injectable()
 export class RedisHealthIndicator extends HealthIndicator {
+  private readonly logger = new Logger(RedisHealthIndicator.name);
+
   constructor(private readonly config: ConfigService<AppConfig, true>) {
     super();
   }
@@ -19,15 +21,16 @@ export class RedisHealthIndicator extends HealthIndicator {
     try {
       await client.connect();
       const pong = await client.ping();
-      const isHealthy = pong === 'PONG';
       client.disconnect();
-      if (!isHealthy) {
-        throw new HealthCheckError('Redis check failed', this.getStatus(key, false));
+      if (pong !== 'PONG') {
+        throw new Error(`unexpected PING reply: ${pong}`);
       }
       return this.getStatus(key, true);
     } catch (error) {
       client.disconnect();
-      throw new HealthCheckError('Redis check failed', this.getStatus(key, false, { message: (error as Error).message }));
+      // Same rule as the Postgres check: the cause is logged, never returned.
+      this.logger.error(`Redis check failed: ${(error as Error).message}`);
+      throw new HealthCheckError('Redis check failed', this.getStatus(key, false));
     }
   }
 }

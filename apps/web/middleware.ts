@@ -7,14 +7,14 @@ import { NextRequest, NextResponse } from 'next/server';
 // two-layer approach (fast edge check + real client-side check) avoids a
 // network round trip in the Edge middleware for every navigation.
 //
-// This ONLY works because the API sets the refresh_token cookie with
-// Path=/ (see apps/api .../auth.controller.ts). The API (a different
-// port/origin in dev) and this Next.js server are different hosts as far
-// as the browser's cookie jar is concerned; the cookie becomes visible
-// here purely through host-only + Path='/' matching. If the API ever
-// narrows that cookie's Path again, this check silently breaks (always
-// sees no cookie -> always redirects to /login). See
-// docs/authentication.md "Escopo do cookie de refresh".
+// This works because the browser only talks to this host: every API call
+// goes through the same-origin /api rewrite (next.config.js), so the
+// refresh_token cookie the API sets is stored for the frontend host and
+// arrives here on every navigation — in production too, where the API runs
+// on another domain. It also depends on the cookie's Path=/ (see apps/api
+// .../auth.controller.ts): if the API ever narrows that Path, this check
+// silently breaks (always sees no cookie -> always redirects to /login).
+// See docs/authentication.md "Escopo do cookie de refresh".
 export function middleware(request: NextRequest) {
   const hasSession = request.cookies.has('refresh_token');
   if (!hasSession) {

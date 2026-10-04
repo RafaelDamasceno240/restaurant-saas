@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "nest start --watch",
-    "build": "nest build",
-    "start:prod": "node dist/main.js",
+    "build": "prisma generate && nest build",
+    "start:prod": "node dist/src/main.js",
     "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "jest",
@@ -14,6 +14,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:prod": "node dist/prisma/seed.js",
     "prisma:constraints": "prisma db execute --file prisma/sql/cash_register_constraints.sql --schema prisma/schema.prisma",
     "prisma:tabs-constraints": "prisma db execute --file prisma/sql/tabs_constraints.sql --schema prisma/schema.prisma"
   },

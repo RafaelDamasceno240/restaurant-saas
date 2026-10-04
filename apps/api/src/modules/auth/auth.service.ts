@@ -256,19 +256,39 @@ export class AuthService {
     return result;
   }
 
-  async logout(userId: string, rawRefreshToken: string | undefined, meta: RequestMeta): Promise<void> {
-    if (rawRefreshToken) {
-      const tokenHash = hashToken(rawRefreshToken);
-      await this.prisma.refreshToken.updateMany({
-        where: { tokenHash, userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+  // Ends the session the refresh token belongs to. The token itself is the
+  // credential: it is signed with the refresh secret and matched by hash to a
+  // row of its own user, so the caller cannot choose whose session ends — and
+  // no access token is needed, which keeps logout working after it expired.
+  // Anything else (no cookie, bad signature, expired, already revoked) ends
+  // nothing and says nothing.
+  async logout(rawRefreshToken: string | undefined, meta: RequestMeta): Promise<void> {
+    if (!rawRefreshToken) {
+      return;
     }
+
+    let payload: { sub: string };
+    try {
+      payload = await this.jwt.verifyAsync(rawRefreshToken, {
+        secret: this.config.get('jwt', { infer: true }).refreshSecret,
+      });
+    } catch {
+      return;
+    }
+
+    const revoked = await this.prisma.refreshToken.updateMany({
+      where: { tokenHash: hashToken(rawRefreshToken), userId: payload.sub, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    if (revoked.count === 0) {
+      return;
+    }
+
     await this.audit.record({
-      userId,
+      userId: payload.sub,
       action: 'LOGOUT',
       entity: 'User',
-      entityId: userId,
+      entityId: payload.sub,
       ip: meta.ip,
       userAgent: meta.userAgent,
     });

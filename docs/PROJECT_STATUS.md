@@ -327,13 +327,12 @@ definitivamente fechada.
   próprias apps (`api`/`web`) fica para uma fase de deploy futura
   (decisão consciente, ver `docs/architecture.md`).
 - **Limitação de produção herdada da correção do cookie (item 11 do
-  histórico acima)**: `Path=/` resolve dev local porque `localhost:3000` e
-  `localhost:4000` são o mesmo host (cookie `Domain` ignora porta). Em
-  produção, se frontend e API ficarem em hosts distintos de verdade (ex.
-  `app.exemplo.com` e `api.exemplo.com`), esse cookie **não** vai
-  atravessar — `Path` não resolve isso, só `Domain` compartilhado (mesmo
-  domínio-raiz + proxy reverso) ou uma troca de estratégia (BFF no
-  Next.js). Ver `docs/authentication.md` → "Escopo do cookie de refresh".
+  histórico acima) — resolvida na fase pré-deploy**: `Path=/` só resolvia
+  dev local, porque `localhost:3000` e `localhost:4000` são o mesmo host. O
+  navegador agora só fala com o frontend: o Next reescreve `/api/*` para a
+  API, e o cookie fica guardado para o host do frontend mesmo com a API em
+  outro domínio. Ver `docs/authentication.md` → "Escopo do cookie de
+  refresh".
   Precisa ser decidido antes do primeiro deploy real, não necessariamente
   nesta fase.
 
@@ -1847,7 +1846,8 @@ JWT_REFRESH_EXPIRES_IN=7d
 CORS_ORIGIN=http://localhost:3000
 ```
 
-`apps/web/.env`: `NEXT_PUBLIC_API_URL=http://localhost:4000/v1`
+`apps/web/.env`: `API_URL=http://localhost:4000/v1` (só de servidor; o
+navegador usa o proxy `/api`)
 
 `.env` (raiz, só para o `docker-compose.yml`): `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `REDIS_PORT` — valores

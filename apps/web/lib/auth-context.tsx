@@ -9,7 +9,15 @@ import {
   useState,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiFetch, ApiError } from './api-client';
+import {
+  apiFetch,
+  ApiError,
+  AuthSession,
+  endSession,
+  refreshSession,
+  startSession,
+  subscribeToSession,
+} from './api-client';
 
 export interface AuthUser {
   id: string;
@@ -42,25 +50,15 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-let refreshInFlight: Promise<AuthResponse> | null = null;
-
-function refreshSession(): Promise<AuthResponse> {
-  refreshInFlight ??= apiFetch<AuthResponse>('/auth/refresh', { method: 'POST' }).finally(() => {
-    refreshInFlight = null;
-  });
-  return refreshInFlight;
-}
-
-interface AuthResponse {
-  accessToken: string;
-  expiresIn: number;
-  user: { id: string; tenantId: string; name: string; email: string; roles: string[] };
-}
+type AuthResponse = AuthSession;
 
 // Access tokens live only in memory (React state) — never in localStorage —
 // per the security guidance in docs/authentication.md. The refresh token is
 // an httpOnly cookie the browser manages automatically; this provider never
 // touches it directly.
+//
+// Renewal itself lives in api-client.ts (a 401 on an authenticated call
+// refreshes once and retries); this provider only mirrors its outcome.
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -80,6 +78,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const me = await apiFetch<AuthUser>('/auth/me', { accessToken: token });
     setUser(me);
   }, []);
+
+  // Keeps React in step with the session held by api-client.ts: a renewal
+  // hands every screen the new token, and a refused refresh ends the session
+  // here. The dashboard layout sends a user-less session back to /login.
+  useEffect(
+    () =>
+      subscribeToSession((event) => {
+        if (event.type === 'refreshed') {
+          setAccessToken(event.session.accessToken);
+          return;
+        }
+        setUser(null);
+        setAccessToken(null);
+        queryClient.clear();
+      }),
+    [queryClient],
+  );
 
   // On first load, try to silently exchange a still-valid refresh cookie for
   // a fresh access token, so a page refresh doesn't force a re-login.
@@ -109,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // cached data, even for a query that fires the instant accessToken
       // updates.
       queryClient.clear();
+      startSession(res.accessToken);
       setAccessToken(res.accessToken);
       await fetchMe(res.accessToken);
     },
@@ -122,23 +138,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: input,
       });
       queryClient.clear();
+      startSession(res.accessToken);
       setAccessToken(res.accessToken);
       await fetchMe(res.accessToken);
     },
     [fetchMe, queryClient],
   );
 
+  // The API identifies the session to end by the refresh cookie alone, so no
+  // access token is sent: signing out has to work after it expired too.
   const logout = useCallback(async () => {
     try {
-      await apiFetch('/auth/logout', { method: 'POST', accessToken });
+      await apiFetch('/auth/logout', { method: 'POST' });
     } catch {
       // Even if the server call fails, clear local state so the UI reflects
       // "logged out" immediately.
     }
+    endSession();
     setUser(null);
     setAccessToken(null);
     queryClient.clear();
-  }, [accessToken, queryClient]);
+  }, [queryClient]);
 
   return (
     <AuthContext.Provider value={{ user, accessToken, isLoading, login, register, logout }}>

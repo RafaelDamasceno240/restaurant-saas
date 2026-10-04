@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { redactUrlQuery } from '../util/redact-url.util';
 
 interface ErrorBody {
   statusCode: number;
@@ -39,7 +40,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     if (statusCode >= 500) {
       this.logger.error(
-        `Unhandled exception on ${request.method} ${request.url}`,
+        `Unhandled exception on ${request.method} ${redactUrlQuery(request.url)}`,
         exception instanceof Error ? exception.stack : undefined,
       );
     }

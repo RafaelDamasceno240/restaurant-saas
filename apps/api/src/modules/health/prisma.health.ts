@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { HealthIndicator, HealthIndicatorResult, HealthCheckError } from '@nestjs/terminus';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -7,6 +7,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 // for Terminus integration: a trivial round-trip query.
 @Injectable()
 export class PrismaHealthIndicator extends HealthIndicator {
+  private readonly logger = new Logger(PrismaHealthIndicator.name);
+
   constructor(private readonly prisma: PrismaService) {
     super();
   }
@@ -16,10 +18,10 @@ export class PrismaHealthIndicator extends HealthIndicator {
       await this.prisma.$queryRaw`SELECT 1`;
       return this.getStatus(key, true);
     } catch (error) {
-      throw new HealthCheckError(
-        'Postgres check failed',
-        this.getStatus(key, false, { message: (error as Error).message }),
-      );
+      // The cause goes to the server log only: /health is public, and a
+      // driver error names hosts, ports and database users.
+      this.logger.error(`Postgres check failed: ${(error as Error).message}`);
+      throw new HealthCheckError('Postgres check failed', this.getStatus(key, false));
     }
   }
 }

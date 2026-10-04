@@ -15,6 +15,10 @@ export const envSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
   CORS_ORIGIN: z.string().default('http://localhost:3000'),
+
+  // Reverse proxies in front of the API whose X-Forwarded-For entry is
+  // trusted (see common/http/trust-proxy.ts). 0 = none, the local default.
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

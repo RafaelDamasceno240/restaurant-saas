@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { LoggerModule as PinoLoggerModule } from 'nestjs-pino';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/configuration';
+import { redactUrlQuery } from '../util/redact-url.util';
 
 // Structured JSON logging. Redacts anything that could leak credentials or
 // tokens, and stitches the requestId set by RequestIdMiddleware into every
@@ -24,6 +25,14 @@ import { AppConfig } from '../../config/configuration';
               'res.headers["set-cookie"]',
             ],
             censor: '[REDACTED]',
+          },
+          // The access log keeps which parameters were sent, never their values.
+          serializers: {
+            req: (req: { url?: string; query?: unknown }) => ({
+              ...req,
+              url: redactUrlQuery(req.url),
+              query: undefined,
+            }),
           },
           customProps: (req) => ({
             requestId: (req as { requestId?: string }).requestId,
