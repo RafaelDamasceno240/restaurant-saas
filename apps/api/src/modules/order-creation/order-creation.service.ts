@@ -22,6 +22,12 @@ import { computeOrderTotalCents } from '../coupons/coupon-calculations';
 import { normalizeCouponCode } from '../coupons/coupon-input';
 import { isCouponError } from '../coupons/coupon-errors';
 
+// Orders that use the SAME limited coupon queue on its row lock, each holding a pooled
+// connection while it waits. Prisma's defaults (5 s to finish, 2 s to get a connection) are tuned
+// for short uncontended transactions; a burst on one coupon could run past them and surface as
+// a 500 even though nothing is wrong. Same budget the other transactional modules use.
+const ORDER_TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
+
 export interface OrderCreationItemInput {
   productId: string;
   quantity: number;
@@ -145,8 +151,9 @@ export class OrderCreationService {
 
     let result: OrderCreationResult;
     try {
-      result = await this.prisma.$transaction((tx) =>
-        this.createPricedOrderInTx(tx, { ...input, items: pricedItems }),
+      result = await this.prisma.$transaction(
+        (tx) => this.createPricedOrderInTx(tx, { ...input, items: pricedItems }),
+        ORDER_TRANSACTION_OPTIONS,
       );
     } catch (error) {
       // A duplicate of an in-flight request loses the race in one of two ways: it reaches the

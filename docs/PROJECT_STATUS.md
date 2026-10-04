@@ -2542,3 +2542,9 @@ Detalhes em `docs/authentication.md`.
 - **Visitante anônimo** não dispara mais `POST /auth/refresh`; slug inexistente responde 404 real.
 - `GET /orders?branchId=` de outro restaurante responde `404 BRANCH_NOT_FOUND` também para OWNER/ADMIN.
 - **Pendências:** rate limit ainda em memória por instância; suspensão de restaurante/bloqueio de usuário feitos direto no banco não derrubam o access token já emitido (até 15 min); busca de clientes com dado pessoal em query string; logout sem rede não apaga o cookie.
+
+## Cupons — auditoria e DEV (2026-10-04)
+
+- Auditoria sem defeitos: regras, cálculo, limites, concorrência, idempotência, isolamento e permissões cobertos por 92 testes e2e (6 arquivos). Os dois casos antes não medidos foram executados: 40 pedidos simultâneos no mesmo cupom limitado e venda em dinheiro com total 0.
+- Ajuste: a transação de criação do pedido passou a ter orçamento explícito (20 s / 10 s).
+- Banco DEV: migration `20261002100000_coupons` aplicada com `prisma migrate deploy` depois de preflight somente leitura e backup verificado por restauração; seed executado (57 permissões); sem drift.

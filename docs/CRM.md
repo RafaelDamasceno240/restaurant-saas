@@ -210,7 +210,8 @@ Não existe `DELETE`: cupons usados mantêm o histórico. As respostas de pedido
 - **Cancelar o pedido não devolve a utilização do cupom.** Pedidos cancelados contam no limite global e no limite por cliente (decisão desta fatia: nunca ultrapassa o limite, no máximo fica conservador).
 - Cupom com limite por cliente só é exercitável pela API do PDV: a tela do PDV ainda não tem seletor de cliente.
 - Um cupom por pedido; sem restrição por produto/categoria; sem cupom em mesa/comanda; sem exclusão física.
-- O lock por cupom serializa os pedidos que usam **o mesmo** cupom (aceito).
+- O lock por cupom serializa os pedidos que usam **o mesmo** cupom (aceito). A transação de criação do pedido tem orçamento explícito (20 s para concluir, 10 s para obter conexão), como os demais módulos transacionais; medido: 40 pedidos simultâneos no mesmo cupom com limite 7 terminam em 7 criados e 33 recusados (`409 COUPON_USAGE_LIMIT_REACHED`), sem nenhum erro 5xx. Cargas maiores não foram medidas.
+- Venda em dinheiro com desconto de 100% é uma venda válida de total 0: grava um movimento `SALE` de R$ 0,00 no caixa (mantém a regra "sem pedido sem SALE") e o fechamento continua batendo (testado).
 - A busca da lista usa `contains` sem índice trigram.
 
 ## Deploy
