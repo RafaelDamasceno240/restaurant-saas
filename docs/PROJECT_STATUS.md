@@ -2530,3 +2530,15 @@ Segunda fatia da Fase 11. Detalhes e decisões em `docs/CRM.md`.
 - **Permissões:** `coupons.read/create/update/apply` (OWNER/ADMIN/MANAGER: todas; CASHIER: só `apply`). Rode `pnpm db:seed` e faça login de novo.
 - **Limitações:** cancelar o pedido não devolve o uso; limite por cliente só com cliente vinculado (API do PDV); sem restrição por produto/categoria.
 - **Tela:** `/dashboard/cupons` (Cupons, para OWNER/ADMIN/MANAGER); campo de cupom no PDV e no checkout.
+
+## Segurança e sessão — fechamento (2026-10-04)
+
+Detalhes em `docs/authentication.md`.
+
+- **Proxy `/api`, renovação de token e logout pelo cookie** (commit `14f9b31`): o navegador só fala com o frontend; `401` renova uma vez e repete uma vez; logout funciona com access token expirado.
+- **Revogação imediata do access token:** logout e reuso de refresh token gravam uma marca no Redis conferida a cada requisição (`401 SESSION_REVOKED`); falha aberta se o Redis cair. O Redis passa a ser usado em tempo de requisição (antes só no health check).
+- **Login sem vazamento:** senha conferida antes de revelar conta bloqueada ou restaurante suspenso; e-mail desconhecido custa o mesmo Argon2.
+- **CSP com nonce** em todas as páginas (sem `unsafe-inline`/`unsafe-eval` para scripts), `Permissions-Policy` e HSTS em produção. Todas as rotas do web passaram a ser dinâmicas.
+- **Visitante anônimo** não dispara mais `POST /auth/refresh`; slug inexistente responde 404 real.
+- `GET /orders?branchId=` de outro restaurante responde `404 BRANCH_NOT_FOUND` também para OWNER/ADMIN.
+- **Pendências:** rate limit ainda em memória por instância; suspensão de restaurante/bloqueio de usuário feitos direto no banco não derrubam o access token já emitido (até 15 min); busca de clientes com dado pessoal em query string; logout sem rede não apaga o cookie.

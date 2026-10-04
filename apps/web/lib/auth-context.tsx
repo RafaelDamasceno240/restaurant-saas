@@ -6,8 +6,10 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from 'react';
+import { usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   apiFetch,
@@ -18,6 +20,7 @@ import {
   startSession,
   subscribeToSession,
 } from './api-client';
+import { isPublicArea } from './session-area';
 
 export interface AuthUser {
   id: string;
@@ -62,7 +65,15 @@ type AuthResponse = AuthSession;
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // The session is only restored where it is used. On the public menu, the demo and the landing
+  // page the provider stays idle (lib/session-area.ts) and nothing is "loading"; the exchange
+  // happens the first time the visitor reaches the sign-in pages or the dashboard. `isLoading`
+  // is derived, not stored: the render that enters such a page already says "loading", so the
+  // dashboard layout never sees a finished-but-empty session and bounces to /login.
+  const needsSession = !isPublicArea(usePathname());
+  const [restored, setRestored] = useState(false);
+  const restoreStarted = useRef(false);
+  const isLoading = needsSession && !restored;
   // Every admin/authenticated query (['pdv-products'], ['orders', tab],
   // ['kds-orders', status], etc.) is tenant-scoped server-side, but the
   // QueryClient itself has no notion of "which tenant" a cached response
@@ -99,6 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // On first load, try to silently exchange a still-valid refresh cookie for
   // a fresh access token, so a page refresh doesn't force a re-login.
   useEffect(() => {
+    if (!needsSession || restoreStarted.current) return;
+    restoreStarted.current = true;
     (async () => {
       try {
         const refreshed = await refreshSession();
@@ -108,10 +121,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setAccessToken(null);
       } finally {
-        setIsLoading(false);
+        setRestored(true);
       }
     })();
-  }, [fetchMe]);
+  }, [fetchMe, needsSession]);
 
   const login = useCallback(
     async (email: string, password: string) => {

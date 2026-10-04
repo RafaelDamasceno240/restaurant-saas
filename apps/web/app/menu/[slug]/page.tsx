@@ -1,11 +1,22 @@
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPublicMenu } from '@/lib/public-menu-api';
 import { ApiError } from '@/lib/api-client';
+import { loadPublicMenu } from '@/lib/public-menu-server';
 import { ProductCard } from '@/components/menu/ProductCard';
 import { CartFloatingButton } from '@/components/menu/CartFloatingButton';
 
 interface PageProps {
   params: { slug: string };
+}
+
+// Shares the lookup with the segment layout (which is what answers 404 for an unknown slug).
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  try {
+    const menu = await loadPublicMenu(params.slug);
+    return { title: menu.restaurant.name + ' — Cardápio' };
+  } catch {
+    return {};
+  }
 }
 
 // Server Component: the fetch happens on the server before any HTML is
@@ -15,7 +26,7 @@ interface PageProps {
 export default async function PublicMenuPage({ params }: PageProps) {
   let menu;
   try {
-    menu = await getPublicMenu(params.slug);
+    menu = await loadPublicMenu(params.slug);
   } catch (err) {
     if (err instanceof ApiError && err.statusCode === 404) {
       notFound();

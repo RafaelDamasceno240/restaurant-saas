@@ -17,8 +17,22 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { durationToMs, hashToken } from './token.util';
 import { AccessTokenPayload } from './strategies/jwt.strategy';
+import { SessionRevocationService } from './session-revocation.service';
 
 const REFRESH_REUSE_GRACE_MS = 10_000;
+
+// Hash of a password nobody has. A login for an unknown e-mail verifies against it, so "no such
+// account" costs the same argon2 work as "wrong password" and the response time does not tell
+// the two apart. Computed once, on first use.
+let unknownAccountHash: Promise<string> | null = null;
+const hashForUnknownAccount = (): Promise<string> => (unknownAccountHash ??= argon2.hash(randomUUID()));
+
+// `sid` ties the refresh token to its session; refresh tokens issued before it existed lack it.
+interface RefreshTokenPayload {
+  sub: string;
+  jti: string;
+  sid?: string;
+}
 
 export interface RequestMeta {
   ip?: string;
@@ -53,6 +67,7 @@ export class AuthService {
     private readonly jwt: JwtService,
     private readonly config: ConfigService<AppConfig, true>,
     private readonly audit: AuditService,
+    private readonly revocations: SessionRevocationService,
   ) {}
 
   async register(dto: RegisterDto, meta: RequestMeta): Promise<AuthResult> {
@@ -148,15 +163,12 @@ export class AuthService {
       new UnauthorizedException({ code: 'INVALID_CREDENTIALS', message: 'E-mail ou senha inválidos.' });
 
     if (!user) {
+      await argon2.verify(await hashForUnknownAccount(), dto.password);
       throw invalidCredentials();
     }
-    if (user.status !== 'ACTIVE') {
-      throw new UnauthorizedException({
-        code: 'USER_NOT_ACTIVE',
-        message: 'Esta conta não está ativa.',
-      });
-    }
 
+    // The password is checked BEFORE anything is said about the account: whether it exists, is
+    // blocked or belongs to a suspended restaurant is only told to someone who proved to own it.
     const passwordValid = await argon2.verify(user.passwordHash, dto.password);
     if (!passwordValid) {
       await this.audit.record({
@@ -169,6 +181,13 @@ export class AuthService {
         userAgent: meta.userAgent,
       });
       throw invalidCredentials();
+    }
+
+    if (user.status !== 'ACTIVE') {
+      throw new UnauthorizedException({
+        code: 'USER_NOT_ACTIVE',
+        message: 'Esta conta não está ativa.',
+      });
     }
 
     if (isTenantBlocked(user.tenant.status)) {
@@ -197,7 +216,7 @@ export class AuthService {
     const invalid = () =>
       new UnauthorizedException({ code: 'INVALID_REFRESH_TOKEN', message: 'Sessão inválida ou expirada.' });
 
-    let payload: { sub: string; jti: string };
+    let payload: RefreshTokenPayload;
     try {
       payload = await this.jwt.verifyAsync(rawRefreshToken, {
         secret: this.config.get('jwt', { infer: true }).refreshSecret,
@@ -219,6 +238,9 @@ export class AuthService {
           where: { userId: stored.userId, revokedAt: null },
           data: { revokedAt: new Date() },
         });
+        // Whoever holds the stolen token may also hold an access token bought with it: every
+        // access token the user has right now dies with the refresh tokens.
+        await this.revocations.revokeUser(stored.userId);
         await this.audit.record({
           userId: stored.userId,
           action: 'REFRESH_TOKEN_REUSE_DETECTED',
@@ -247,7 +269,8 @@ export class AuthService {
       throw invalid();
     }
 
-    const result = await this.issueTokensFor(user, meta);
+    // Rotation renews the tokens, not the session: the same `sid` goes on.
+    const result = await this.issueTokensFor(user, meta, payload.sid);
     await this.prisma.refreshToken.update({
       where: { id: stored.id },
       data: { replacedBy: hashToken(result.refreshToken) },
@@ -267,7 +290,7 @@ export class AuthService {
       return;
     }
 
-    let payload: { sub: string };
+    let payload: RefreshTokenPayload;
     try {
       payload = await this.jwt.verifyAsync(rawRefreshToken, {
         secret: this.config.get('jwt', { infer: true }).refreshSecret,
@@ -282,6 +305,12 @@ export class AuthService {
     });
     if (revoked.count === 0) {
       return;
+    }
+
+    // The refresh token is dead; this makes the access token of the same session die with it
+    // instead of staying valid until it expires.
+    if (payload.sid) {
+      await this.revocations.revokeSession(payload.sid);
     }
 
     await this.audit.record({
@@ -313,7 +342,13 @@ export class AuthService {
     };
   }
 
-  private async issueTokensFor(user: User, meta: RequestMeta): Promise<AuthResult> {
+  // `sessionId` is passed only by refresh(), to keep the session it is renewing; login and
+  // register start a new one.
+  private async issueTokensFor(
+    user: User,
+    meta: RequestMeta,
+    sessionId: string = randomUUID(),
+  ): Promise<AuthResult> {
     const { roles, permissions } = await this.loadRolesAndPermissions(user.id, user.tenantId);
     const jwtConfig = this.config.get('jwt', { infer: true });
 
@@ -324,17 +359,19 @@ export class AuthService {
       roles,
       permissions,
       jti: randomUUID(),
+      sid: sessionId,
+      iatMs: Date.now(),
     };
     const accessToken = await this.jwt.signAsync(accessPayload, {
       secret: jwtConfig.accessSecret,
       expiresIn: jwtConfig.accessExpiresIn,
     });
 
-    const jti = randomUUID();
-    const refreshToken = await this.jwt.signAsync(
-      { sub: user.id, jti },
-      { secret: jwtConfig.refreshSecret, expiresIn: jwtConfig.refreshExpiresIn },
-    );
+    const refreshPayload: RefreshTokenPayload = { sub: user.id, jti: randomUUID(), sid: sessionId };
+    const refreshToken = await this.jwt.signAsync(refreshPayload, {
+      secret: jwtConfig.refreshSecret,
+      expiresIn: jwtConfig.refreshExpiresIn,
+    });
     const refreshExpiresAt = new Date(Date.now() + durationToMs(jwtConfig.refreshExpiresIn));
 
     await this.prisma.refreshToken.create({

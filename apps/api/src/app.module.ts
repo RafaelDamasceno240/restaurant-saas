@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
@@ -44,6 +45,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     LoggerModule,
     PrismaModule,
+    RedisModule,
     AuditModule,
     AuthModule,
     UsersModule,

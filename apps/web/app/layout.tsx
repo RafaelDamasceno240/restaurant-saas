@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { Providers } from './providers';
 import './globals.css';
 
@@ -8,6 +9,12 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  // The Content-Security-Policy (middleware.ts) only runs scripts that carry this request's
+  // nonce, and Next can only stamp it on HTML rendered for the request. Reading it here makes
+  // every route dynamic; a statically prerendered page would ship scripts without a nonce and
+  // the browser would refuse all of them.
+  headers().get('x-nonce');
+
   return (
     <html lang="pt-BR">
       <head>

@@ -50,6 +50,18 @@ export class OrdersService {
         message: 'Você não tem acesso a esta unidade.',
       });
     }
+    // OWNER/ADMIN have no branch list to be checked against, so the branch itself is checked:
+    // one that is not of this tenant is "not found", like in every other module, instead of an
+    // empty page. (Any status: the history of a deactivated branch stays readable.)
+    if (query.branchId && !allowedBranchIds) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: query.branchId, tenantId },
+        select: { id: true },
+      });
+      if (!branch) {
+        throw new NotFoundException({ code: 'BRANCH_NOT_FOUND', message: 'Unidade não encontrada.' });
+      }
+    }
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
     const where: Prisma.OrderWhereInput = {

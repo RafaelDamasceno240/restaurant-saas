@@ -107,7 +107,7 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 30 suítes cobrindo auth, sessão, proxy reverso, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes e cupons
+pnpm --filter api test:e2e    # e2e: 31 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes e cupons
 ```
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do

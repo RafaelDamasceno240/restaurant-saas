@@ -19,6 +19,8 @@ const nextConfig = {
   async rewrites() {
     return [{ source: '/api/:path*', destination: `${apiUrl}/:path*` }];
   },
+  // Static headers for every response. The Content-Security-Policy is not here: it carries a
+  // per-request nonce, so middleware.ts builds it (lib/csp.ts).
   async headers() {
     return [
       {
@@ -28,6 +30,13 @@ const nextConfig = {
           // The dashboard acts on a session, so it must never render inside another site's frame.
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // The app uses none of these; an injected script or embedded content cannot ask for them.
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()' },
+          // Browsers ignore this over plain http (local `next start`), so it only binds real
+          // deployments: once seen over https, the host is never contacted over http again.
+          ...(process.env.NODE_ENV === 'production'
+            ? [{ key: 'Strict-Transport-Security', value: 'max-age=63072000' }]
+            : []),
         ],
       },
     ];
