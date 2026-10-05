@@ -292,7 +292,7 @@ export default function MesaDetailPage() {
       <div className="flex flex-wrap items-center gap-3">
         <Link
           href="/dashboard/mesas"
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground touch:min-h-10"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden />
           Mesas
@@ -328,7 +328,7 @@ export default function MesaDetailPage() {
               <button
                 type="button"
                 onClick={() => setCategoryId(null)}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                className={`rounded-full px-3 py-1.5 text-sm font-medium touch:py-2.5 ${
                   categoryId === null ? 'bg-primary text-primary-foreground' : 'bg-surface-hover text-muted-foreground hover:text-foreground'
                 }`}
               >
@@ -339,7 +339,7 @@ export default function MesaDetailPage() {
                   key={category.id}
                   type="button"
                   onClick={() => setCategoryId(category.id)}
-                  className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                  className={`rounded-full px-3 py-1.5 text-sm font-medium touch:py-2.5 ${
                     categoryId === category.id ? 'bg-primary text-primary-foreground' : 'bg-surface-hover text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -384,7 +384,7 @@ export default function MesaDetailPage() {
                       <button
                         type="button"
                         onClick={() => handleRemoveItem(item.id)}
-                        className="text-xs text-danger underline"
+                        className="inline-flex items-center text-xs text-danger underline touch:min-h-10 touch:px-2"
                       >
                         Remover
                       </button>
@@ -419,7 +419,7 @@ export default function MesaDetailPage() {
                       <button
                         type="button"
                         onClick={() => startEditingNotes(item.id, item.notes)}
-                        className="mt-0.5 block text-left text-xs text-muted-foreground underline decoration-dotted"
+                        className="mt-0.5 block text-left text-xs text-muted-foreground underline decoration-dotted touch:min-h-10 touch:py-2"
                       >
                         {item.notes || 'Adicionar observação'}
                       </button>
@@ -429,7 +429,7 @@ export default function MesaDetailPage() {
                         <button
                           type="button"
                           onClick={() => handleChangeQuantity(item.id, item.quantity - 1)}
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95"
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
                         >
                           −
                         </button>
@@ -437,7 +437,7 @@ export default function MesaDetailPage() {
                         <button
                           type="button"
                           onClick={() => handleChangeQuantity(item.id, item.quantity + 1)}
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95"
+                          className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
                         >
                           +
                         </button>

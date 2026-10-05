@@ -14,12 +14,14 @@ const VARIANT: Record<ButtonVariant, string> = {
   'danger-ghost': 'bg-transparent text-danger hover:bg-danger/10 font-medium',
 };
 
+// The `touch:` sizes give a finger a 40-44px target on phones and tablets; a mouse keeps the
+// compact sizes.
 const SIZE: Record<ButtonSize, string> = {
-  sm: 'h-8 gap-1.5 px-3 text-xs',
-  md: 'h-9 gap-2 px-3.5 text-sm',
+  sm: 'h-8 gap-1.5 px-3 text-xs touch:h-10',
+  md: 'h-9 gap-2 px-3.5 text-sm touch:h-11',
   lg: 'h-12 gap-2 px-5 text-base',
-  icon: 'h-9 w-9',
-  'icon-sm': 'h-7 w-7',
+  icon: 'h-9 w-9 touch:h-11 touch:w-11',
+  'icon-sm': 'h-7 w-7 touch:h-10 touch:w-10',
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

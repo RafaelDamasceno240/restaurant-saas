@@ -105,7 +105,9 @@ export default function KitchenDisplayPage() {
         </Button>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto p-3 sm:grid-cols-2 sm:overflow-hidden xl:grid-cols-4">
+      {/* Phone: one column, each status as tall as its orders, the whole board scrolls (rows sized
+          to their content). From `sm` up: a fixed board where each column scrolls by itself. */}
+      <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-1 gap-3 overflow-y-auto p-3 sm:auto-rows-auto sm:grid-cols-2 sm:overflow-hidden xl:grid-cols-4">
         {COLUMN_STATUSES.map((status) => {
           const query = columnData[status];
           const orders: AdminOrderListItem[] = query.data?.data ?? [];
@@ -113,7 +115,7 @@ export default function KitchenDisplayPage() {
             <section
               key={status}
               aria-label={COLUMN_LABELS[status]}
-              className="flex min-h-[16rem] flex-col overflow-hidden rounded-card border border-line bg-background sm:min-h-0"
+              className="flex flex-col overflow-hidden rounded-card border border-line bg-background sm:min-h-0"
             >
               <h2 className="flex items-center justify-between border-b border-line bg-surface px-3 py-2.5 text-sm font-bold uppercase tracking-wide text-foreground">
                 <span className="flex items-center gap-2">
@@ -122,7 +124,7 @@ export default function KitchenDisplayPage() {
                 </span>
                 <span className="rounded-full bg-surface-hover px-2.5 py-0.5 text-xs text-foreground">{orders.length}</span>
               </h2>
-              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-2.5">
+              <div className="space-y-3 p-2.5 sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
                 {query.isLoading ? (
                   <LoadingState className="py-6" />
                 ) : query.isError ? (

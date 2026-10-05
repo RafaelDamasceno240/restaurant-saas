@@ -381,7 +381,7 @@ export default function PdvPage() {
                       type="button"
                       onClick={() => setCart((prev) => decrementItem(prev, item.productId))}
                       aria-label={`Diminuir ${item.name}`}
-                      className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95"
+                      className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
                     >
                       <Minus className="h-4 w-4" />
                     </button>
@@ -390,7 +390,7 @@ export default function PdvPage() {
                       type="button"
                       onClick={() => setCart((prev) => incrementItem(prev, item.productId))}
                       aria-label={`Aumentar ${item.name}`}
-                      className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95"
+                      className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
@@ -605,7 +605,7 @@ export default function PdvPage() {
       <section aria-label="Catálogo" className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-4">
         <div role="tablist" aria-label="Modo de venda" className="flex w-max max-w-full gap-1 overflow-x-auto rounded-ctl bg-surface-2 p-1">
           {MODES.map((mode) => {
-            const base = 'whitespace-nowrap rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors';
+            const base = 'whitespace-nowrap rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors touch:py-2.5';
             if ('active' in mode) {
               return (
                 <span key={mode.key} role="tab" aria-selected className={clsx(base, 'bg-surface-hover text-foreground shadow-sm')}>

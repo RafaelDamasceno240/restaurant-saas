@@ -93,7 +93,7 @@ export default function OrderDetailPage({ params }: PageProps) {
     <Page>
       <Link
         href="/dashboard/pedidos"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground touch:min-h-10"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
         Pedidos

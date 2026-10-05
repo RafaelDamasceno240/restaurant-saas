@@ -6,7 +6,7 @@
 > PDV, caixa, mesas, comandas, estoque e compras. **PARCIAL:** pagamentos (só registro
 > interno, sem gateway), delivery (taxa, despacho, falha/reentrega, confirmação, entregador interno e histórico; sem mapas/GPS nem entregador externo),
 > CRM (clientes: cadastro, histórico, segmentos e métricas; cupons; fidelidade por pontos; cashback; fiado/contas a receber; sem campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
-> NFC-e, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
+> NFC-e, WhatsApp/IA, relatórios, cobrança SaaS, push com o app fechado. O painel é instalável (PWA): ver `docs/PWA.md`. Detalhes e
 > evidências em `docs/PROJECT_STATUS.md`.
 
 ## Visão geral
@@ -208,6 +208,8 @@ Ver `docs/architecture.md` para a árvore completa e as decisões por trás dela
 - `docs/DEMO_MODE.md` — modo demonstração (`/demo/*`, dados fictícios, sem API)
 - `docs/RESTAURANT_PROFILE.md` — perfil do restaurante (real x demonstrativo)
 - `docs/INVENTORY.md`, `docs/PURCHASES.md`, `docs/DELIVERY.md`, `docs/CRM.md`, `docs/CASH_REGISTER_PLAN.md`, `docs/UI_DESIGN_SYSTEM.md`
+- `docs/LOYALTY.md`, `docs/CASHBACK.md`, `docs/RECEIVABLES.md` — fidelidade, cashback e fiado
+- `docs/PWA.md` — app instalável, service worker, offline, avisos e uso com o dedo
 
 ## Roadmap (não implementar sem aprovação explícita)
 

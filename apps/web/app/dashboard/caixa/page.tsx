@@ -333,7 +333,7 @@ export default function CaixaPage() {
                         <Td className="text-muted-foreground">{m.createdBy.name}</Td>
                         <Td>
                           {m.orderNumber ? (
-                            <Link className="font-medium text-accent hover:underline" href={`/dashboard/pedidos/${m.orderId}`}>
+                            <Link className="inline-flex items-center font-medium text-accent hover:underline touch:min-h-10" href={`/dashboard/pedidos/${m.orderId}`}>
                               #{m.orderNumber}
                             </Link>
                           ) : (

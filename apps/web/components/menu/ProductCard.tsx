@@ -62,7 +62,7 @@ export function ProductCard({ product, restaurant }: Props) {
             type="button"
             onClick={handleAdd}
             aria-label={`Adicionar ${product.name} ao carrinho`}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition touch:min-h-11 touch:px-4 touch:text-sm ${
               justAdded
                 ? 'bg-success text-background'
                 : 'bg-primary text-primary-foreground hover:bg-primary-hover'

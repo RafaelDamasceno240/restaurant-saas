@@ -1,4 +1,4 @@
-import { isPublicArea } from './session-area';
+import { isPublicArea, isSessionRefusal } from './session-area';
 
 describe('isPublicArea', () => {
   it('treats the landing page, the public menu and the demo as session-free', () => {
@@ -21,5 +21,21 @@ describe('isPublicArea', () => {
   it('asks for the session when the path is unknown', () => {
     expect(isPublicArea(null)).toBe(false);
     expect(isPublicArea('')).toBe(false);
+  });
+});
+
+describe('isSessionRefusal', () => {
+  it('only 401 and 403 mean "not signed in"', () => {
+    expect(isSessionRefusal(401)).toBe(true);
+    expect(isSessionRefusal(403)).toBe(true);
+  });
+
+  it('no answer, a server error or a rate limit say nothing about the session', () => {
+    expect(isSessionRefusal(null)).toBe(false);
+    expect(isSessionRefusal(500)).toBe(false);
+    expect(isSessionRefusal(502)).toBe(false);
+    expect(isSessionRefusal(503)).toBe(false);
+    expect(isSessionRefusal(429)).toBe(false);
+    expect(isSessionRefusal(404)).toBe(false);
   });
 });

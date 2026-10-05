@@ -10,3 +10,10 @@ export function isPublicArea(pathname: string | null): boolean {
   if (pathname === '/') return true;
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
+
+// When restoring the session fails: a 401/403 is the API REFUSING the refresh cookie (not signed
+// in, expired, revoked). Any other outcome (no answer at all, 5xx, 429) says nothing about the
+// session, so the operator must not be sent to the login form for it.
+export function isSessionRefusal(statusCode: number | null): boolean {
+  return statusCode === 401 || statusCode === 403;
+}

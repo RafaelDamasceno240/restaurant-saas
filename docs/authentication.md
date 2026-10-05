@@ -101,7 +101,12 @@ vezes durante um turno. Quem cuida disso é `apps/web/lib/api-client.ts`:
   depois disso nenhum `401` dispara outro refresh até um novo login;
 - se o refresh **falhar sem veredito** (rede, `5xx`, `429`), a sessão é
   mantida: a chamada falha e a próxima tenta de novo. Deslogar o caixa por
-  causa de uma oscilação de rede seria pior do que o erro.
+  causa de uma oscilação de rede seria pior do que o erro;
+- a mesma regra vale ao **abrir** o painel: se a troca inicial do cookie por
+  um access token não recebe veredito, o layout do dashboard não redireciona
+  ao `/login`; mostra "não foi possível falar com o servidor" com nova
+  tentativa (automática quando o aparelho volta a ter rede). Só `401`/`403`
+  contam como "não está logado" (`isSessionRefusal`, `lib/session-area.ts`).
 
 ## Por que não access token em cookie também?
 

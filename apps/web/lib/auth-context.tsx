@@ -20,7 +20,7 @@ import {
   startSession,
   subscribeToSession,
 } from './api-client';
-import { isPublicArea } from './session-area';
+import { isPublicArea, isSessionRefusal } from './session-area';
 
 export interface AuthUser {
   id: string;
@@ -46,6 +46,11 @@ interface AuthContextValue {
   user: AuthUser | null;
   accessToken: string | null;
   isLoading: boolean;
+  // The session could not be restored because the API did not answer (no network, server down),
+  // which says nothing about being signed in. Screens show "cannot reach the server" and offer
+  // `retrySession` instead of sending a signed-in operator to the login form.
+  sessionUnavailable: boolean;
+  retrySession: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
@@ -72,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // dashboard layout never sees a finished-but-empty session and bounces to /login.
   const needsSession = !isPublicArea(usePathname());
   const [restored, setRestored] = useState(false);
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const restoreStarted = useRef(false);
   const isLoading = needsSession && !restored;
   // Every admin/authenticated query (['pdv-products'], ['orders', tab],
@@ -109,22 +115,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // On first load, try to silently exchange a still-valid refresh cookie for
   // a fresh access token, so a page refresh doesn't force a re-login.
+  const restore = useCallback(async () => {
+    setSessionUnavailable(false);
+    try {
+      const refreshed = await refreshSession();
+      setAccessToken(refreshed.accessToken);
+      await fetchMe(refreshed.accessToken);
+    } catch (error) {
+      setUser(null);
+      setAccessToken(null);
+      // Only a refusal means "not signed in". Anything else (the request never got an answer, the
+      // API is restarting) leaves the refresh cookie as valid as it was.
+      setSessionUnavailable(!isSessionRefusal(error instanceof ApiError ? error.statusCode : null));
+    } finally {
+      setRestored(true);
+    }
+  }, [fetchMe]);
+
   useEffect(() => {
     if (!needsSession || restoreStarted.current) return;
     restoreStarted.current = true;
-    (async () => {
-      try {
-        const refreshed = await refreshSession();
-        setAccessToken(refreshed.accessToken);
-        await fetchMe(refreshed.accessToken);
-      } catch {
-        setUser(null);
-        setAccessToken(null);
-      } finally {
-        setRestored(true);
-      }
-    })();
-  }, [fetchMe, needsSession]);
+    void restore();
+  }, [needsSession, restore]);
+
+  // One retry at a time: a second tap while the first is in flight does nothing.
+  const retrying = useRef(false);
+  const retrySession = useCallback(async () => {
+    if (retrying.current) return;
+    retrying.current = true;
+    setRestored(false);
+    try {
+      await restore();
+    } finally {
+      retrying.current = false;
+    }
+  }, [restore]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -138,6 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // updates.
       queryClient.clear();
       startSession(res.accessToken);
+      setSessionUnavailable(false);
       setAccessToken(res.accessToken);
       await fetchMe(res.accessToken);
     },
@@ -174,7 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, accessToken, isLoading, sessionUnavailable, retrySession, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );

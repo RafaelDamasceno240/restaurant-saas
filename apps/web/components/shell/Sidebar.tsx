@@ -79,11 +79,11 @@ function NavRow({
 }) {
   const Icon = item.icon;
   const rowClass = clsx(
-    'group relative flex h-9 items-center gap-3 rounded-ctl text-sm font-medium transition-colors',
-    collapsed ? 'w-10 justify-center' : 'w-full px-2.5',
+    'group relative flex h-9 items-center gap-3 rounded-ctl text-sm font-medium transition-colors touch:h-11',
+    collapsed ? 'w-10 justify-center touch:w-11' : 'w-full px-2.5',
     active ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground',
     // Caramel marker: the selected item reads at a glance without a loud fill.
-    active && "before:absolute before:left-0 before:top-1.5 before:h-6 before:w-[3px] before:rounded-r before:bg-primary",
+    active && "before:absolute before:left-0 before:top-1/2 before:h-6 before:w-[3px] before:-translate-y-1/2 before:rounded-r before:bg-primary",
     item.soon && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground',
   );
   const inner = (
@@ -148,7 +148,7 @@ export function Sidebar({
       <div className={clsx('flex h-14 shrink-0 items-center border-b border-line', collapsed ? 'justify-center' : 'gap-2 px-3')}>
         {collapsed ? (
           <Tooltip label={LOGO_NAME} side="right">
-            <Link href={brandHref} aria-label={LOGO_NAME} className="flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+            <Link href={brandHref} aria-label={LOGO_NAME} className="flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 touch:p-1">
               <BrandLogo size="md" />
             </Link>
           </Tooltip>
@@ -159,7 +159,7 @@ export function Sidebar({
                 type="button"
                 onClick={onCloseDrawer}
                 aria-label="Fechar menu"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-11 touch:w-11"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -169,7 +169,7 @@ export function Sidebar({
                 onClick={onToggleCollapsed}
                 aria-label="Recolher menu"
                 aria-expanded
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-11 touch:w-11"
               >
                 <PanelLeftClose className="h-5 w-5" />
               </button>
@@ -195,7 +195,7 @@ export function Sidebar({
                 onClick={onToggleCollapsed}
                 aria-label="Expandir menu"
                 aria-expanded={false}
-                className="flex h-9 w-10 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+                className="flex h-9 w-10 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-11 touch:w-11"
               >
                 <Menu className="h-5 w-5" />
               </button>
@@ -260,7 +260,7 @@ export function Sidebar({
                 type="button"
                 onClick={onLogout}
                 aria-label="Sair"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger touch:h-10 touch:w-10"
               >
                 <LogOut className="h-4 w-4" />
               </button>

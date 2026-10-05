@@ -50,7 +50,7 @@ export function Tabs<K extends string>({
                     active ? 'border-accent text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
                   )
                 : clsx(
-                    'rounded-md px-3 py-1.5',
+                    'rounded-md px-3 py-1.5 touch:py-2.5',
                     active ? 'bg-surface-hover text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
                   ),
             )}

@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import plugin from 'tailwindcss/plugin';
 
 // Semantic tokens resolve to CSS variables declared in app/globals.css (the
 // single source of truth for the palette: preto #020001, caramelo #9F6118,
@@ -82,7 +83,11 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // `touch:` applies where the primary pointer is a finger (phones, tablets). Used to give
+    // controls a 40-44px hit area there without making the desktop layout bulkier.
+    plugin(({ addVariant }) => addVariant('touch', '@media (pointer: coarse)')),
+  ],
 };
 
 export default config;

@@ -2594,3 +2594,15 @@ Sexta fatia da Fase 11. Regra, modelo e decisões em `docs/RECEIVABLES.md`.
 - **Migration:** `20261005005645_receivables`. Validada no banco descartável, em banco novo e em uma cópia do DEV (13 → 16); **não aplicada no DEV**.
 - **Defeito encontrado e corrigido antes do commit:** o `CHECK` da forma de pagamento aceitava `PAYMENT` com forma nula (`NULL IN (...)` resulta em `NULL`, que um `CHECK` aceita); passou a exigir `IS NOT NULL`.
 - **Limitações:** sem juros/multa, sem renegociação de parcelas, sem cobrança automática, sem tela para alterar o fuso do restaurante, um pagamento abate uma conta por vez.
+
+## PWA e experiência mobile (2026-10-05)
+
+Detalhes em `docs/PWA.md`.
+
+- **Instalável:** manifest (`/manifest.webmanifest`, `start_url: /dashboard`, standalone, atalhos), ícones 192/512/maskable/Apple, favicon (antes respondia 404), metatags Apple e `theme-color`.
+- **Service worker conservador** (`public/sw.js`): guarda só arquivos de build e ícones; nunca `/api`, nunca HTML, nunca escritas. Navegação sem servidor cai em `offline.html`. Sem fila offline.
+- **Sem conexão:** faixa de aviso no painel; ao abrir o app sem alcançar a API o operador não é mais jogado para o login (só `401`/`403` encerram a sessão).
+- **Avisos de pedido novo:** notificação local, opcional, com o app aberto em segundo plano. **Push com o app fechado: não implementado** (sem chaves VAPID, sem armazenamento de inscrições, sem emissor).
+- **Toque:** variante `touch:` no design system; controles com 40–44px e campos com 16px em celular e tablet; desktop inalterado. Cozinha no celular deixou de cortar os pedidos.
+- **Validação:** Chrome headless com emulação de tela e toque em 390×844, 820×1180 e 1366×900; não validado em aparelho físico.
+- Sem alteração de API nem de banco nesta etapa.

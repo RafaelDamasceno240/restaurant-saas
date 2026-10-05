@@ -54,7 +54,7 @@ export function OrdersTable({ orders, compact }: { orders: AdminOrderListItem[];
                 <Link
                   href={`/dashboard/pedidos/${order.id}`}
                   aria-label={`Abrir pedido ${order.orderNumber}`}
-                  className="text-subtle transition-colors group-hover:text-foreground"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-ctl text-subtle transition-colors hover:bg-surface-hover group-hover:text-foreground touch:h-11 touch:w-11"
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Link>

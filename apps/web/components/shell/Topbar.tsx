@@ -21,7 +21,7 @@ export function Topbar({
         type="button"
         onClick={onOpenMenu}
         aria-label="Abrir menu"
-        className="flex h-9 w-9 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground md:hidden"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-11 touch:w-11 md:hidden"
       >
         <Menu className="h-5 w-5" />
       </button>
