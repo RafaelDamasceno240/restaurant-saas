@@ -21,6 +21,8 @@ import { CouponRedemptionService } from '../coupons/coupon-redemption.service';
 import { computeOrderTotalCents } from '../coupons/coupon-calculations';
 import { normalizeCouponCode } from '../coupons/coupon-input';
 import { isCouponError } from '../coupons/coupon-errors';
+import { OrderEffectsService } from '../order-effects/order-effects.service';
+import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 
 // Orders that use the SAME limited coupon queue on its row lock, each holding a pooled
 // connection while it waits. Prisma's defaults (5 s to finish, 2 s to get a connection) are tuned
@@ -127,6 +129,7 @@ export class OrderCreationService {
     private readonly cashRegister: CashRegisterService,
     private readonly inventory: InventoryService,
     private readonly coupons: CouponRedemptionService,
+    private readonly effects: OrderEffectsService,
   ) {}
 
   async createOrder(rawInput: OrderCreationInput): Promise<OrderWithItems> {
@@ -393,6 +396,18 @@ export class OrderCreationService {
           input.recordCashSaleByUserId ?? null,
         )
       : [];
+
+    // An order that is BORN concluded (table checkout) credits its benefits right here, in the
+    // same transaction as everything else. Orders born PENDING are credited when they conclude
+    // (OrdersService / DeliveryService). Always last: benefit accounts are locked after the
+    // cash session and the coupon.
+    if (isConcludedOrderStatus(order.status)) {
+      await this.effects.onOrderConcludedInTx(tx, {
+        tenantId: order.tenantId,
+        orderId: order.id,
+        actorUserId: input.recordCashSaleByUserId ?? null,
+      });
+    }
 
     return { order, cashMovementId: movement?.id ?? null, stockMovementIds: stockMovements.map((m) => m.id) };
   }

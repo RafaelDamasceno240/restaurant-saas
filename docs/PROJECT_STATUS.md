@@ -2557,3 +2557,15 @@ Terceira fatia da Fase 11. Detalhes em `docs/CRM.md` ("CRM avançado").
 - **Produtos mais comprados** no detalhe do cliente.
 - **Integração:** seletor de cliente no PDV (com cadastro na hora), cliente no fechamento de mesa e vínculo/desvínculo de pedidos existentes (online e delivery) com sugestão por telefone e auditoria atômica.
 - Sem migration e sem permissão nova.
+
+## Fidelidade — pontos (2026-10-04)
+
+Quarta fatia da Fase 11. Regra, modelo e decisões em `docs/LOYALTY.md`.
+
+- **Regra:** pedido concluído (`COMPLETED`/`DELIVERED`) de cliente vinculado credita `floor((subtotal − desconto) / 100) × pontos por real`, uma vez por pedido; pontos são trocados por recompensas do catálogo; ajuste manual e estorno com motivo.
+- **Ledger:** `loyalty_entries` append-only (trigger), saldo como total corrente travado por linha, nunca negativo (CHECK), idempotência por chave, auditoria na mesma transação.
+- **Integração:** novo `OrderEffectsService`, chamado dentro da transação que conclui o pedido (status genérico, entrega confirmada, fechamento de mesa) e ao vincular cliente a pedido já concluído.
+- **API:** `/v1/loyalty/*`; permissões `loyalty.read/redeem/adjust/configure`.
+- **Tela:** `/dashboard/fidelidade` e aba Fidelidade no detalhe do cliente.
+- **Migration:** `20261005001215_loyalty` (aditiva). Aplicada só no banco descartável; **não aplicada no DEV**.
+- **Limitações:** pontos não expiram; resgate não vira desconto em pedido; taxa única por restaurante.

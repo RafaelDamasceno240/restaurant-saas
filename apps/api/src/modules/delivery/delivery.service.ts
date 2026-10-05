@@ -5,6 +5,8 @@ import { AuditService } from '../audit/audit.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { Tx } from '../inventory/stock-ledger.service';
+import { OrderEffectsService } from '../order-effects/order-effects.service';
+import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import {
   courierNotEligible,
   courierNotFound,
@@ -105,6 +107,7 @@ export class DeliveryService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly branchAccess: BranchAccessService,
+    private readonly effects: OrderEffectsService,
   ) {}
 
   async list(user: AuthenticatedRequestUser, query: ListDeliveriesQueryDto) {
@@ -453,6 +456,15 @@ export class DeliveryService {
       await tx.delivery.update({ where: { id }, data });
       if (rule.orderFrom !== rule.orderTo) {
         await tx.order.update({ where: { id: scoped.orderId }, data: { status: rule.orderTo } });
+        // DELIVERED concludes the sale: its benefits (loyalty points...) are credited in this
+        // same transaction, under the order lock taken above.
+        if (isConcludedOrderStatus(rule.orderTo)) {
+          await this.effects.onOrderConcludedInTx(tx, {
+            tenantId: user.tenantId,
+            orderId: scoped.orderId,
+            actorUserId: user.userId,
+          });
+        }
       }
 
       await this.audit.recordTx(tx, {

@@ -60,6 +60,10 @@ const PERMISSIONS: string[] = [
   'coupons.create',
   'coupons.update',
   'coupons.apply',
+  'loyalty.read',
+  'loyalty.redeem',
+  'loyalty.adjust',
+  'loyalty.configure',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -116,6 +120,11 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'coupons.create',
     'coupons.update',
     'coupons.apply',
+    // Runs the program day to day; the rate and the rewards catalogue (loyalty.configure)
+    // stay with OWNER/ADMIN.
+    'loyalty.read',
+    'loyalty.redeem',
+    'loyalty.adjust',
   ],
   CASHIER: [
     'orders.read',
@@ -135,6 +144,9 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'customers.create',
     // Uses a coupon at the counter; administering coupons stays with management.
     'coupons.apply',
+    // Sees the balance and hands out a reward at the counter; never adjusts points by hand.
+    'loyalty.read',
+    'loyalty.redeem',
   ],
   WAITER: [
     'orders.read',

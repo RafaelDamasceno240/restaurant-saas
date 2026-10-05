@@ -71,6 +71,10 @@ model Tenant {
   purchaseSequence  PurchaseSequence?
   productRecipes    ProductRecipe[]
   inventoryCounts   InventoryCount[]
+  loyaltyProgram    LoyaltyProgram?
+  loyaltyRewards    LoyaltyReward[]
+  loyaltyAccounts   LoyaltyAccount[]
+  loyaltyEntries    LoyaltyEntry[]
 
   @@map("tenants")
 }
@@ -148,6 +152,7 @@ model User {
   createdPurchases     Purchase[]            @relation("PurchaseCreatedBy")
   receivedPurchases    Purchase[]            @relation("PurchaseReceivedBy")
   cancelledPurchases   Purchase[]            @relation("PurchaseCancelledBy")
+  loyaltyEntries       LoyaltyEntry[]
 
   @@index([tenantId])
   @@map("users")
@@ -369,16 +374,17 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch       Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  tab          Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
-  items        OrderItem[]
-  cashMovement CashMovement?
-  payment      Payment?
-  delivery     Delivery?
-  customer     Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  coupon       Coupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
-  redemption   CouponRedemption?
+  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch         Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  tab            Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
+  items          OrderItem[]
+  cashMovement   CashMovement?
+  payment        Payment?
+  delivery       Delivery?
+  customer       Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  coupon         Coupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  redemption     CouponRedemption?
+  loyaltyEntries LoyaltyEntry[]
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, createdAt])
@@ -848,9 +854,10 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orders      Order[]
-  redemptions CouponRedemption[]
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders         Order[]
+  redemptions    CouponRedemption[]
+  loyaltyAccount LoyaltyAccount?
 
   @@index([tenantId, active, name])
   @@map("customers")
@@ -989,4 +996,115 @@ model PurchaseItem {
   @@index([purchaseId])
   @@index([inventoryItemId])
   @@map("purchase_items")
+}
+
+// ---------------------------------------------------------------------------------------
+// Fidelidade (Fase 11, fatia 4): points. The LEDGER (loyalty_entries) is the source of truth;
+// LoyaltyAccount.balancePoints is its running total, changed only inside the transaction that
+// appends the entry, with the account row locked FOR UPDATE (same pattern as the stock ledger:
+// InventoryBalance + StockMovement.balanceAfter). Entries are append-only (trigger in SQL).
+// Rule (docs/LOYALTY.md): a concluded order (COMPLETED/DELIVERED) of a linked customer earns
+// floor((subtotal - discount) / 100) * pointsPerReal points; points are spent on rewards.
+// ---------------------------------------------------------------------------------------
+
+// One row per tenant; no row = program never configured = disabled.
+model LoyaltyProgram {
+  tenantId      String   @id
+  enabled       Boolean  @default(false)
+  // Points per whole R$ 1,00 of the items value actually paid. CHECK 1..1000.
+  pointsPerReal Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("loyalty_programs")
+}
+
+// What points can be exchanged for. Never deleted: deactivated, so past redemptions keep
+// pointing at the reward they were for.
+model LoyaltyReward {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  // CHECK >= 1.
+  pointsCost  Int
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entries LoyaltyEntry[]
+
+  @@index([tenantId, active, name])
+  @@map("loyalty_rewards")
+}
+
+// One per customer, created on the first movement. balancePoints = SUM(entries.points),
+// never negative (CHECK).
+model LoyaltyAccount {
+  id            String   @id @default(uuid())
+  tenantId      String
+  customerId    String   @unique
+  balancePoints Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  entries  LoyaltyEntry[]
+
+  @@index([tenantId])
+  @@map("loyalty_accounts")
+}
+
+enum LoyaltyEntryType {
+  // + points for a concluded order (orderId set; at most one per order: partial unique index)
+  EARN
+  // - points exchanged for a reward (rewardId set)
+  REDEEM
+  // +/- manual correction by management (reason mandatory)
+  ADJUSTMENT
+  // undoes exactly one earlier entry (reversedEntryId, unique: an entry is reversed once)
+  REVERSAL
+}
+
+model LoyaltyEntry {
+  id           String           @id @default(uuid())
+  tenantId     String
+  accountId    String
+  customerId   String
+  type         LoyaltyEntryType
+  // Signed: credit > 0, debit < 0, never 0 (CHECKs tie the sign to the type).
+  points       Int
+  // Account balance right after this entry (>= 0): the statement needs no recomputation.
+  balanceAfter Int
+
+  // Origin / reference of the movement.
+  orderId         String?
+  rewardId        String?
+  branchId        String?
+  reversedEntryId String?  @unique
+  reason          String?
+  // Client-generated, for the operations a user repeats by accident (redeem, adjust, reverse).
+  idempotencyKey  String?
+  // NULL = generated by the system on behalf of nobody (never the case today: the user who
+  // concluded the order is recorded).
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account       LoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  order         Order?         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  reward        LoyaltyReward? @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+  reversedEntry LoyaltyEntry?  @relation("LoyaltyEntryReversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversal      LoyaltyEntry?  @relation("LoyaltyEntryReversal")
+  createdBy     User?          @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([accountId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([orderId])
+  @@map("loyalty_entries")
 }

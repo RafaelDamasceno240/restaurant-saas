@@ -23,6 +23,16 @@ import { StatCard } from '@/components/ds/StatCard';
 import { useToast } from '@/components/ds/Toast';
 import { useErrorMessage } from '@/components/estoque/use-inventory';
 import { StatusBadge } from '@/components/pedidos/StatusBadge';
+import { Tabs } from '@/components/ds/Tabs';
+import { CustomerLoyaltyPanel } from '@/components/loyalty/CustomerLoyaltyPanel';
+
+// Sections of the dialog. Each benefit keeps its own panel (and its own requests), so the
+// summary opens as fast as before.
+type Section = 'summary' | 'loyalty';
+const SECTIONS: { key: Section; label: string }[] = [
+  { key: 'summary', label: 'Resumo' },
+  { key: 'loyalty', label: 'Fidelidade' },
+];
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -47,9 +57,13 @@ export function CustomerDetailDialog({
   const queryClient = useQueryClient();
   const open = customerId !== null;
   const [page, setPage] = useState(1);
+  const [section, setSection] = useState<Section>('summary');
   const toggling = useRef(false);
 
-  useEffect(() => setPage(1), [customerId]);
+  useEffect(() => {
+    setPage(1);
+    setSection('summary');
+  }, [customerId]);
 
   const detail = useQuery({
     queryKey: ['customers', 'detail', customerId],
@@ -128,6 +142,10 @@ export function CustomerDetailDialog({
         <ErrorState message="Não foi possível carregar o cliente." onRetry={() => void detail.refetch()} />
       ) : (
         <div className="space-y-5">
+          <Tabs value={section} onChange={setSection} items={SECTIONS} />
+          {section === 'loyalty' && <CustomerLoyaltyPanel customerId={customer.id} customerActive={customer.active} />}
+          {section === 'summary' && (
+            <>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={CUSTOMER_STATUS_TONE[customer.active ? 'active' : 'inactive']} dot>
               {customer.active ? 'Ativo' : 'Inativo'}
@@ -215,6 +233,8 @@ export function CustomerDetailDialog({
               </>
             )}
           </section>
+            </>
+          )}
         </div>
       )}
     </Dialog>

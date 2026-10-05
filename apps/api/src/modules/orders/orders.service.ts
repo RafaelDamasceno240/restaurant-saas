@@ -14,6 +14,8 @@ import { deliveryFlowRequired } from '../delivery/delivery-errors';
 import { InventoryService } from '../inventory/inventory.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { CustomerLookupService } from '../customers/customer-lookup.service';
+import { OrderEffectsService } from '../order-effects/order-effects.service';
+import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { OrderDetailDto, OrderListItemDto, OrderListResponseDto } from './dto/order-admin-response.dto';
@@ -38,6 +40,7 @@ export class OrdersService {
     private readonly inventory: InventoryService,
     private readonly branchAccess: BranchAccessService,
     private readonly customers: CustomerLookupService,
+    private readonly effects: OrderEffectsService,
   ) {}
 
   // Every query below is scoped by `tenantId` taken from the caller
@@ -166,6 +169,11 @@ export class OrdersService {
         if (isDelivery && newStatus === 'COMPLETED') throw deliveryFlowRequired();
 
         await tx.order.update({ where: { id }, data: { status: newStatus } });
+        // Benefits of a concluded sale (loyalty points...) are credited in this same transaction:
+        // concluded and credited commit together, or neither does.
+        if (isConcludedOrderStatus(newStatus)) {
+          await this.effects.onOrderConcludedInTx(tx, { tenantId, orderId: id, actorUserId: actor.userId });
+        }
         // Cancelling the order cancels its delivery in the same transaction: PENDING for
         // PENDING..PREPARING orders, FAILED for the explicit cancel after a failed delivery.
         if (isDelivery && newStatus === 'CANCELLED') {
@@ -254,7 +262,10 @@ export class OrdersService {
   //    entry is written in the same transaction (the trail records ids only, never names);
   //  - the order's own customerName/customerPhone snapshot is never rewritten;
   //  - a coupon redemption keeps the customer it was recorded with (the per-customer limit is
-  //    about who redeemed, not about who the order was later filed under).
+  //    about who redeemed, not about who the order was later filed under);
+  //  - an order that already credited points to its customer cannot change customer until
+  //    those points are reversed; linking a customer to an already concluded order credits
+  //    its points then (once).
   // Repeating the same link changes nothing and writes no audit.
   async setCustomer(user: AuthenticatedRequestUser, id: string, customerId: string | null): Promise<OrderDetailDto> {
     const tenantId = user.tenantId;
@@ -263,14 +274,18 @@ export class OrdersService {
     const allowedBranchIds = await this.branchAccess.accessibleBranchIds(user);
 
     await this.prisma.$transaction(async (tx) => {
-      const rows = await tx.$queryRaw<{ customerId: string | null; branchId: string }[]>`
-        SELECT "customerId", "branchId" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      const rows = await tx.$queryRaw<{ customerId: string | null; branchId: string; status: OrderStatus }[]>`
+        SELECT "customerId", "branchId", "status" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
       if (rows.length === 0 || (allowedBranchIds && !allowedBranchIds.includes(rows[0].branchId))) {
         throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
       }
       const before = rows[0].customerId;
       const next = customer?.id ?? null;
       if (before === next) return;
+
+      // Points (and other benefits) already credited for this order stay with the customer
+      // they were credited to: the change is refused until they are reversed.
+      await this.effects.assertCustomerCanChangeInTx(tx, id);
 
       await tx.order.update({ where: { id }, data: { customerId: next } });
       await this.audit.recordTx(tx, {
@@ -282,6 +297,10 @@ export class OrdersService {
         beforeData: { customerId: before },
         afterData: { customerId: next },
       });
+      // A sale that was already concluded when its customer became known earns now.
+      if (next && isConcludedOrderStatus(rows[0].status)) {
+        await this.effects.onOrderConcludedInTx(tx, { tenantId, orderId: id, actorUserId: user.userId });
+      }
     });
 
     return this.findOneForTenant(tenantId, id);
