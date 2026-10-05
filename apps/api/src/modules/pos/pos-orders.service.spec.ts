@@ -56,6 +56,24 @@ describe('PosOrdersService customer linking', () => {
     expect(createOrder).not.toHaveBeenCalled();
   });
 
+  it('refuses to spend cashback without cashback.use, before any lookup or sale', async () => {
+    const { service, findFirst, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: true });
+    await expect(
+      service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1', cashbackToUseCents: 500 }) as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(createOrder).not.toHaveBeenCalled();
+  });
+
+  it('passes the requested cashback on, and null when none was asked for', async () => {
+    const { service, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: true });
+    const allowed = user(['pos.create', 'customers.read', 'cashback.use']);
+    await service.createOrder(allowed, dto({ customerId: 'c1', cashbackToUseCents: 500 }) as never);
+    expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ customerId: 'c1', cashbackToUseCents: 500 }));
+    await service.createOrder(allowed, dto({ customerId: 'c1' }) as never);
+    expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ cashbackToUseCents: null }));
+  });
+
   it('refuses an inactive customer', async () => {
     const { service, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: false });
     await expect(service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1' }) as never)).rejects.toBeInstanceOf(ConflictException);

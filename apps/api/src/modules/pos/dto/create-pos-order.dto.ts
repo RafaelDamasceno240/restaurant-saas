@@ -60,6 +60,16 @@ export class CreatePosOrderDto {
   @MaxLength(40)
   couponCode?: string;
 
+  // Fase 11 (fatia 5): cents of the linked customer's cashback balance to spend on this sale.
+  // Needs a customerId and the cashback.use permission; the server checks the amount against
+  // the real balance and against what the items cost. Never a price or a total.
+  @ApiPropertyOptional({ example: 500, description: 'Centavos de cashback do cliente a usar nesta venda' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2_147_483_647)
+  cashbackToUseCents?: number;
+
   @ApiPropertyOptional({ example: 'Cliente balcão' })
   @IsOptional()
   @IsString()

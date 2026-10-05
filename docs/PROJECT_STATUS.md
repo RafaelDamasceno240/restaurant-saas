@@ -2569,3 +2569,15 @@ Quarta fatia da Fase 11. Regra, modelo e decisões em `docs/LOYALTY.md`.
 - **Tela:** `/dashboard/fidelidade` e aba Fidelidade no detalhe do cliente.
 - **Migration:** `20261005001215_loyalty` (aditiva). Aplicada só no banco descartável; **não aplicada no DEV**.
 - **Limitações:** pontos não expiram; resgate não vira desconto em pedido; taxa única por restaurante.
+
+## Cashback (2026-10-04)
+
+Quinta fatia da Fase 11. Regra, modelo e decisões em `docs/CASHBACK.md`.
+
+- **Regra:** pedido concluído credita `floor((subtotal − desconto − cashback usado) × taxa em pontos-base / 10000)`; o saldo paga itens de vendas futuras no PDV e na mesa; cancelar o pedido devolve o que ele usou; ajuste administrativo e estorno com motivo; expiração opcional por inatividade.
+- **Ledger em centavos:** `cashback_entries` append-only, saldo como total corrente travado por linha, nunca negativo; `orders.cashbackUsedCents` e fórmula do total conferida por `CHECK`.
+- **Integração:** uso validado contra o saldo travado dentro da transação que cria o pedido (`OrderCreationService`); crédito e devolução pelo `OrderEffectsService`; ordem de locks caixa → cupom → cashback → fidelidade.
+- **API:** `/v1/cashback/*` e `cashbackToUseCents` em `POST /pos/orders` e `POST /tabs/:id/checkout`; permissões `cashback.read/use/adjust/configure`.
+- **Tela:** cartão de cashback em `/dashboard/fidelidade`, campo de uso no PDV e na mesa, aba Cashback no cliente, linha no detalhe do pedido.
+- **Migration:** `20261005003323_cashback`. Validada no banco descartável, em banco novo e em uma cópia do DEV; **não aplicada no DEV**.
+- **Limitações:** expiração por inatividade da conta (não por lote); sem agendador; sem uso no checkout público.

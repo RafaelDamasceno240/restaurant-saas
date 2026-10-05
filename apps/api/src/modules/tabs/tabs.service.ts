@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   NotFoundException,
@@ -285,6 +286,9 @@ export class TabsService {
     // After the replay check on purpose: repeating a checkout that already happened must keep
     // answering with the sale, even if the customer was deactivated in the meantime.
     const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
+    if (dto.cashbackToUseCents && !user.permissions.includes('cashback.use')) {
+      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para usar cashback.' });
+    }
 
     const auditBase = {
       tenantId: user.tenantId,
@@ -398,6 +402,7 @@ export class TabsService {
       customerName: tab.customerName ?? customer?.name ?? null,
       customerPhone: customer?.phone ?? null,
       customerId: customer?.id ?? null,
+      cashbackToUseCents: dto.cashbackToUseCents ?? null,
       address: null,
       notes: null,
       items: buildPricedItemsFromTab(items),

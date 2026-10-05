@@ -64,6 +64,10 @@ const PERMISSIONS: string[] = [
   'loyalty.redeem',
   'loyalty.adjust',
   'loyalty.configure',
+  'cashback.read',
+  'cashback.use',
+  'cashback.adjust',
+  'cashback.configure',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -125,6 +129,11 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'loyalty.read',
     'loyalty.redeem',
     'loyalty.adjust',
+    // Same split for cashback: the percentage and the expiration (cashback.configure) stay
+    // with OWNER/ADMIN.
+    'cashback.read',
+    'cashback.use',
+    'cashback.adjust',
   ],
   CASHIER: [
     'orders.read',
@@ -147,6 +156,9 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     // Sees the balance and hands out a reward at the counter; never adjusts points by hand.
     'loyalty.read',
     'loyalty.redeem',
+    // Sees the balance and spends it on a sale; never adjusts it by hand.
+    'cashback.read',
+    'cashback.use',
   ],
   WAITER: [
     'orders.read',

@@ -60,6 +60,9 @@ export interface AdminOrderListItem {
   // Coupon discount over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
   discount: number;
   couponCode: string | null;
+  // Cashback balance of the linked customer spent on the items (0 when none);
+  // total = subtotal - discount - cashbackUsed + deliveryFee.
+  cashbackUsed: number;
   deliveryFee: number;
   total: number;
   delivery: AdminOrderDelivery | null;
@@ -104,6 +107,9 @@ export interface AdminOrderDetail {
   // Coupon discount over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
   discount: number;
   couponCode: string | null;
+  // Cashback balance of the linked customer spent on the items (0 when none);
+  // total = subtotal - discount - cashbackUsed + deliveryFee.
+  cashbackUsed: number;
   deliveryFee: number;
   total: number;
   delivery: AdminOrderDelivery | null;

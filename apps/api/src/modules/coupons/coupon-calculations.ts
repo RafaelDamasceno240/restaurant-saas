@@ -90,23 +90,28 @@ export function evaluateCoupon(rules: CouponRules, ctx: CouponContext): CouponEv
 
 // The single formula for an order total. Throws on anything that would break the invariant,
 // so a bug can never reach the database as a negative or inconsistent total.
+// `cashbackUsedCents` (Fase 11, fatia 5) is the customer's cashback balance spent on the order:
+// like the coupon it only covers items, so discount + cashback can never exceed the subtotal.
 export function computeOrderTotalCents(
   subtotalCents: number,
   discountCents: number,
   deliveryFeeCents: number,
+  cashbackUsedCents = 0,
 ): number {
-  if (![subtotalCents, discountCents, deliveryFeeCents].every(Number.isInteger)) {
+  if (![subtotalCents, discountCents, deliveryFeeCents, cashbackUsedCents].every(Number.isInteger)) {
     throw new RangeError('order amounts must be integer cents');
   }
   if (
     subtotalCents < 0 ||
     deliveryFeeCents < 0 ||
     discountCents < 0 ||
-    discountCents > subtotalCents
+    discountCents > subtotalCents ||
+    cashbackUsedCents < 0 ||
+    cashbackUsedCents > subtotalCents - discountCents
   ) {
     throw new RangeError('invalid order amounts');
   }
-  const total = subtotalCents - discountCents + deliveryFeeCents;
+  const total = subtotalCents - discountCents - cashbackUsedCents + deliveryFeeCents;
   if (total < 0 || total > MAX_AMOUNT_CENTS) throw new RangeError('order total out of range');
   return total;
 }

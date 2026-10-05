@@ -172,7 +172,7 @@ export default function OrderDetailPage({ params }: PageProps) {
                     </li>
                   ))}
                 </ul>
-                {(order.fulfillmentType === 'DELIVERY' || order.discount > 0) && (
+                {(order.fulfillmentType === 'DELIVERY' || order.discount > 0 || order.cashbackUsed > 0) && (
                   <div className="space-y-1 border-t border-line px-4 py-3 text-sm text-muted-foreground">
                     <div className="flex items-center justify-between">
                       <span>Subtotal</span>
@@ -182,6 +182,12 @@ export default function OrderDetailPage({ params }: PageProps) {
                       <div className="flex items-center justify-between text-success">
                         <span>Desconto{order.couponCode ? ` (${order.couponCode})` : ''}</span>
                         <span>− {formatBRL(order.discount)}</span>
+                      </div>
+                    )}
+                    {order.cashbackUsed > 0 && (
+                      <div className="flex items-center justify-between text-success">
+                        <span>Cashback usado</span>
+                        <span>− {formatBRL(order.cashbackUsed)}</span>
                       </div>
                     )}
                     {order.fulfillmentType === 'DELIVERY' && (

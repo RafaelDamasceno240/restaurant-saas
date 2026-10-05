@@ -265,6 +265,7 @@ Uma única consulta SQL parametrizada decide a página: os clientes do tenant co
 - **Pedido existente (online, delivery, qualquer origem):** um funcionário vincula ou desvincula no detalhe do pedido. A tela sugere os clientes com o mesmo telefone, mas **nada é atribuído automaticamente**: qualquer pessoa pode digitar qualquer telefone no checkout público.
 - Regras do vínculo: cliente do mesmo tenant e ativo (`404`/`409`); pedido do tenant e de filial acessível (`404`); a linha do pedido é travada e a auditoria (`ORDER_CUSTOMER_LINKED` / `ORDER_CUSTOMER_UNLINKED`, só ids) é gravada na mesma transação; repetir o mesmo vínculo não grava nada. O nome e o telefone digitados no pedido **nunca** são reescritos.
 - O resgate de cupom mantém o cliente com que foi registrado: o limite por cliente é sobre quem resgatou, não sobre a quem o pedido foi atribuído depois.
+- Pedido que já creditou pontos (`docs/LOYALTY.md`) ou movimentou cashback (`docs/CASHBACK.md`) não troca de cliente enquanto a movimentação estiver de pé (`409`).
 
 ## Permissões
 

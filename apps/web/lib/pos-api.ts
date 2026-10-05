@@ -17,6 +17,9 @@ export interface CreatePosOrderInput {
   // A customer of the registry (needs customers.read). Only the id travels; when no name or
   // phone is typed, the server copies them from the registry into the order.
   customerId?: string;
+  // Cents of that customer's cashback balance to spend on this sale (needs cashback.use). The
+  // server checks it against the real balance and against what the items cost.
+  cashbackToUseCents?: number;
   paymentMethod: PaymentMethod;
   // Only the CODE travels (needs coupons.apply): the server decides everything about the discount.
   couponCode?: string;

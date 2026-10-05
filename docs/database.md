@@ -78,6 +78,8 @@ Existem no schema atual (10 migrations em `prisma/migrations`):
 
 - **Fidelidade:** `LoyaltyProgram` (`loyalty_programs`, uma linha por tenant), `LoyaltyReward` (`loyalty_rewards`), `LoyaltyAccount` (`loyalty_accounts`, `customerId` único, `balancePoints`) e `LoyaltyEntry` (`loyalty_entries`, o ledger de pontos: `type` EARN/REDEEM/ADJUSTMENT/REVERSAL, `points` com sinal, `balanceAfter`, origem e `idempotencyKey`). Migration `20261005001215_loyalty`. Em SQL: tabela append-only por trigger, CHECKs de saldo não negativo, sinal por tipo, origem por tipo e motivo obrigatório, índice único parcial de um `EARN` por pedido. Ver `docs/LOYALTY.md`.
 
+- **Cashback:** `CashbackProgram` (`cashback_programs`), `CashbackAccount` (`cashback_accounts`, `customerId` único, `balanceCents`, `lastActivityAt`) e `CashbackEntry` (`cashback_entries`, o ledger em centavos: `type` EARN/USE/ADJUSTMENT/REVERSAL/EXPIRATION, `amountCents` com sinal, `balanceAfterCents`, origem e `idempotencyKey`); `orders.cashbackUsedCents`. Migration `20261005003323_cashback`. Em SQL: tabela append-only por trigger, CHECKs de saldo, sinal, origem e motivo, índices únicos parciais de um `EARN` e um `USE` por pedido, e o `CHECK orders_total_formula` recriado (`total = subtotal - discount - cashbackUsed + deliveryFee`) com `orders_cashback_range`. Ver `docs/CASHBACK.md`.
+
 Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`; pontos são `Int`.
 
 Os índices parciais (um caixa `OPEN` por unidade, uma comanda `OPEN` por mesa)

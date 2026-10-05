@@ -55,6 +55,8 @@ export interface CheckoutTabInput {
   idempotencyKey: string;
   // A customer of the registry the sale belongs to (needs customers.read). Only the id travels.
   customerId?: string;
+  // Cents of that customer's cashback balance to spend on this sale (needs cashback.use).
+  cashbackToUseCents?: number;
 }
 
 export interface OpenTabInput {

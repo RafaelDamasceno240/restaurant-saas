@@ -25,13 +25,15 @@ import { useErrorMessage } from '@/components/estoque/use-inventory';
 import { StatusBadge } from '@/components/pedidos/StatusBadge';
 import { Tabs } from '@/components/ds/Tabs';
 import { CustomerLoyaltyPanel } from '@/components/loyalty/CustomerLoyaltyPanel';
+import { CustomerCashbackPanel } from '@/components/cashback/CustomerCashbackPanel';
 
 // Sections of the dialog. Each benefit keeps its own panel (and its own requests), so the
 // summary opens as fast as before.
-type Section = 'summary' | 'loyalty';
+type Section = 'summary' | 'loyalty' | 'cashback';
 const SECTIONS: { key: Section; label: string }[] = [
   { key: 'summary', label: 'Resumo' },
   { key: 'loyalty', label: 'Fidelidade' },
+  { key: 'cashback', label: 'Cashback' },
 ];
 
 function formatDateTime(iso: string): string {
@@ -144,6 +146,7 @@ export function CustomerDetailDialog({
         <div className="space-y-5">
           <Tabs value={section} onChange={setSection} items={SECTIONS} />
           {section === 'loyalty' && <CustomerLoyaltyPanel customerId={customer.id} customerActive={customer.active} />}
+          {section === 'cashback' && <CustomerCashbackPanel customerId={customer.id} />}
           {section === 'summary' && (
             <>
           <div className="flex flex-wrap items-center gap-2">

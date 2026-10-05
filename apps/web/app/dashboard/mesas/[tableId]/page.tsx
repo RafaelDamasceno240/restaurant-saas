@@ -19,6 +19,8 @@ import { Page } from '@/components/ds/PageHeader';
 import { Alert, LoadingState } from '@/components/ds/States';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
+import { CashbackUseField } from '@/components/cashback/CashbackUseField';
+import { parseCashbackToUse, validateCashbackToUse } from '@/lib/cashback-logic';
 
 // A comanda's items are never local state: every add/change/remove hits the
 // API immediately and re-renders from whatever it echoes back — the same
@@ -43,6 +45,9 @@ export default function MesaDetailPage() {
   // Optional customer of the registry for this sale. Waiters close tabs but cannot see the
   // customer registry (the API refuses a customerId from them), so the picker is hidden.
   const [saleCustomer, setSaleCustomer] = useState<PickedCustomer | null>(null);
+  // Cashback of that customer to spend on this bill (only the amount is sent; the API checks it).
+  const [cashbackInput, setCashbackInput] = useState('');
+  const [cashbackMaxCents, setCashbackMaxCents] = useState(0);
   const canLinkCustomer = (user?.roles ?? []).some((role) => ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER'].includes(role));
   const [sale, setSale] = useState<Tab | null>(null);
   // One key per checkout attempt, reused on every retry of that attempt: if
@@ -173,6 +178,8 @@ export default function MesaDetailPage() {
     setError(null);
     setPaymentMethod(null);
     setSaleCustomer(null);
+    setCashbackInput('');
+    setCashbackMaxCents(0);
     checkoutKeyRef.current = crypto.randomUUID();
     setCheckoutOpen(true);
   }
@@ -181,11 +188,19 @@ export default function MesaDetailPage() {
     setCheckoutOpen(false);
     setPaymentMethod(null);
     setSaleCustomer(null);
+    setCashbackInput('');
+    setCashbackMaxCents(0);
     checkoutKeyRef.current = null;
   }
 
   async function handleCheckout() {
     if (!accessToken || !tab || !paymentMethod || submittingRef.current) return;
+    const cashbackProblem = saleCustomer ? validateCashbackToUse(cashbackInput, cashbackMaxCents) : null;
+    if (cashbackProblem) {
+      setError(cashbackProblem);
+      return;
+    }
+    const cashbackCents = saleCustomer ? (parseCashbackToUse(cashbackInput) ?? 0) : 0;
     submittingRef.current = true;
     setIsSubmitting(true);
     setError(null);
@@ -194,6 +209,7 @@ export default function MesaDetailPage() {
         paymentMethod,
         idempotencyKey: checkoutKeyRef.current ?? crypto.randomUUID(),
         ...(saleCustomer ? { customerId: saleCustomer.id } : {}),
+        ...(cashbackCents > 0 ? { cashbackToUseCents: cashbackCents } : {}),
       });
       setSale(result);
       setCheckoutOpen(false);
@@ -439,7 +455,27 @@ export default function MesaDetailPage() {
                 onCancel={cancelCheckout}
                 customerSlot={
                   canLinkCustomer ? (
-                    <CustomerPicker value={saleCustomer} onChange={setSaleCustomer} disabled={isSubmitting} />
+                    <div className="space-y-2">
+                      <CustomerPicker
+                        value={saleCustomer}
+                        disabled={isSubmitting}
+                        onChange={(picked) => {
+                          setSaleCustomer(picked);
+                          setCashbackInput('');
+                          setCashbackMaxCents(0);
+                        }}
+                      />
+                      {saleCustomer && (
+                        <CashbackUseField
+                          customerId={saleCustomer.id}
+                          itemsAfterDiscountCents={tab.totalCents}
+                          value={cashbackInput}
+                          onChange={setCashbackInput}
+                          onMaxChange={setCashbackMaxCents}
+                          disabled={isSubmitting}
+                        />
+                      )}
+                    </div>
                   ) : null
                 }
               />

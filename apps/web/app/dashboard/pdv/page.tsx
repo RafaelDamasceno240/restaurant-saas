@@ -40,6 +40,8 @@ import { Button } from '@/components/ds/Button';
 import { Input, SearchInput } from '@/components/ds/Input';
 import { Tooltip } from '@/components/ds/Tooltip';
 import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
+import { CashbackUseField } from '@/components/cashback/CashbackUseField';
+import { parseCashbackToUse, validateCashbackToUse } from '@/lib/cashback-logic';
 import clsx from 'clsx';
 
 function formatBRL(cents: number): string {
@@ -82,6 +84,11 @@ export default function PdvPage() {
   // A customer of the registry (optional). Only the id is sent; with one picked, the name and
   // phone of the sale come from the registry on the server.
   const [customer, setCustomer] = useState<PickedCustomer | null>(null);
+  // Cashback of the picked customer to spend on this sale: what the cashier typed, and the
+  // most this basket may use (reported by CashbackUseField). Only the amount is sent; the API
+  // checks it against the real balance when the sale is created.
+  const [cashbackInput, setCashbackInput] = useState('');
+  const [cashbackMaxCents, setCashbackMaxCents] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -121,7 +128,11 @@ export default function PdvPage() {
   const currentPreviewKey = branchId && couponCode ? previewKeyFor(branchId, couponCode) : null;
   const appliedCoupon = couponPreview && couponPreview.key === currentPreviewKey ? couponPreview.preview : null;
   const discountCents = appliedCoupon?.discountCents ?? 0;
-  const totalCents = totalAfterCouponCents(subtotalCents, discountCents);
+  const itemsAfterDiscountCents = totalAfterCouponCents(subtotalCents, discountCents);
+  // Shown and sent only while it is a valid amount for this basket; otherwise nothing is used.
+  const cashbackProblem = customer ? validateCashbackToUse(cashbackInput, cashbackMaxCents) : null;
+  const cashbackCents = customer && !cashbackProblem ? (parseCashbackToUse(cashbackInput) ?? 0) : 0;
+  const totalCents = itemsAfterDiscountCents - cashbackCents;
 
   function addProduct(product: { id: string; name: string; price: number }) {
     setCart((prev) =>
@@ -173,6 +184,8 @@ export default function PdvPage() {
     setCustomerName('');
     setCustomerPhone('');
     setCustomer(null);
+    setCashbackInput('');
+    setCashbackMaxCents(0);
     setPaymentMethod('CASH');
     setError(null);
     setConfirmation(null);
@@ -188,6 +201,10 @@ export default function PdvPage() {
       setError('Selecione a unidade da venda.');
       return;
     }
+    if (cashbackProblem) {
+      setError(cashbackProblem);
+      return;
+    }
     setError(null);
     setIsSubmitting(true);
     try {
@@ -200,6 +217,7 @@ export default function PdvPage() {
           : { customerName: customerName.trim() || undefined, customerPhone: customerPhone.trim() || undefined }),
         paymentMethod,
         couponCode: couponCode || undefined,
+        ...(cashbackCents > 0 ? { cashbackToUseCents: cashbackCents } : {}),
         idempotencyKey: saleKeyRef.current,
       });
       saleKeyRef.current = null;
@@ -361,7 +379,28 @@ export default function PdvPage() {
       </div>
 
       <div className="space-y-3 border-t border-line p-4">
-        {canPickCustomer && <CustomerPicker value={customer} onChange={setCustomer} disabled={isSubmitting} />}
+        {canPickCustomer && (
+          <CustomerPicker
+            value={customer}
+            disabled={isSubmitting}
+            onChange={(picked) => {
+              setCustomer(picked);
+              // Another customer, another balance: never carry an amount over.
+              setCashbackInput('');
+              setCashbackMaxCents(0);
+            }}
+          />
+        )}
+        {canPickCustomer && customer && cart.length > 0 && (
+          <CashbackUseField
+            customerId={customer.id}
+            itemsAfterDiscountCents={itemsAfterDiscountCents}
+            value={cashbackInput}
+            onChange={setCashbackInput}
+            onMaxChange={setCashbackMaxCents}
+            disabled={isSubmitting}
+          />
+        )}
         {!customer && (
           <div className="grid grid-cols-2 gap-2">
             <Input
@@ -459,16 +498,24 @@ export default function PdvPage() {
           })}
         </div>
 
-        {appliedCoupon && (
+        {(appliedCoupon || cashbackCents > 0) && (
           <div className="space-y-0.5 text-sm text-muted-foreground">
             <div className="flex items-baseline justify-between">
               <span>Subtotal</span>
               <span className="tabular-nums">{formatBRL(subtotalCents)}</span>
             </div>
-            <div className="flex items-baseline justify-between text-success">
-              <span>Desconto ({appliedCoupon.code})</span>
-              <span className="tabular-nums">− {formatBRL(discountCents)}</span>
-            </div>
+            {appliedCoupon && (
+              <div className="flex items-baseline justify-between text-success">
+                <span>Desconto ({appliedCoupon.code})</span>
+                <span className="tabular-nums">− {formatBRL(discountCents)}</span>
+              </div>
+            )}
+            {cashbackCents > 0 && (
+              <div className="flex items-baseline justify-between text-success">
+                <span>Cashback</span>
+                <span className="tabular-nums">− {formatBRL(cashbackCents)}</span>
+              </div>
+            )}
           </div>
         )}
         <div className="flex items-baseline justify-between">

@@ -40,6 +40,9 @@ export class OrderListItemDto {
   // Discount from a coupon over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
   @ApiProperty({ example: 5 }) discount!: number;
   @ApiPropertyOptional({ nullable: true }) couponCode!: string | null;
+  // Cashback balance of the linked customer spent on the items (0 when none);
+  // total = subtotal - discount - cashbackUsed + deliveryFee.
+  @ApiProperty({ example: 0 }) cashbackUsed!: number;
   @ApiProperty({ example: 5 }) deliveryFee!: number;
   @ApiProperty({ example: 54.8 }) total!: number;
   @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;
@@ -80,6 +83,9 @@ export class OrderDetailDto {
   // Discount from a coupon over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
   @ApiProperty({ example: 5 }) discount!: number;
   @ApiPropertyOptional({ nullable: true }) couponCode!: string | null;
+  // Cashback balance of the linked customer spent on the items (0 when none);
+  // total = subtotal - discount - cashbackUsed + deliveryFee.
+  @ApiProperty({ example: 0 }) cashbackUsed!: number;
   @ApiProperty({ example: 5 }) deliveryFee!: number;
   @ApiProperty({ example: 54.8 }) total!: number;
   @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;

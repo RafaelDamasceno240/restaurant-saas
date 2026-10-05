@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
 
 // No amount/price/total field exists here: the sale total is always the sum
@@ -24,4 +24,13 @@ export class CheckoutTabDto {
   @IsOptional()
   @IsUUID()
   customerId?: string;
+
+  // Fase 11 (fatia 5): cents of that customer's cashback balance to spend on this sale. Needs a
+  // customerId and the cashback.use permission; validated server-side against the real balance.
+  @ApiPropertyOptional({ description: 'Centavos de cashback do cliente a usar nesta venda' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(2_147_483_647)
+  cashbackToUseCents?: number;
 }

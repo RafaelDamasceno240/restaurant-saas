@@ -174,6 +174,11 @@ export class OrdersService {
         if (isConcludedOrderStatus(newStatus)) {
           await this.effects.onOrderConcludedInTx(tx, { tenantId, orderId: id, actorUserId: actor.userId });
         }
+        // ...and what a cancelled sale took from the customer (cashback spent on it) goes back,
+        // also in this transaction: cancelled and refunded commit together.
+        if (newStatus === 'CANCELLED') {
+          await this.effects.onOrderCancelledInTx(tx, { tenantId, orderId: id, actorUserId: actor.userId });
+        }
         // Cancelling the order cancels its delivery in the same transaction: PENDING for
         // PENDING..PREPARING orders, FAILED for the explicit cancel after a failed delivery.
         if (isDelivery && newStatus === 'CANCELLED') {
@@ -336,6 +341,7 @@ export class OrdersService {
       subtotal: fromCents(order.subtotalCents),
       discount: fromCents(order.discountCents),
       couponCode: order.couponCode,
+      cashbackUsed: fromCents(order.cashbackUsedCents),
       deliveryFee: fromCents(order.deliveryFeeCents),
       total: fromCents(order.totalCents),
       delivery: order.delivery,
@@ -374,6 +380,7 @@ export class OrdersService {
       subtotal: fromCents(order.subtotalCents),
       discount: fromCents(order.discountCents),
       couponCode: order.couponCode,
+      cashbackUsed: fromCents(order.cashbackUsedCents),
       deliveryFee: fromCents(order.deliveryFeeCents),
       total: fromCents(order.totalCents),
       delivery: order.delivery,

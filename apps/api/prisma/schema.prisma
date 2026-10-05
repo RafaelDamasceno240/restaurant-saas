@@ -75,6 +75,9 @@ model Tenant {
   loyaltyRewards    LoyaltyReward[]
   loyaltyAccounts   LoyaltyAccount[]
   loyaltyEntries    LoyaltyEntry[]
+  cashbackProgram   CashbackProgram?
+  cashbackAccounts  CashbackAccount[]
+  cashbackEntries   CashbackEntry[]
 
   @@map("tenants")
 }
@@ -153,6 +156,7 @@ model User {
   receivedPurchases    Purchase[]            @relation("PurchaseReceivedBy")
   cancelledPurchases   Purchase[]            @relation("PurchaseCancelledBy")
   loyaltyEntries       LoyaltyEntry[]
+  cashbackEntries      CashbackEntry[]
 
   @@index([tenantId])
   @@map("users")
@@ -355,18 +359,22 @@ model Order {
   state        String?
   zipCode      String?
 
-  subtotalCents    Int
+  subtotalCents     Int
   // Discount applied to the ITEMS subtotal by a coupon (Fase 11, fatia 2); 0 without coupon.
   // Never applies to the delivery fee. CHECK: 0 <= discountCents <= subtotalCents.
-  discountCents    Int     @default(0)
+  discountCents     Int     @default(0)
+  // Cashback balance of the linked customer spent on this order (Fase 11, fatia 5); 0 when
+  // none. Covers items only: CHECK 0 <= cashbackUsedCents <= subtotalCents - discountCents.
+  cashbackUsedCents Int     @default(0)
   // Snapshot of the delivery fee charged on this order (0 for non-delivery).
-  // totalCents = subtotalCents - discountCents + deliveryFeeCents (CHECK in the database).
-  deliveryFeeCents Int     @default(0)
-  totalCents       Int
+  // totalCents = subtotalCents - discountCents - cashbackUsedCents + deliveryFeeCents (CHECK in
+  // the database).
+  deliveryFeeCents  Int     @default(0)
+  totalCents        Int
   // Coupon used, if any. couponCode is the canonical code AT ORDER TIME (snapshot, survives
   // the coupon being edited); couponId becomes NULL only if the coupon row ever disappears.
-  couponId         String?
-  couponCode       String?
+  couponId          String?
+  couponCode        String?
 
   tabId          String? @unique
   idempotencyKey String?
@@ -374,17 +382,18 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant         Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch         Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  tab            Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
-  items          OrderItem[]
-  cashMovement   CashMovement?
-  payment        Payment?
-  delivery       Delivery?
-  customer       Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  coupon         Coupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
-  redemption     CouponRedemption?
-  loyaltyEntries LoyaltyEntry[]
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  tab             Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
+  items           OrderItem[]
+  cashMovement    CashMovement?
+  payment         Payment?
+  delivery        Delivery?
+  customer        Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  coupon          Coupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  redemption      CouponRedemption?
+  loyaltyEntries  LoyaltyEntry[]
+  cashbackEntries CashbackEntry[]
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, createdAt])
@@ -854,10 +863,11 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orders         Order[]
-  redemptions    CouponRedemption[]
-  loyaltyAccount LoyaltyAccount?
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders          Order[]
+  redemptions     CouponRedemption[]
+  loyaltyAccount  LoyaltyAccount?
+  cashbackAccount CashbackAccount?
 
   @@index([tenantId, active, name])
   @@map("customers")
@@ -1107,4 +1117,101 @@ model LoyaltyEntry {
   @@index([tenantId, createdAt])
   @@index([orderId])
   @@map("loyalty_entries")
+}
+
+// ---------------------------------------------------------------------------------------
+// Cashback (Fase 11, fatia 5): money, in integer cents. Same shape as the points ledger: the
+// LEDGER (cashback_entries) is the source of truth, CashbackAccount.balanceCents is its running
+// total changed only inside the transaction that appends an entry, with the account row locked
+// FOR UPDATE; entries are append-only (trigger in SQL).
+// Rule (docs/CASHBACK.md): a concluded order of a linked customer earns
+// floor((subtotal - discount - cashbackUsed) * earnRateBps / 10000) cents; the balance pays for
+// items of later orders (orders.cashbackUsedCents); a cancelled order gets what it used back;
+// an idle balance may expire.
+// ---------------------------------------------------------------------------------------
+
+// One row per tenant; no row = program never configured = disabled.
+model CashbackProgram {
+  tenantId        String   @id
+  enabled         Boolean  @default(false)
+  // Basis points of the items value actually paid: 500 = 5,00%. CHECK 1..5000.
+  earnRateBps     Int      @default(500)
+  // NULL = the balance never expires. Otherwise the whole balance expires after this many days
+  // without a credit or a use. CHECK 1..3650.
+  expireAfterDays Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("cashback_programs")
+}
+
+// One per customer, created on the first movement. balanceCents = SUM(entries.amountCents),
+// never negative (CHECK).
+model CashbackAccount {
+  id             String    @id @default(uuid())
+  tenantId       String
+  customerId     String    @unique
+  balanceCents   Int       @default(0)
+  // Last credit or use: what the expiration clock counts from.
+  lastActivityAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  entries  CashbackEntry[]
+
+  @@index([tenantId])
+  @@map("cashback_accounts")
+}
+
+enum CashbackEntryType {
+  // + cents for a concluded order (orderId set; at most one per order)
+  EARN
+  // - cents spent on an order (orderId set; at most one per order)
+  USE
+  // +/- manual correction by management (reason mandatory)
+  ADJUSTMENT
+  // undoes exactly one earlier entry (reversedEntryId, unique); also how a cancelled order
+  // gets back the cashback it used
+  REVERSAL
+  // - the whole idle balance, when the program has an expiration
+  EXPIRATION
+}
+
+model CashbackEntry {
+  id                String            @id @default(uuid())
+  tenantId          String
+  accountId         String
+  customerId        String
+  type              CashbackEntryType
+  // Signed cents: credit > 0, debit < 0, never 0 (CHECKs tie the sign to the type).
+  amountCents       Int
+  // Account balance right after this entry (>= 0).
+  balanceAfterCents Int
+
+  // Origin / reference of the movement.
+  orderId         String?
+  branchId        String?
+  reversedEntryId String?  @unique
+  reason          String?
+  idempotencyKey  String?
+  // NULL = written by the system (an expiration found while settling an account).
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account       CashbackAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  order         Order?          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  reversedEntry CashbackEntry?  @relation("CashbackEntryReversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversal      CashbackEntry?  @relation("CashbackEntryReversal")
+  createdBy     User?           @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([accountId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([orderId])
+  @@map("cashback_entries")
 }

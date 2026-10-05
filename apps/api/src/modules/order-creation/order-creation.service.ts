@@ -22,6 +22,8 @@ import { computeOrderTotalCents } from '../coupons/coupon-calculations';
 import { normalizeCouponCode } from '../coupons/coupon-input';
 import { isCouponError } from '../coupons/coupon-errors';
 import { OrderEffectsService } from '../order-effects/order-effects.service';
+import { CashbackService } from '../cashback/cashback.service';
+import { isCashbackError } from '../cashback/cashback-errors';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 
 // Orders that use the SAME limited coupon queue on its row lock, each holding a pooled
@@ -77,6 +79,12 @@ export interface OrderCreationInput {
   // input there is: the discount, the limits and the eligibility are all decided here, on the
   // server, inside the order transaction. The caller must have checked coupons.apply (PDV).
   couponCode?: string | null;
+  // Fase 11 (fatia 5): how much of the linked customer's cashback balance pays for this order,
+  // in cents. Only ever set by the staff flows (PDV, table checkout) after checking cashback.use;
+  // the public checkout never sets it. The amount is validated here against the customer's
+  // LOCKED balance, inside the order transaction: asking for more than the balance or more than
+  // the items cost refuses the whole order.
+  cashbackToUseCents?: number | null;
   idempotencyKey?: string;
 }
 
@@ -130,6 +138,7 @@ export class OrderCreationService {
     private readonly inventory: InventoryService,
     private readonly coupons: CouponRedemptionService,
     private readonly effects: OrderEffectsService,
+    private readonly cashback: CashbackService,
   ) {}
 
   async createOrder(rawInput: OrderCreationInput): Promise<OrderWithItems> {
@@ -161,10 +170,14 @@ export class OrderCreationService {
     } catch (error) {
       // A duplicate of an in-flight request loses the race in one of two ways: it reaches the
       // order insert and collides on the idempotency key, or - with a limited coupon - it waits
-      // for the coupon lock, then finds the usage already taken by the WINNER (its twin). In both
+      // for the coupon lock, then finds the usage already taken by the WINNER (its twin) - and the
+      // same happens with the cashback balance its twin has just spent. In all these
       // cases the request is a replay, so it gets the original order (findReplay re-checks that
       // it really is the same request) and never a spurious "coupon used up".
-      if (input.idempotencyKey && (this.isIdempotencyKeyViolation(error) || isCouponError(error))) {
+      if (
+        input.idempotencyKey &&
+        (this.isIdempotencyKeyViolation(error) || isCouponError(error) || isCashbackError(error))
+      ) {
         const replay = await this.findReplay(input);
         if (replay) return replay;
       }
@@ -263,6 +276,7 @@ export class OrderCreationService {
       existing.customerPhone === input.customerPhone &&
       existing.customerId === (input.customerId ?? null) &&
       existing.couponCode === (input.couponCode ?? null) &&
+      existing.cashbackUsedCents === (input.cashbackToUseCents ?? 0) &&
       signature(existing.items) === signature(input.items);
     if (!sameRequest) {
       throw new ConflictException({
@@ -313,10 +327,30 @@ export class OrderCreationService {
         })
       : null;
     const discountCents = applied?.discountCents ?? 0;
-    // The single formula: total = subtotal - discount + delivery fee (never negative).
+
+    // Fase 11 (fatia 5): cashback is reserved AFTER the coupon (fixed lock order: cash -> coupon
+    // -> cashback account) and BEFORE the order exists: the customer's account is locked FOR
+    // UPDATE and the requested amount is checked against the balance it really has and against
+    // what the items cost after the coupon. The debit itself is written right after the order
+    // is created, below, in this same transaction. Orders without cashback skip all of this.
+    const reservation =
+      input.cashbackToUseCents && input.cashbackToUseCents > 0
+        ? await this.cashback.reserveUseInTx(tx, {
+            tenantId: input.tenantId,
+            customerId: input.customerId ?? null,
+            branchId: input.branchId,
+            requestedCents: input.cashbackToUseCents,
+            subtotalCents,
+            discountCents,
+            actorUserId: input.recordCashSaleByUserId ?? null,
+          })
+        : null;
+    const cashbackUsedCents = reservation?.amountCents ?? 0;
+
+    // The single formula: total = subtotal - discount - cashback + delivery fee (never negative).
     let totalCents: number;
     try {
-      totalCents = computeOrderTotalCents(subtotalCents, discountCents, deliveryFeeCents);
+      totalCents = computeOrderTotalCents(subtotalCents, discountCents, deliveryFeeCents, cashbackUsedCents);
     } catch {
       throw orderTotalTooLarge();
     }
@@ -343,6 +377,7 @@ export class OrderCreationService {
         zipCode: isDelivery ? input.address!.zipCode : undefined,
         subtotalCents,
         discountCents,
+        cashbackUsedCents,
         couponId: applied?.couponId ?? null,
         couponCode: applied?.code ?? null,
         deliveryFeeCents,
@@ -360,6 +395,12 @@ export class OrderCreationService {
         orderId: order.id,
         customerId: input.customerId ?? null,
       });
+    }
+
+    // The cashback debit points at the order it paid for: no order without its debit, no debit
+    // without its order.
+    if (reservation) {
+      await this.cashback.commitUseInTx(tx, reservation, order.id);
     }
 
     // A DELIVERY order always has its operational record, created in the same
@@ -444,6 +485,7 @@ export class OrderCreationService {
         totalCents: order.totalCents,
         discountCents: order.discountCents,
         couponCode: order.couponCode,
+        cashbackUsedCents: order.cashbackUsedCents,
         deliveryFeeCents: order.deliveryFeeCents,
         itemCount: order.items.length,
       },

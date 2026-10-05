@@ -24,6 +24,7 @@ export class PosOrdersService {
   async createOrder(user: AuthenticatedRequestUser, dto: CreatePosOrderDto): Promise<OrderDetailDto> {
     await this.branchAccess.assertAccess(user, dto.branchId);
     if (dto.couponCode) this.assertCanApplyCoupon(user);
+    if (dto.cashbackToUseCents) this.assertCanUseCashback(user);
     const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
 
     const order = await this.orderCreation.createOrder({
@@ -38,6 +39,7 @@ export class PosOrdersService {
       customerPhone: dto.customerPhone ?? customer?.phone ?? null,
       customerId: customer?.id ?? null,
       couponCode: dto.couponCode ?? null,
+      cashbackToUseCents: dto.cashbackToUseCents ?? null,
       fulfillmentType: 'PICKUP',
       address: null,
       paymentMethod: dto.paymentMethod,
@@ -61,6 +63,13 @@ export class PosOrdersService {
       couponCode: dto.code,
       customerId: customer?.id ?? null,
     });
+  }
+
+  // Spending a customer's cashback is a permission of its own (cashback.use).
+  private assertCanUseCashback(user: AuthenticatedRequestUser) {
+    if (!user.permissions.includes('cashback.use')) {
+      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para usar cashback.' });
+    }
   }
 
   // Using a coupon is a permission of its own: it is not implied by pos.create, and it is not

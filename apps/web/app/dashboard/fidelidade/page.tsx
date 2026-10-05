@@ -28,6 +28,7 @@ import { Switch } from '@/components/ds/Switch';
 import { Table, TableWrap, TBody, Td, Th, THead, Tr } from '@/components/ds/Table';
 import { Tabs } from '@/components/ds/Tabs';
 import { useToast } from '@/components/ds/Toast';
+import { CashbackProgramCard } from '@/components/cashback/CashbackProgramCard';
 
 // The API decides (loyalty.read / loyalty.configure); these only hide what would be refused.
 // Managers and cashiers see the program and the catalogue; only owners and administrators
@@ -143,8 +144,8 @@ export default function LoyaltyPage() {
   return (
     <Page>
       <PageHeader
-        title="Fidelidade"
-        description="Programa de pontos: o cliente ganha pontos nas compras concluídas e troca por recompensas."
+        title="Fidelidade e cashback"
+        description="Pontos trocados por recompensas e cashback usado como saldo em compras futuras, para clientes cadastrados."
         actions={
           canConfigure ? (
             <Button icon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => setForm({ reward: null })}>
@@ -203,7 +204,10 @@ export default function LoyaltyPage() {
         )}
       </Card>
 
+      <CashbackProgramCard canConfigure={canConfigure} />
+
       <div className="space-y-3">
+        <h2 className="text-sm font-semibold text-foreground">Recompensas do programa de pontos</h2>
         <Tabs variant="pill" value={status} onChange={setStatus} items={TABS} />
         {rewards.isPending ? (
           <LoadingState label="Carregando recompensas..." />
