@@ -1,6 +1,5 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { customerInactive, customerNotFound } from '../customers/customer-errors';
+import { CustomerLookupService } from '../customers/customer-lookup.service';
 import { OrderCreationService } from '../order-creation/order-creation.service';
 import { OrdersService } from '../orders/orders.service';
 import { BranchAccessService } from '../branches/branch-access.service';
@@ -15,7 +14,7 @@ export class PosOrdersService {
     private readonly orderCreation: OrderCreationService,
     private readonly ordersService: OrdersService,
     private readonly branchAccess: BranchAccessService,
-    private readonly prisma: PrismaService,
+    private readonly customers: CustomerLookupService,
   ) {}
 
   // Thin adapter: tenantId from the JWT, branch validated against the user,
@@ -25,7 +24,7 @@ export class PosOrdersService {
   async createOrder(user: AuthenticatedRequestUser, dto: CreatePosOrderDto): Promise<OrderDetailDto> {
     await this.branchAccess.assertAccess(user, dto.branchId);
     if (dto.couponCode) this.assertCanApplyCoupon(user);
-    const customer = dto.customerId ? await this.resolveCustomer(user, dto.customerId) : null;
+    const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
 
     const order = await this.orderCreation.createOrder({
       tenantId: user.tenantId,
@@ -54,7 +53,7 @@ export class PosOrdersService {
   async previewCoupon(user: AuthenticatedRequestUser, dto: PosCouponPreviewDto) {
     this.assertCanApplyCoupon(user);
     await this.branchAccess.assertAccess(user, dto.branchId);
-    const customer = dto.customerId ? await this.resolveCustomer(user, dto.customerId) : null;
+    const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
     return this.orderCreation.previewCoupon({
       tenantId: user.tenantId,
       branchId: dto.branchId,
@@ -70,20 +69,5 @@ export class PosOrdersService {
     if (!user.permissions.includes('coupons.apply')) {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para aplicar cupons.' });
     }
-  }
-
-  // Linking needs customers.read (the PDV user must be allowed to see the customer), and the
-  // customer must belong to the caller's tenant and be active. Another tenant's id is a 404.
-  private async resolveCustomer(user: AuthenticatedRequestUser, customerId: string) {
-    if (!user.permissions.includes('customers.read')) {
-      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para vincular clientes.' });
-    }
-    const customer = await this.prisma.customer.findFirst({
-      where: { id: customerId, tenantId: user.tenantId },
-      select: { id: true, name: true, phone: true, active: true },
-    });
-    if (!customer) throw customerNotFound();
-    if (!customer.active) throw customerInactive();
-    return customer;
   }
 }

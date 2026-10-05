@@ -2548,3 +2548,12 @@ Detalhes em `docs/authentication.md`.
 - Auditoria sem defeitos: regras, cálculo, limites, concorrência, idempotência, isolamento e permissões cobertos por 92 testes e2e (6 arquivos). Os dois casos antes não medidos foram executados: 40 pedidos simultâneos no mesmo cupom limitado e venda em dinheiro com total 0.
 - Ajuste: a transação de criação do pedido passou a ter orçamento explícito (20 s / 10 s).
 - Banco DEV: migration `20261002100000_coupons` aplicada com `prisma migrate deploy` depois de preflight somente leitura e backup verificado por restauração; seed executado (57 permissões); sem drift.
+
+## CRM avançado (2026-10-04)
+
+Terceira fatia da Fase 11. Detalhes em `docs/CRM.md` ("CRM avançado").
+
+- **Segmentação** derivada dos pedidos (novos, recorrentes, sem compra recente, inativos há 180+ dias) e **ordenações** por maior gasto, maior ticket, mais pedidos e compra mais recente, tudo em uma consulta SQL parametrizada; contadores por segmento.
+- **Produtos mais comprados** no detalhe do cliente.
+- **Integração:** seletor de cliente no PDV (com cadastro na hora), cliente no fechamento de mesa e vínculo/desvínculo de pedidos existentes (online e delivery) com sugestão por telefone e auditoria atômica.
+- Sem migration e sem permissão nova.

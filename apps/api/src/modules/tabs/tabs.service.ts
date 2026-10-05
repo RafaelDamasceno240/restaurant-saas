@@ -12,6 +12,7 @@ import { BranchAccessService } from '../branches/branch-access.service';
 import { TablesService } from '../tables/tables.service';
 import { OrderCreationResult, OrderCreationService } from '../order-creation/order-creation.service';
 import { PaymentsService } from '../payments/payments.service';
+import { CustomerLookupService, LinkableCustomer } from '../customers/customer-lookup.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { computeTabTotals } from './tab-calculations';
 import { buildPricedItemsFromTab, classifyExistingCheckout } from './tab-checkout';
@@ -75,6 +76,7 @@ export class TabsService {
     private readonly tablesService: TablesService,
     private readonly orderCreation: OrderCreationService,
     private readonly payments: PaymentsService,
+    private readonly customers: CustomerLookupService,
   ) {}
 
   async findAllForBranch(user: AuthenticatedRequestUser, query: ListTabsQueryDto) {
@@ -280,6 +282,10 @@ export class TabsService {
     const byKey = await this.findSaleByKey(user.tenantId, dto.idempotencyKey);
     if (byKey) return this.resolveExistingSale(user, byKey, tab.id, dto.idempotencyKey);
 
+    // After the replay check on purpose: repeating a checkout that already happened must keep
+    // answering with the sale, even if the customer was deactivated in the meantime.
+    const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
+
     const auditBase = {
       tenantId: user.tenantId,
       userId: user.userId,
@@ -294,7 +300,7 @@ export class TabsService {
 
     let result: CheckoutTxResult;
     try {
-      result = await this.prisma.$transaction((tx) => this.checkoutInTx(tx, user, tab, dto));
+      result = await this.prisma.$transaction((tx) => this.checkoutInTx(tx, user, tab, dto, customer));
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         // A concurrent request won the race on one of the unique constraints
@@ -349,6 +355,7 @@ export class TabsService {
     user: AuthenticatedRequestUser,
     tab: { id: string; branchId: string; customerName: string | null },
     dto: CheckoutTabDto,
+    customer: LinkableCustomer | null,
   ): Promise<CheckoutTxResult> {
     const rows = await tx.$queryRaw<{ status: string }[]>`
       SELECT "status" FROM "tabs" WHERE id = ${tab.id} FOR UPDATE`;
@@ -386,8 +393,11 @@ export class TabsService {
       fulfillmentType: 'DINE_IN',
       paymentMethod: dto.paymentMethod,
       recordCashSaleByUserId: user.userId,
-      customerName: tab.customerName,
-      customerPhone: null,
+      // Same snapshot rule as the PDV: what was typed on the tab wins; the registry fills
+      // the gaps once, and later edits of the customer never rewrite the order.
+      customerName: tab.customerName ?? customer?.name ?? null,
+      customerPhone: customer?.phone ?? null,
+      customerId: customer?.id ?? null,
       address: null,
       notes: null,
       items: buildPricedItemsFromTab(items),

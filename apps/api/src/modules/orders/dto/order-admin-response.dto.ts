@@ -30,6 +30,9 @@ export class OrderListItemDto {
   @ApiProperty() branchId!: string;
   @ApiPropertyOptional({ nullable: true }) customerName!: string | null;
   @ApiPropertyOptional({ nullable: true }) customerPhone!: string | null;
+  // Link to the customer registry (null for guest orders). Only the id: the registry data
+  // itself is read through /customers, which has its own permission.
+  @ApiPropertyOptional({ nullable: true }) customerId!: string | null;
   @ApiProperty({ enum: FulfillmentType }) fulfillmentType!: FulfillmentType;
   @ApiProperty({ enum: PaymentMethod }) paymentMethod!: PaymentMethod;
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
@@ -64,6 +67,9 @@ export class OrderDetailDto {
   @ApiProperty() branchId!: string;
   @ApiPropertyOptional({ nullable: true }) customerName!: string | null;
   @ApiPropertyOptional({ nullable: true }) customerPhone!: string | null;
+  // Link to the customer registry (null for guest orders). Only the id: the registry data
+  // itself is read through /customers, which has its own permission.
+  @ApiPropertyOptional({ nullable: true }) customerId!: string | null;
   @ApiProperty({ enum: FulfillmentType }) fulfillmentType!: FulfillmentType;
   @ApiPropertyOptional({ type: OrderAddressResponseDto, nullable: true })
   address!: OrderAddressResponseDto | null;

@@ -50,6 +50,9 @@ export interface AdminOrderListItem {
   branchId: string;
   customerName: string | null;
   customerPhone: string | null;
+  // Link to the customer registry (null for guest orders); the registry data itself is read
+  // through /customers, which has its own permission.
+  customerId: string | null;
   fulfillmentType: AdminFulfillmentType;
   paymentMethod: PaymentMethod;
   notes: string | null;
@@ -89,6 +92,9 @@ export interface AdminOrderDetail {
   branchId: string;
   customerName: string | null;
   customerPhone: string | null;
+  // Link to the customer registry (null for guest orders); the registry data itself is read
+  // through /customers, which has its own permission.
+  customerId: string | null;
   fulfillmentType: AdminFulfillmentType;
   address: CheckoutAddressInput | null;
   paymentMethod: PaymentMethod;
@@ -128,6 +134,29 @@ export function updateOrderStatus(
   return apiFetch<AdminOrderDetail>(`/orders/${id}/status`, {
     method: 'PATCH',
     body: { status },
+    accessToken,
+  });
+}
+
+// Customers of the registry whose phone is the one typed on the order (a hint, never an
+// automatic attribution). Needs customers.read.
+export function getOrderCustomerSuggestions(
+  accessToken: string,
+  id: string,
+): Promise<{ data: { id: string; name: string; phone: string; active: boolean }[] }> {
+  return apiFetch(`/orders/${id}/customer-suggestions`, { accessToken });
+}
+
+// Attaches the order to a customer of the registry, or removes the link (null). Only the id
+// travels; the order's own name/phone snapshot is never changed.
+export function setOrderCustomer(
+  accessToken: string,
+  id: string,
+  customerId: string | null,
+): Promise<AdminOrderDetail> {
+  return apiFetch<AdminOrderDetail>(`/orders/${id}/customer`, {
+    method: 'PATCH',
+    body: { customerId },
     accessToken,
   });
 }

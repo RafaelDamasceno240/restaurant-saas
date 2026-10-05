@@ -4,9 +4,10 @@ import { PosOrdersService } from './pos-orders.service';
 import { OrderCreationModule } from '../order-creation/order-creation.module';
 import { OrdersModule } from '../orders/orders.module';
 import { BranchesModule } from '../branches/branches.module';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
-  imports: [OrderCreationModule, OrdersModule, BranchesModule],
+  imports: [OrderCreationModule, OrdersModule, BranchesModule, CustomersModule],
   controllers: [PosOrdersController],
   providers: [PosOrdersService],
 })

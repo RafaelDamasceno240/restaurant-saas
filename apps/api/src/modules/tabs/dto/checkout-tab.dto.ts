@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { PaymentMethod } from '@prisma/client';
 
 // No amount/price/total field exists here: the sale total is always the sum
@@ -17,4 +17,11 @@ export class CheckoutTabDto {
   @MaxLength(100)
   @Matches(/^[A-Za-z0-9_-]+$/, { message: 'idempotencyKey deve conter apenas letras, números, "-" ou "_".' })
   idempotencyKey!: string;
+
+  // Fase 11: optional customer of the registry the sale belongs to. Validated server-side
+  // against the caller's tenant (and the customers.read permission); only the id travels.
+  @ApiPropertyOptional({ description: 'Cliente cadastrado a vincular à venda' })
+  @IsOptional()
+  @IsUUID()
+  customerId?: string;
 }

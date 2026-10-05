@@ -53,6 +53,8 @@ export interface TabSale {
 export interface CheckoutTabInput {
   paymentMethod: PaymentMethod;
   idempotencyKey: string;
+  // A customer of the registry the sale belongs to (needs customers.read). Only the id travels.
+  customerId?: string;
 }
 
 export interface OpenTabInput {

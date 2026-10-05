@@ -1,5 +1,11 @@
 import type { CustomerRecord } from './customers-api';
 import {
+  CUSTOMER_SEGMENT_HINT,
+  CUSTOMER_SEGMENT_LABEL,
+  CUSTOMER_SEGMENT_TONE,
+  CUSTOMER_SEGMENTS,
+  CUSTOMER_SORT_LABEL,
+  CUSTOMER_SORTS,
   CUSTOMER_TABS,
   customerErrorMessage,
   draftToInput,
@@ -141,5 +147,23 @@ describe('labels', () => {
     expect(isFiltering('', 'inactive')).toBe(true);
     expect(isFiltering('', 'all')).toBe(true);
     expect(CUSTOMER_TABS).toEqual(['active', 'inactive', 'all']);
+  });
+
+  it('a segment counts as a filter (the empty state must offer to clear it)', () => {
+    expect(isFiltering('', 'active', null)).toBe(false);
+    expect(isFiltering('', 'active', 'LOST')).toBe(true);
+  });
+
+  it('names every segment and ordering the API knows, with no duplicate label', () => {
+    expect(CUSTOMER_SEGMENTS).toEqual(['NEW', 'RECURRING', 'AT_RISK', 'LOST']);
+    expect(CUSTOMER_SORTS).toEqual(['name', 'spent', 'ticket', 'orders', 'recent']);
+    const segmentLabels = CUSTOMER_SEGMENTS.map((key) => CUSTOMER_SEGMENT_LABEL[key]);
+    const sortLabels = CUSTOMER_SORTS.map((key) => CUSTOMER_SORT_LABEL[key]);
+    expect(new Set(segmentLabels).size).toBe(4);
+    expect(new Set(sortLabels).size).toBe(5);
+    for (const key of CUSTOMER_SEGMENTS) {
+      expect(CUSTOMER_SEGMENT_HINT[key].length).toBeGreaterThan(10);
+      expect(CUSTOMER_SEGMENT_TONE[key]).toBeTruthy();
+    }
   });
 });

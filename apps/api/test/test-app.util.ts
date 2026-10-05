@@ -127,3 +127,35 @@ export async function createStaffAndLoginE2E(
   const login = await request(server).post('/v1/auth/login').send({ email, password }).expect(200);
   return login.body.accessToken as string;
 }
+
+// ---------------------------------------------------------------------------
+// Proving that an audit entry is part of the business transaction: a trigger makes ONE
+// tenant's inserts of ONE action fail, so the test can assert the operation rolled back
+// with it. `name` keeps triggers of different spec files (run in parallel workers against
+// the same database) from colliding. Always pair with removeAuditFailure() in afterEach.
+// ---------------------------------------------------------------------------
+export async function injectAuditFailure(app: INestApplication, name: string, tenantId: string, action: string) {
+  const prisma = getPrisma(app);
+  if (!/^[a-z_]+$/.test(name) || !/^[0-9a-f-]{36}$/.test(tenantId) || !/^[A-Z_]+$/.test(action)) {
+    throw new Error('injectAuditFailure: unexpected identifier');
+  }
+  await prisma.$executeRawUnsafe(
+    `CREATE OR REPLACE FUNCTION ${name}() RETURNS trigger LANGUAGE plpgsql AS $fn$
+     BEGIN
+       IF NEW."tenantId" = '${tenantId}' AND NEW."action" = '${action}' THEN
+         RAISE EXCEPTION 'audit failure injected by test';
+       END IF;
+       RETURN NEW;
+     END $fn$`,
+  );
+  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${name} ON audit_logs`);
+  await prisma.$executeRawUnsafe(
+    `CREATE TRIGGER ${name} BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION ${name}()`,
+  );
+}
+
+export async function removeAuditFailure(app: INestApplication, name: string) {
+  const prisma = getPrisma(app);
+  await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${name} ON audit_logs`);
+  await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${name}()`);
+}

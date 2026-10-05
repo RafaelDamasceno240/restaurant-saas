@@ -39,6 +39,7 @@ import { Alert, EmptyState, ErrorState, LoadingState } from '@/components/ds/Sta
 import { Button } from '@/components/ds/Button';
 import { Input, SearchInput } from '@/components/ds/Input';
 import { Tooltip } from '@/components/ds/Tooltip';
+import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
 import clsx from 'clsx';
 
 function formatBRL(cents: number): string {
@@ -78,6 +79,9 @@ export default function PdvPage() {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  // A customer of the registry (optional). Only the id is sent; with one picked, the name and
+  // phone of the sale come from the registry on the server.
+  const [customer, setCustomer] = useState<PickedCustomer | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,8 +112,13 @@ export default function PdvPage() {
   const totalQuantity = getTotalQuantity(cart);
   // Applying coupons needs coupons.apply: OWNER/ADMIN/MANAGER/CASHIER (the API enforces it).
   const canApplyCoupon = (user?.roles ?? []).some((role) => ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER'].includes(role));
+  // Reading and registering customers needs customers.read/create: the same four roles.
+  const canPickCustomer = canApplyCoupon;
   const couponCode = couponInput.trim();
-  const currentPreviewKey = branchId && couponCode ? couponPreviewKey(branchId, couponCode, cart) : null;
+  // A coupon limited per customer is valid or not depending on WHO buys: the preview belongs
+  // to the customer it was asked for, too.
+  const previewKeyFor = (branch: string, code: string) => `${couponPreviewKey(branch, code, cart)}|${customer?.id ?? ''}`;
+  const currentPreviewKey = branchId && couponCode ? previewKeyFor(branchId, couponCode) : null;
   const appliedCoupon = couponPreview && couponPreview.key === currentPreviewKey ? couponPreview.preview : null;
   const discountCents = appliedCoupon?.discountCents ?? 0;
   const totalCents = totalAfterCouponCents(subtotalCents, discountCents);
@@ -129,12 +138,13 @@ export default function PdvPage() {
     couponBusy.current = true;
     setCouponLoading(true);
     setCouponMessage(null);
-    const key = couponPreviewKey(branchId, couponCode, cart);
+    const key = previewKeyFor(branchId, couponCode);
     try {
       const preview = await previewPosCoupon(accessToken as string, {
         branchId,
         items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity })),
         code: couponCode,
+        ...(customer ? { customerId: customer.id } : {}),
       });
       setCouponPreview({ key, preview });
     } catch (err) {
@@ -162,6 +172,7 @@ export default function PdvPage() {
     setCategoryId(null);
     setCustomerName('');
     setCustomerPhone('');
+    setCustomer(null);
     setPaymentMethod('CASH');
     setError(null);
     setConfirmation(null);
@@ -184,8 +195,9 @@ export default function PdvPage() {
       const order = await createPosOrder(accessToken as string, {
         branchId,
         items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity })),
-        customerName: customerName.trim() || undefined,
-        customerPhone: customerPhone.trim() || undefined,
+        ...(customer
+          ? { customerId: customer.id }
+          : { customerName: customerName.trim() || undefined, customerPhone: customerPhone.trim() || undefined }),
         paymentMethod,
         couponCode: couponCode || undefined,
         idempotencyKey: saleKeyRef.current,
@@ -349,21 +361,24 @@ export default function PdvPage() {
       </div>
 
       <div className="space-y-3 border-t border-line p-4">
-        <div className="grid grid-cols-2 gap-2">
-          <Input
-            placeholder="Cliente (opcional)"
-            aria-label="Cliente"
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-          />
-          <Input
-            placeholder="Telefone (opcional)"
-            aria-label="Telefone"
-            inputMode="tel"
-            value={customerPhone}
-            onChange={(e) => setCustomerPhone(e.target.value)}
-          />
-        </div>
+        {canPickCustomer && <CustomerPicker value={customer} onChange={setCustomer} disabled={isSubmitting} />}
+        {!customer && (
+          <div className="grid grid-cols-2 gap-2">
+            <Input
+              placeholder={canPickCustomer ? 'Ou só o nome (opcional)' : 'Cliente (opcional)'}
+              aria-label="Cliente"
+              value={customerName}
+              onChange={(e) => setCustomerName(e.target.value)}
+            />
+            <Input
+              placeholder="Telefone (opcional)"
+              aria-label="Telefone"
+              inputMode="tel"
+              value={customerPhone}
+              onChange={(e) => setCustomerPhone(e.target.value)}
+            />
+          </div>
+        )}
 
         {canApplyCoupon && (
           <div className="space-y-1.5">

@@ -6,6 +6,7 @@ import { AuthenticatedRequestUser } from '../../common/types/authenticated-reque
 import { OrdersService } from './orders.service';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { SetOrderCustomerDto } from './dto/set-order-customer.dto';
 
 @ApiTags('orders')
 @ApiBearerAuth()
@@ -36,5 +37,23 @@ export class OrdersController {
     @Body() dto: UpdateOrderStatusDto,
   ) {
     return this.ordersService.updateStatus(user.tenantId, id, dto.status, user);
+  }
+
+  @Get(':id/customer-suggestions')
+  @RequirePermissions('orders.read')
+  @ApiOperation({ summary: 'Clientes cadastrados com o telefone digitado no pedido (sugestão; exige customers.read)' })
+  customerSuggestions(@CurrentUser() user: AuthenticatedRequestUser, @Param('id') id: string) {
+    return this.ordersService.customerSuggestions(user, id);
+  }
+
+  @Patch(':id/customer')
+  @RequirePermissions('orders.update')
+  @ApiOperation({ summary: 'Vincula o pedido a um cliente cadastrado, ou desvincula (exige customers.read)' })
+  setCustomer(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('id') id: string,
+    @Body() dto: SetOrderCustomerDto,
+  ) {
+    return this.ordersService.setCustomer(user, id, dto.customerId);
   }
 }

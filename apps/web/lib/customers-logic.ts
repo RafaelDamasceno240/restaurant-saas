@@ -1,5 +1,11 @@
 import type { BadgeTone } from '@/components/ds/Badge';
-import type { CustomerInput, CustomerRecord, CustomerStatusFilter } from './customers-api';
+import type {
+  CustomerInput,
+  CustomerRecord,
+  CustomerSegment,
+  CustomerSort,
+  CustomerStatusFilter,
+} from './customers-api';
 
 // Presentation and form rules for the customers screen. The API is the authority (it
 // normalizes and validates again); these only give fast feedback and readable output.
@@ -10,6 +16,40 @@ export const CUSTOMER_TAB_LABEL: Record<CustomerStatusFilter, string> = {
   active: 'Ativos',
   inactive: 'Inativos',
   all: 'Todos',
+};
+
+// Segments are decided by the API; these are only their names on screen.
+export const CUSTOMER_SEGMENTS: CustomerSegment[] = ['NEW', 'RECURRING', 'AT_RISK', 'LOST'];
+
+export const CUSTOMER_SEGMENT_LABEL: Record<CustomerSegment, string> = {
+  NEW: 'Novos',
+  RECURRING: 'Recorrentes',
+  AT_RISK: 'Sem compra recente',
+  LOST: 'Inativos (180+ dias)',
+};
+
+export const CUSTOMER_SEGMENT_HINT: Record<CustomerSegment, string> = {
+  NEW: 'Primeira compra nos últimos 30 dias',
+  RECURRING: '2 ou mais compras, a última nos últimos 60 dias',
+  AT_RISK: 'Última compra entre 61 e 180 dias atrás',
+  LOST: 'Nunca comprou ou não compra há mais de 180 dias',
+};
+
+export const CUSTOMER_SEGMENT_TONE: Record<CustomerSegment, BadgeTone> = {
+  NEW: 'brand',
+  RECURRING: 'success',
+  AT_RISK: 'warning',
+  LOST: 'neutral',
+};
+
+export const CUSTOMER_SORTS: CustomerSort[] = ['name', 'spent', 'ticket', 'orders', 'recent'];
+
+export const CUSTOMER_SORT_LABEL: Record<CustomerSort, string> = {
+  name: 'Nome (A-Z)',
+  spent: 'Maior gasto',
+  ticket: 'Maior ticket médio',
+  orders: 'Mais pedidos',
+  recent: 'Compra mais recente',
 };
 
 export const MAX_NOTES = 500;
@@ -127,6 +167,6 @@ export function lastOrderLabel(iso: string | null): string {
 export const CUSTOMER_STATUS_TONE: Record<'active' | 'inactive', BadgeTone> = { active: 'success', inactive: 'neutral' };
 
 // When the list must tell "no customers yet" from "nothing matches the filters".
-export function isFiltering(search: string, status: CustomerStatusFilter): boolean {
-  return search.trim() !== '' || status !== 'active';
+export function isFiltering(search: string, status: CustomerStatusFilter, segment: CustomerSegment | null = null): boolean {
+  return search.trim() !== '' || status !== 'active' || segment !== null;
 }

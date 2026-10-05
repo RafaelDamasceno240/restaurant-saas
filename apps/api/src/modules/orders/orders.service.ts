@@ -13,6 +13,7 @@ import { isValidOrderStatusTransition } from './order-status.util';
 import { deliveryFlowRequired } from '../delivery/delivery-errors';
 import { InventoryService } from '../inventory/inventory.service';
 import { BranchAccessService } from '../branches/branch-access.service';
+import { CustomerLookupService } from '../customers/customer-lookup.service';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
 import { OrderDetailDto, OrderListItemDto, OrderListResponseDto } from './dto/order-admin-response.dto';
@@ -36,6 +37,7 @@ export class OrdersService {
     private readonly audit: AuditService,
     private readonly inventory: InventoryService,
     private readonly branchAccess: BranchAccessService,
+    private readonly customers: CustomerLookupService,
   ) {}
 
   // Every query below is scoped by `tenantId` taken from the caller
@@ -240,6 +242,59 @@ export class OrdersService {
     return this.findOneForTenant(tenantId, id);
   }
 
+  // ---- customer link (Fase 11, CRM avançado) ---------------------------------------------
+
+  // Attaches an existing order to a customer of the registry, or removes the link (null). This
+  // is how an online or delivery order - which the public checkout never attributes to anyone -
+  // becomes part of a customer's history: a staff member confirms who it belongs to.
+  //  - needs orders.update (controller) AND customers.read (checked by the lookup);
+  //  - the order must be of the caller's tenant and of a branch they can see (else 404);
+  //  - the customer must be of the same tenant and active;
+  //  - the order row is locked, so two simultaneous links cannot interleave, and the audit
+  //    entry is written in the same transaction (the trail records ids only, never names);
+  //  - the order's own customerName/customerPhone snapshot is never rewritten;
+  //  - a coupon redemption keeps the customer it was recorded with (the per-customer limit is
+  //    about who redeemed, not about who the order was later filed under).
+  // Repeating the same link changes nothing and writes no audit.
+  async setCustomer(user: AuthenticatedRequestUser, id: string, customerId: string | null): Promise<OrderDetailDto> {
+    const tenantId = user.tenantId;
+    const customer = customerId ? await this.customers.resolveForOrder(user, customerId) : null;
+    if (!customer) this.customers.assertCanLink(user);
+    const allowedBranchIds = await this.branchAccess.accessibleBranchIds(user);
+
+    await this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<{ customerId: string | null; branchId: string }[]>`
+        SELECT "customerId", "branchId" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      if (rows.length === 0 || (allowedBranchIds && !allowedBranchIds.includes(rows[0].branchId))) {
+        throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
+      }
+      const before = rows[0].customerId;
+      const next = customer?.id ?? null;
+      if (before === next) return;
+
+      await tx.order.update({ where: { id }, data: { customerId: next } });
+      await this.audit.recordTx(tx, {
+        tenantId,
+        userId: user.userId,
+        action: next ? 'ORDER_CUSTOMER_LINKED' : 'ORDER_CUSTOMER_UNLINKED',
+        entity: 'Order',
+        entityId: id,
+        beforeData: { customerId: before },
+        afterData: { customerId: next },
+      });
+    });
+
+    return this.findOneForTenant(tenantId, id);
+  }
+
+  // Customers whose registered phone is the one typed on this order: a hint for the screen,
+  // never an automatic attribution.
+  async customerSuggestions(user: AuthenticatedRequestUser, id: string) {
+    this.customers.assertCanLink(user);
+    const order = await this.findOneForUser(user, id);
+    return { data: await this.customers.suggestByPhone(user, order.customerPhone) };
+  }
+
   private async lockDeliveryStatus(tx: Prisma.TransactionClient, tenantId: string, orderId: string) {
     const rows = await tx.$queryRaw<{ status: DeliveryStatus }[]>`
       SELECT "status" FROM "deliveries" WHERE "orderId" = ${orderId} AND "tenantId" = ${tenantId} FOR UPDATE`;
@@ -255,6 +310,7 @@ export class OrdersService {
       branchId: order.branchId,
       customerName: order.customerName,
       customerPhone: order.customerPhone,
+      customerId: order.customerId,
       fulfillmentType: order.fulfillmentType,
       paymentMethod: order.paymentMethod,
       notes: order.notes,
@@ -279,6 +335,7 @@ export class OrdersService {
       branchId: order.branchId,
       customerName: order.customerName,
       customerPhone: order.customerPhone,
+      customerId: order.customerId,
       fulfillmentType: order.fulfillmentType,
       address:
         order.fulfillmentType === 'DELIVERY'

@@ -6,9 +6,10 @@ import { BranchesModule } from '../branches/branches.module';
 import { TablesModule } from '../tables/tables.module';
 import { OrderCreationModule } from '../order-creation/order-creation.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
-  imports: [AuditModule, BranchesModule, TablesModule, OrderCreationModule, PaymentsModule],
+  imports: [AuditModule, BranchesModule, TablesModule, OrderCreationModule, PaymentsModule, CustomersModule],
   controllers: [TabsController],
   providers: [TabsService],
 })

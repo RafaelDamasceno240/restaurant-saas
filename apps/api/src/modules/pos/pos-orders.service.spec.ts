@@ -1,5 +1,6 @@
 import { ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
+import { CustomerLookupService } from '../customers/customer-lookup.service';
 import { PosOrdersService } from './pos-orders.service';
 
 // Customer linking in the PDV (Fase 11). The HTTP-level cases live in
@@ -27,7 +28,9 @@ describe('PosOrdersService customer linking', () => {
       { createOrder } as never,
       { findOneForTenant: jest.fn().mockResolvedValue({ id: 'o1' }) } as never,
       { assertAccess: jest.fn().mockResolvedValue(undefined) } as never,
-      { customer: { findFirst } } as never,
+      // The real lookup (the rule under test lives there since it is shared with the table
+      // checkout and the order link), over a stubbed database.
+      new CustomerLookupService({ customer: { findFirst } } as never),
     );
     return { service, findFirst, createOrder };
   }

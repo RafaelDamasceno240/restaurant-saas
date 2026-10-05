@@ -18,6 +18,7 @@ import { Input } from '@/components/ds/Input';
 import { Page } from '@/components/ds/PageHeader';
 import { Alert, LoadingState } from '@/components/ds/States';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
 
 // A comanda's items are never local state: every add/change/remove hits the
 // API immediately and re-renders from whatever it echoes back — the same
@@ -39,6 +40,10 @@ export default function MesaDetailPage() {
   const [notesDraft, setNotesDraft] = useState('');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  // Optional customer of the registry for this sale. Waiters close tabs but cannot see the
+  // customer registry (the API refuses a customerId from them), so the picker is hidden.
+  const [saleCustomer, setSaleCustomer] = useState<PickedCustomer | null>(null);
+  const canLinkCustomer = (user?.roles ?? []).some((role) => ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER'].includes(role));
   const [sale, setSale] = useState<Tab | null>(null);
   // One key per checkout attempt, reused on every retry of that attempt: if
   // a response is lost and the user presses again, the backend returns the
@@ -167,6 +172,7 @@ export default function MesaDetailPage() {
   function openCheckout() {
     setError(null);
     setPaymentMethod(null);
+    setSaleCustomer(null);
     checkoutKeyRef.current = crypto.randomUUID();
     setCheckoutOpen(true);
   }
@@ -174,6 +180,7 @@ export default function MesaDetailPage() {
   function cancelCheckout() {
     setCheckoutOpen(false);
     setPaymentMethod(null);
+    setSaleCustomer(null);
     checkoutKeyRef.current = null;
   }
 
@@ -186,6 +193,7 @@ export default function MesaDetailPage() {
       const result = await tabsApi.checkout(accessToken, tab.id, {
         paymentMethod,
         idempotencyKey: checkoutKeyRef.current ?? crypto.randomUUID(),
+        ...(saleCustomer ? { customerId: saleCustomer.id } : {}),
       });
       setSale(result);
       setCheckoutOpen(false);
@@ -429,6 +437,11 @@ export default function MesaDetailPage() {
                 isSubmitting={isSubmitting}
                 onConfirm={handleCheckout}
                 onCancel={cancelCheckout}
+                customerSlot={
+                  canLinkCustomer ? (
+                    <CustomerPicker value={saleCustomer} onChange={setSaleCustomer} disabled={isSubmitting} />
+                  ) : null
+                }
               />
             )}
           </section>
@@ -450,6 +463,7 @@ function CheckoutPanel({
   isSubmitting,
   onConfirm,
   onCancel,
+  customerSlot,
 }: {
   itemCount: number;
   subtotalCents: number;
@@ -460,6 +474,7 @@ function CheckoutPanel({
   isSubmitting: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  customerSlot?: React.ReactNode;
 }) {
   const blockReason = checkoutBlockReason({ itemCount, paymentMethod, cashRegisterOpen });
   return (
@@ -479,6 +494,13 @@ function CheckoutPanel({
           <dd>{formatCentsAsBRL(totalCents)}</dd>
         </div>
       </dl>
+
+      {customerSlot && (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">Cliente (opcional)</p>
+          {customerSlot}
+        </div>
+      )}
 
       <fieldset className="space-y-1" disabled={isSubmitting}>
         <legend className="mb-1 text-xs text-muted-foreground">Forma de pagamento</legend>

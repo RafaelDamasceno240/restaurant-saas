@@ -14,6 +14,9 @@ export interface CreatePosOrderInput {
   items: { productId: string; quantity: number }[];
   customerName?: string;
   customerPhone?: string;
+  // A customer of the registry (needs customers.read). Only the id travels; when no name or
+  // phone is typed, the server copies them from the registry into the order.
+  customerId?: string;
   paymentMethod: PaymentMethod;
   // Only the CODE travels (needs coupons.apply): the server decides everything about the discount.
   couponCode?: string;
@@ -34,7 +37,7 @@ export function createPosOrder(
 // Read-only preview for the current basket (needs coupons.apply). Prices are never sent.
 export function previewPosCoupon(
   accessToken: string,
-  input: { branchId: string; items: { productId: string; quantity: number }[]; code: string },
+  input: { branchId: string; items: { productId: string; quantity: number }[]; code: string; customerId?: string },
 ): Promise<CouponPreview> {
   return apiFetch<CouponPreview>('/pos/orders/coupon-preview', { method: 'POST', body: input, accessToken });
 }

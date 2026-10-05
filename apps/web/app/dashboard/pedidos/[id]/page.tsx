@@ -21,6 +21,7 @@ import { Card, CardHeader } from '@/components/ds/Card';
 import { Page } from '@/components/ds/PageHeader';
 import { PAYMENT_LABEL, customerLabel } from '@/components/pedidos/OrderCard';
 import { SourceBadge, StatusBadge } from '@/components/pedidos/StatusBadge';
+import { OrderCustomerCard } from '@/components/customers/OrderCustomerCard';
 
 interface PageProps {
   params: { id: string };
@@ -237,6 +238,8 @@ export default function OrderDetailPage({ params }: PageProps) {
                   </p>
                 </div>
               </Card>
+
+              <OrderCustomerCard order={order} />
 
               {actionError && <Alert tone="danger">{actionError}</Alert>}
 
