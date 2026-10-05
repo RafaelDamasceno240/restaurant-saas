@@ -62,7 +62,8 @@ Motivo: falta infraestrutura. Web push exige par de chaves VAPID, armazenamento 
 
 - Variante Tailwind **`touch:`** (`@media (pointer: coarse)`, em `tailwind.config.ts`): vale em celulares e tablets, não em computador com mouse. O desktop mantém a densidade compacta.
 - Botões, campos, seletores, abas em pílula, chips clicáveis, itens da barra lateral e ícones de ação passam a ter **40–44px** de área de toque nesses aparelhos.
-- Campos usam texto de **16px** no toque: com menos que isso o iOS dá zoom na página ao focar.
+- Campos (inclusive as áreas de texto das páginas públicas) usam texto de **16px** no toque: com menos que isso o iOS dá zoom na página ao focar.
+- No checkout público o telefone abre o teclado de telefone e o CEP o teclado numérico.
 - O zoom do usuário **não** é bloqueado.
 - **Cozinha no celular:** as colunas de status deixam de ser caixas baixas com rolagem interna; cada uma cresce com seus pedidos e o quadro inteiro rola. Em tablet e desktop o quadro fixo com rolagem por coluna continua.
 

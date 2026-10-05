@@ -92,6 +92,7 @@ Menu **Relatórios** → `/dashboard/relatorios` (proprietário, administrador, 
 - Os presets de período usam a data do aparelho; se o fuso do aparelho for diferente do fuso do restaurante, "Hoje" pode divergir em um dia perto da meia-noite. O período exibido é sempre o que a API usou.
 - Sem cache: cada consulta agrega na hora. Suficiente para o volume de um restaurante; um período de um ano em um tenant muito grande pede tabelas de resumo.
 - `byCourier` limitado a 100 linhas.
+- **Venda em dinheiro cancelada:** o relatório de vendas deixa de contá-la, mas o movimento de venda continua na sessão de caixa (o caixa não registra devolução automática; ver `docs/CASH_REGISTER_PLAN.md`). Enquanto essa regra não for decidida, "vendas em dinheiro" do relatório de caixa pode ser maior que o "Dinheiro" do relatório de vendas na medida dos pedidos em dinheiro cancelados.
 
 ## Deploy
 

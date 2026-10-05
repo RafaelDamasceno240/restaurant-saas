@@ -63,7 +63,7 @@ continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 
 ## Modelos adicionados depois da Fase 01
 
-Existem no schema atual (10 migrations em `prisma/migrations`):
+Existem no schema atual (16 migrations em `prisma/migrations`, da `20260928001733_initial_mvp_schema` à `20261005005645_receivables`):
 
 - **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
 - **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
@@ -92,9 +92,10 @@ válidos e idempotentes.
 
 ## O que NÃO existe
 
-Customer/CRM, entregador e rastreamento de entregas, FiscalDocument (NFC-e), gateway de
+Rastreamento de entregas por mapa/GPS, FiscalDocument (NFC-e), gateway de
 pagamento, cobrança SaaS, horários e endereço do restaurante (perfil), pedidos
-de compra e contas a pagar.
+de compra, contas a pagar, inscrições de push e tabelas de resumo para relatórios
+(os relatórios agregam direto das tabelas de operação).
 
 ## Seed
 

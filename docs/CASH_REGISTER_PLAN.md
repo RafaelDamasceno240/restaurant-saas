@@ -8,6 +8,18 @@
 > (sem CLI/engine do Prisma nem rede neste ambiente). O schema e o SQL de
 > constraints estão prontos; o primeiro `pnpm db:migrate` + `pnpm db:constraints`
 > num ambiente real materializa tudo.
+>
+> **Atualização (2026-10-05):** essa pendência está superada. As tabelas de caixa estão na
+> migration `20260928001733_initial_mvp_schema` e os índices parciais e o trigger de
+> imutabilidade em `20260930000000_partial_indexes_and_cash_immutability`.
+>
+> **Limitação conhecida (medida em 2026-10-05, ainda sem decisão):** cancelar um pedido pago em
+> **dinheiro** não gera movimento de devolução. O movimento `SALE` permanece e o saldo esperado
+> continua contando a venda. Se o dinheiro for devolvido ao cliente, o operador precisa registrar
+> uma **sangria com motivo**; caso contrário o fechamento acusa falta. Corrigir isso exige uma
+> regra de negócio nova (devolução automática, movimento de estorno de venda ou bloqueio do
+> cancelamento) e não foi feito sem autorização. O fiado recebido em dinheiro, por outro lado,
+> já tem estorno próprio (`RECEIVABLE_REFUND`, ver `docs/RECEIVABLES.md`).
 
 ## 1. Objetivo
 

@@ -7,7 +7,8 @@ Estado real implementado em 2026-10-04. Programa de pontos por restaurante: o cl
 1. **Programa por restaurante**, desligado até ser configurado: `enabled` e `pointsPerReal` (inteiro de 1 a 1000, padrão 1).
 2. **Ganho (`EARN`)**: um pedido **concluído** (`COMPLETED`, ou `DELIVERED` no delivery) de um **cliente vinculado** credita
    `floor((subtotal − desconto do cupom) / 100) × pointsPerReal` pontos.
-   - a base é o que foi pago pelos **itens**; a taxa de entrega não gera pontos;
+   - a base é o valor dos **itens** depois do cupom; a taxa de entrega não gera pontos;
+   - o cashback usado para pagar o pedido **não** reduz os pontos (cashback é forma de pagamento, não desconto): R$ 80,00 em itens com R$ 10,00 pagos em cashback geram pontos sobre R$ 80,00. O cashback ganho, este sim, é calculado só sobre o que foi pago em dinheiro (`docs/CASHBACK.md`);
    - centavos abaixo de R$ 1,00 são desprezados (arredonda para baixo: o programa nunca dá mais que a taxa anunciada);
    - compra que não chega a 1 ponto não gera movimentação;
    - **uma vez por pedido**, garantido por índice único parcial no banco.
@@ -48,7 +49,7 @@ Garantias que estão **no banco** (além da aplicação):
 
 - **Lock pessimista por conta.** Toda escrita trava a linha da conta; dois resgates simultâneos são processados um de cada vez e o segundo já vê o saldo deixado pelo primeiro. Medido: 20 resgates simultâneos com saldo para 3 → 3 concluídos, 17 recusados com `409`, saldo final correto, nenhum 5xx.
 - **Criação da conta** por `INSERT ... ON CONFLICT DO NOTHING`: os primeiros movimentos simultâneos de um cliente não criam duas contas.
-- **Ordem de locks:** o que o chamador já segura (linha do pedido, sessão de caixa, cupom, conta de cashback, conta de crédito do fiado) e, por último, a conta de fidelidade. Sempre a mesma ordem, sem ciclo.
+- **Ordem de locks:** o que o chamador já segura (linha do pedido, sessão de caixa, cupom, conta de cashback, conta de crédito do fiado) e, por último entre as contas, a de fidelidade; os saldos de estoque vêm depois de todas elas (`docs/architecture.md`). Sempre a mesma ordem, sem ciclo.
 - **Idempotência** de resgate, ajuste e estorno por `idempotencyKey` (8 a 100 caracteres, gerada pelo cliente uma vez por tentativa). A chave é conferida de novo **dentro da transação, depois do lock**: uma duplicata que chega enquanto a primeira ainda roda espera o lock e recebe a mesma movimentação (`idempotentReplay: true`), em vez de um falso "saldo insuficiente". Medido: 8 duplicatas simultâneas de um resgate com saldo para um só → as 8 respondem `200` com a mesma movimentação, um único débito. A mesma chave para outra operação, cliente ou valor responde `409 IDEMPOTENCY_KEY_REUSED`.
 - **Crédito de compra** é idempotente por pedido (verificação + índice único) e roda sob o lock da linha do pedido que o fluxo de conclusão já segura.
 

@@ -2,6 +2,9 @@
 
 ## AUDITORIA TÉCNICA — 2026-09-30 (estado real, prevalece sobre as seções históricas abaixo)
 
+> Os números de teste desta auditoria são de 2026-09-30. O estado mais recente (testes, migrations,
+> pendências) está na seção **"Fechamento técnico do salto (2026-10-05)"**, no fim deste arquivo.
+
 As seções seguintes são um registro cronológico. Os trechos que dizem que nada
 foi executado no ambiente ("Motivo, sem meias-palavras", "Pendência
 estrutural") descrevem rodadas antigas e **estão superados** pela validação de
@@ -30,6 +33,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
 | CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV. Fatia 2: cupons e descontos (cálculo e validação no backend, PDV e checkout público, prévia, concorrência e idempotência, tela `/dashboard/cupons`). Ver `docs/CRM.md`. Fatias 3 a 6 (2026-10-04/05): segmentos e vínculo de cliente em PDV/mesa/pedido, fidelidade por pontos (`docs/LOYALTY.md`), cashback (`docs/CASHBACK.md`) e fiado/contas a receber (`docs/RECEIVABLES.md`). Sem campanhas nem WhatsApp |
 | Relatórios | IMPLEMENTADO (operacionais) | `GET /v1/reports/{sales,products,customers,inventory,delivery,cash}` e tela `/dashboard/relatorios`; `reports.e2e-spec`. Sem exportação, comparação de períodos nem margem por produto. Ver `docs/REPORTS.md` |
+| PWA / mobile | IMPLEMENTADO (sem push) | manifest, service worker conservador, página offline, instalação, controles de toque; push com o app fechado não existe. Validado só por emulação. Ver `docs/PWA.md` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
 | NFC-e | NÃO IMPLEMENTADO | |
 | SaaS Billing | NÃO IMPLEMENTADO | sem cobrança; `Tenant.status` já bloqueia login e cardápio público quando SUSPENDED/CANCELLED |
@@ -2618,3 +2622,17 @@ Oitava etapa do salto. Regras e contrato em `docs/REPORTS.md`.
 - **Desempenho:** agregação no banco, número fixo de consultas por relatório, listas paginadas, índices já existentes. Sem migration.
 - **Tela:** `/dashboard/relatorios` com filtro de período e unidade, seis abas e gráficos em HTML sem biblioteca.
 - **Limitações:** sem exportação, sem comparação entre períodos, sem margem por produto, sem cache.
+
+## Fechamento técnico do salto (2026-10-05)
+
+Validação e endurecimento do que foi entregue nas oito etapas do salto, sem funcionalidade nova. Detalhes e evidências em `RELATORIO_VALIDACAO_COMPRAS.txt`, seções 21 a 28.
+
+- **Testes no fechamento:** API unit 29 suítes / 286 testes; API E2E 42 suítes / 728 testes; web unit 20 suítes / 256 testes; lint, typecheck e build das duas aplicações sem erro. Navegador real (Chrome headless, build de produção): 223 verificações em 9 roteiros, mais as auditorias de toque, teclado e rolagem em 390×844, 820×1180 e 1366×900.
+- **Defeitos encontrados e corrigidos:**
+  - deadlock entre fechamento de mesa e cancelamento do mesmo cliente sobre o mesmo insumo (ordem de travas invertida); corrigido com uma ordem única, descrita em `docs/architecture.md`;
+  - repetição idempotente de venda fiado ignorava parcelas e vencimento;
+  - checkout público: telefone sem teclado de telefone e área de texto com 14px no toque.
+- **Limitação conhecida, sem decisão:** cancelar venda em **dinheiro** não gera devolução no caixa (anterior ao salto; ver `docs/CASH_REGISTER_PLAN.md`).
+- **Migrations:** 16 no código. No banco de desenvolvimento estavam aplicadas 13 no momento do fechamento; `20261005001215_loyalty`, `20261005003323_cashback` e `20261005005645_receivables` aguardavam autorização, com preflight sem violações, backup verificado por restauração e ensaio do upgrade em cópia. Depois delas é preciso rodar o seed (70 permissões) e os usuários entrarem de novo.
+- **Não validado:** aparelho físico (celular, tablet, iOS), Safari e Firefox, teste de carga, validação manual por pessoa.
+- **Fora do escopo, não iniciado:** WhatsApp, IA, gateway de pagamento, NFC-e, cobrança SaaS, campanhas, push com o app fechado.

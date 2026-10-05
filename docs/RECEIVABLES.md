@@ -53,10 +53,10 @@ Garantias no **banco**:
 
 ## Concorrência, idempotência e reprocessamento
 
-- **Lock pessimista por conta de crédito**, com a mesma ordem em todos os fluxos de pedido: sessão de caixa → cupom → conta de cashback → **conta de crédito** → conta de fidelidade. No recebimento em dinheiro: sessão de caixa → conta de crédito.
+- **Lock pessimista por conta de crédito**, com a mesma ordem em todos os fluxos de pedido: linha do pedido → sessão de caixa → cupom → conta de cashback → **conta de crédito** → conta de fidelidade → saldos de estoque. No recebimento em dinheiro: sessão de caixa → conta de crédito.
 - **Venda em duas etapas na mesma transação:** `reserveSaleInTx` trava a conta e confere limite e atraso antes de o pedido existir; `commitSaleInTx` abre a conta apontando para o pedido recém-criado. Qualquer falha desfaz tudo.
 - Medido nos testes: 10 vendas simultâneas de R$ 40,00 contra limite de R$ 100,00 → 2 criadas, 8 recusadas com `409`, dívida final R$ 80,00; 20 recebimentos simultâneos de R$ 1,00 contra R$ 3,50 em aberto → 3 aceitos, 17 recusados, nunca pago a mais; 6 estornos simultâneos do mesmo pagamento → 1 aceito.
-- **Idempotência da venda** é a do pedido (`idempotencyKey` do PDV e da mesa): repetir devolve o mesmo pedido e a mesma dívida, mesmo sem limite sobrando; a mesma chave com outra forma de pagamento é `409 IDEMPOTENCY_KEY_REUSED`.
+- **Idempotência da venda** é a do pedido (`idempotencyKey` do PDV e da mesa): repetir devolve o mesmo pedido e a mesma dívida, mesmo sem limite sobrando; a mesma chave com outra forma de pagamento, outra quantidade de parcelas ou outro primeiro vencimento é `409 IDEMPOTENCY_KEY_REUSED` (condições omitidas na repetição só valem para a venda feita no padrão de 1 parcela).
 - **Recebimento, estorno e dívida avulsa** têm chave própria, reconferida dentro da transação depois do lock; a repetição devolve o mesmo resultado (`idempotentReplay: true`), e a mesma chave com outros dados é `409`.
 - Cancelar a conta duas vezes não grava nada na segunda.
 
