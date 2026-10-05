@@ -1,0 +1,3 @@
+# Prisma records a checksum of each migration file. A line-ending conversion on checkout
+# (core.autocrlf on Windows) would change it and make applied migrations look modified.
+apps/api/prisma/migrations/**/*.sql text eol=lf
