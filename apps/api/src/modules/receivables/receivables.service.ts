@@ -615,6 +615,20 @@ export class ReceivablesService {
     });
   }
 
+  // Whether the debt of an order was opened with the terms a repeated request states (the
+  // idempotent replay of a sale compares them). Terms left out mean the default, which is one
+  // installment whatever its date.
+  async saleHasTerms(tenantId: string, orderId: string, terms: CreditTerms | null): Promise<boolean> {
+    const installments = await this.prisma.receivableInstallment.findMany({
+      where: { receivable: { orderId, tenantId } },
+      orderBy: { number: 'asc' },
+      select: { dueDate: true },
+    });
+    if (installments.length === 0) return false;
+    if (!terms) return installments.length === 1;
+    return installments.length === terms.installments && dateToDateOnly(installments[0].dueDate) === terms.firstDueDate;
+  }
+
   // A cancelled order takes its debt with it, in the transaction that cancels it. If money was
   // already received for it the cancellation is refused: the payments are reversed first.
   async cancelForOrderInTx(tx: Tx, input: { tenantId: string; orderId: string; actorUserId: string | null }) {

@@ -289,7 +289,13 @@ export class OrderCreationService {
       existing.couponCode === (input.couponCode ?? null) &&
       existing.cashbackUsedCents === (input.cashbackToUseCents ?? 0) &&
       signature(existing.items) === signature(input.items);
-    if (!sameRequest) {
+    // A sale on account is also defined by how it is to be paid back: the same key with other
+    // installments or another due date is another request, not a repetition.
+    const sameTerms =
+      !sameRequest ||
+      existing.paymentMethod !== 'ON_ACCOUNT' ||
+      (await this.receivables.saleHasTerms(input.tenantId, existing.id, input.creditTerms ?? null));
+    if (!sameRequest || !sameTerms) {
       throw new ConflictException({
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: 'Esta chave de idempotência já foi usada em outro pedido.',
@@ -458,22 +464,15 @@ export class OrderCreationService {
         })
       : null;
 
-    // Fase 09: an order that is BORN confirmed (table checkout -> COMPLETED)
-    // consumes its recipes right here, in the same transaction as the Order,
-    // the SALE cash movement and the payment. PENDING orders (online, PDV)
-    // consume later, on the PENDING -> CONFIRMED transition (OrdersService).
-    const stockMovements = statusConsumesStock(order.status)
-      ? await this.inventory.consumeForOrderInTx(
-          tx,
-          { id: order.id, tenantId: order.tenantId, branchId: order.branchId, items: order.items },
-          input.recordCashSaleByUserId ?? null,
-        )
-      : [];
-
     // An order that is BORN concluded (table checkout) credits its benefits right here, in the
     // same transaction as everything else. Orders born PENDING are credited when they conclude
-    // (OrdersService / DeliveryService). Always last: benefit accounts are locked after the
-    // cash session and the coupon.
+    // (OrdersService / DeliveryService).
+    //
+    // BEFORE the stock, on purpose. Every flow locks the customer's accounts (cashback, credit,
+    // loyalty) before the stock balances: a cancellation gives cashback back and only then
+    // returns the ingredients. Taking the stock first here would be the opposite order, and a
+    // table bill and a cancellation of the same customer over the same ingredient could wait
+    // for each other forever (PostgreSQL would abort one of them with a deadlock).
     if (isConcludedOrderStatus(order.status)) {
       await this.effects.onOrderConcludedInTx(tx, {
         tenantId: order.tenantId,
@@ -481,6 +480,19 @@ export class OrderCreationService {
         actorUserId: input.recordCashSaleByUserId ?? null,
       });
     }
+
+    // Fase 09: an order that is BORN confirmed (table checkout -> COMPLETED)
+    // consumes its recipes right here, in the same transaction as the Order,
+    // the SALE cash movement and the payment. PENDING orders (online, PDV)
+    // consume later, on the PENDING -> CONFIRMED transition (OrdersService).
+    // Last: the stock balances are always locked after the customer's accounts (see above).
+    const stockMovements = statusConsumesStock(order.status)
+      ? await this.inventory.consumeForOrderInTx(
+          tx,
+          { id: order.id, tenantId: order.tenantId, branchId: order.branchId, items: order.items },
+          input.recordCashSaleByUserId ?? null,
+        )
+      : [];
 
     return { order, cashMovementId: movement?.id ?? null, stockMovementIds: stockMovements.map((m) => m.id) };
   }
