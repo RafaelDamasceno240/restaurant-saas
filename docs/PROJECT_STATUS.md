@@ -29,7 +29,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `ON_ACCOUNT` (fiado) abre uma conta a receber em vez de um pagamento; `provider` só `INTERNAL`; sem gateway |
 | Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
 | CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV. Fatia 2: cupons e descontos (cálculo e validação no backend, PDV e checkout público, prévia, concorrência e idempotência, tela `/dashboard/cupons`). Ver `docs/CRM.md`. Fatias 3 a 6 (2026-10-04/05): segmentos e vínculo de cliente em PDV/mesa/pedido, fidelidade por pontos (`docs/LOYALTY.md`), cashback (`docs/CASHBACK.md`) e fiado/contas a receber (`docs/RECEIVABLES.md`). Sem campanhas nem WhatsApp |
-| Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
+| Relatórios | IMPLEMENTADO (operacionais) | `GET /v1/reports/{sales,products,customers,inventory,delivery,cash}` e tela `/dashboard/relatorios`; `reports.e2e-spec`. Sem exportação, comparação de períodos nem margem por produto. Ver `docs/REPORTS.md` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
 | NFC-e | NÃO IMPLEMENTADO | |
 | SaaS Billing | NÃO IMPLEMENTADO | sem cobrança; `Tenant.status` já bloqueia login e cardápio público quando SUSPENDED/CANCELLED |
@@ -2606,3 +2606,15 @@ Detalhes em `docs/PWA.md`.
 - **Toque:** variante `touch:` no design system; controles com 40–44px e campos com 16px em celular e tablet; desktop inalterado. Cozinha no celular deixou de cortar os pedidos.
 - **Validação:** Chrome headless com emulação de tela e toque em 390×844, 820×1180 e 1366×900; não validado em aparelho físico.
 - Sem alteração de API nem de banco nesta etapa.
+
+## Relatórios operacionais (2026-10-05)
+
+Oitava etapa do salto. Regras e contrato em `docs/REPORTS.md`.
+
+- **Seis relatórios somente leitura:** vendas (totais, por dia, por hora, por pagamento, origem e atendimento), produtos, clientes, estoque (entradas, consumo, saídas e perdas por insumo), delivery (situação, tempos, taxa, entregadores) e caixa (sessões, totais e diferenças).
+- **Escopo:** tenant do token; unidade conferida (`404`/`403`) ou, sem ela, exatamente as unidades do usuário; permissão `reports.read` (proprietário, administrador, gerente).
+- **Período em dias de calendário no fuso do restaurante** (`tenants.timezone`), inclusive nas duas pontas, até 366 dias; dia e hora agrupados no mesmo fuso.
+- **Venda = pedido não cancelado**, pelo dia de criação; cancelados à parte.
+- **Desempenho:** agregação no banco, número fixo de consultas por relatório, listas paginadas, índices já existentes. Sem migration.
+- **Tela:** `/dashboard/relatorios` com filtro de período e unidade, seis abas e gráficos em HTML sem biblioteca.
+- **Limitações:** sem exportação, sem comparação entre períodos, sem margem por produto, sem cache.

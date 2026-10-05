@@ -72,6 +72,7 @@ const PERMISSIONS: string[] = [
   'receivables.sell',
   'receivables.receive',
   'receivables.manage',
+  'reports.read',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -143,6 +144,8 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'receivables.sell',
     'receivables.receive',
     'receivables.manage',
+    // Sales, products, customers, stock, delivery and cash figures of the branches they run.
+    'reports.read',
   ],
   CASHIER: [
     'orders.read',

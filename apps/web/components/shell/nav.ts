@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  BarChart3,
   Bike,
   BookOpen,
   Building2,
@@ -68,6 +69,7 @@ export const DASHBOARD_NAV: NavGroup[] = [
       { key: 'cupons', label: 'Cupons', icon: Ticket, href: '/dashboard/cupons', roles: MANAGEMENT },
       { key: 'fidelidade', label: 'Fidelidade', icon: Gift, href: '/dashboard/fidelidade', roles: [...MANAGEMENT, 'CASHIER'] },
       { key: 'fiado', label: 'Fiado', icon: NotebookPen, href: '/dashboard/fiado', roles: [...MANAGEMENT, 'CASHIER'] },
+      { key: 'relatorios', label: 'Relatórios', icon: BarChart3, href: '/dashboard/relatorios', roles: MANAGEMENT },
       { key: 'cardapio', label: 'Cardápio', icon: BookOpen, href: '/dashboard/cardapio' },
       { key: 'estoque', label: 'Estoque', icon: Package, href: '/dashboard/estoque', roles: [...MANAGEMENT, 'CASHIER', 'KITCHEN'] },
       { key: 'restaurante', label: 'Restaurante', icon: Building2, href: '/dashboard/restaurante', roles: MANAGEMENT },
