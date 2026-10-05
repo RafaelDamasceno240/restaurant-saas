@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+import { CreditTermsDto } from '../../receivables/dto/receivables.dto';
 import { PaymentMethod } from '@prisma/client';
 
 // No amount/price/total field exists here: the sale total is always the sum
@@ -33,4 +35,12 @@ export class CheckoutTabDto {
   @Min(1)
   @Max(2_147_483_647)
   cashbackToUseCents?: number;
+
+  // Fase 11 (fatia 6): terms of a bill paid ON_ACCOUNT (fiado). Needs a customerId and the
+  // receivables.sell permission; ignored for any other payment method.
+  @ApiPropertyOptional({ type: CreditTermsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreditTermsDto)
+  creditTerms?: CreditTermsDto;
 }

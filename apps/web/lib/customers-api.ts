@@ -92,7 +92,7 @@ export interface CustomerOrderItem {
   counted: boolean;
   source: string;
   fulfillmentType: string;
-  paymentMethod: 'CASH' | 'PIX' | 'CARD';
+  paymentMethod: 'CASH' | 'PIX' | 'CARD' | 'ON_ACCOUNT';
   totalCents: number;
   itemCount: number;
   branch: { id: string; name: string };

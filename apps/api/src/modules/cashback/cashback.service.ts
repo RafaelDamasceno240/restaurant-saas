@@ -407,12 +407,15 @@ export class CashbackService {
         branchId: true,
         customerId: true,
         status: true,
+        paymentMethod: true,
         subtotalCents: true,
         discountCents: true,
         cashbackUsedCents: true,
       },
     });
     if (!order?.customerId || !isConcludedOrderStatus(order.status)) return null;
+    // A sale on account (fiado) has not been paid: it gives nothing back, now or later.
+    if (order.paymentMethod === 'ON_ACCOUNT') return null;
 
     const earned = earnedCashbackCents(order, program.earnRateBps);
     if (earned < 1) return null;

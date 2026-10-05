@@ -26,9 +26,9 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Compras e fornecedores | IMPLEMENTADO | `purchases.e2e-spec` (29 casos); ver seção "Compras de estoque" |
 | Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
-| Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
+| Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `ON_ACCOUNT` (fiado) abre uma conta a receber em vez de um pagamento; `provider` só `INTERNAL`; sem gateway |
 | Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
-| CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV. Fatia 2: cupons e descontos (cálculo e validação no backend, PDV e checkout público, prévia, concorrência e idempotência, tela `/dashboard/cupons`). Ver `docs/CRM.md`. Sem cashback, fidelidade, campanhas, WhatsApp nem segmentação; o PDV (tela) ainda não tem seletor de cliente |
+| CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV. Fatia 2: cupons e descontos (cálculo e validação no backend, PDV e checkout público, prévia, concorrência e idempotência, tela `/dashboard/cupons`). Ver `docs/CRM.md`. Fatias 3 a 6 (2026-10-04/05): segmentos e vínculo de cliente em PDV/mesa/pedido, fidelidade por pontos (`docs/LOYALTY.md`), cashback (`docs/CASHBACK.md`) e fiado/contas a receber (`docs/RECEIVABLES.md`). Sem campanhas nem WhatsApp |
 | Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
 | NFC-e | NÃO IMPLEMENTADO | |
@@ -2581,3 +2581,16 @@ Quinta fatia da Fase 11. Regra, modelo e decisões em `docs/CASHBACK.md`.
 - **Tela:** cartão de cashback em `/dashboard/fidelidade`, campo de uso no PDV e na mesa, aba Cashback no cliente, linha no detalhe do pedido.
 - **Migration:** `20261005003323_cashback`. Validada no banco descartável, em banco novo e em uma cópia do DEV; **não aplicada no DEV**.
 - **Limitações:** expiração por inatividade da conta (não por lote); sem agendador; sem uso no checkout público.
+
+## Fiado / contas a receber (2026-10-05)
+
+Sexta fatia da Fase 11. Regra, modelo e decisões em `docs/RECEIVABLES.md`.
+
+- **Regra:** cliente compra fiado só com limite definido, dentro do limite e sem parcela vencida; a venda (`ON_ACCOUNT`) abre uma conta com 1 a 12 parcelas mensais; recebimento total ou parcial em dinheiro, Pix ou cartão abate as parcelas por vencimento; estorno de recebimento e cancelamento com motivo; cancelar o pedido cancela a dívida; venda fiado não gera pontos nem cashback.
+- **Ledger em centavos:** `receivable_entries` e `receivable_payment_allocations` append-only; dívida do cliente, pago por conta e pago por parcela como totais correntes travados por linha; atraso calculado contra o dia do restaurante (`tenants.timezone`), nunca gravado.
+- **Integração:** limite e atraso conferidos contra a conta travada dentro da transação que cria o pedido (`OrderCreationService`); cancelamento e troca de cliente pelo `OrderEffectsService`; ordem de locks caixa → cupom → cashback → crédito → fidelidade; dinheiro recebido entra na sessão de caixa (`RECEIVABLE_PAYMENT`) e o estorno sai dela (`RECEIVABLE_REFUND`).
+- **API:** `/v1/receivables/*`, `paymentMethod: ON_ACCOUNT` + `creditTerms` em `POST /pos/orders` e `POST /tabs/:id/checkout`; permissões `receivables.read/sell/receive/manage`; o checkout público recusa `ON_ACCOUNT`.
+- **Tela:** `/dashboard/fiado` (Contas a receber), forma de pagamento Fiado no PDV e na mesa, aba Fiado no cliente, fiado recebido no Caixa.
+- **Migration:** `20261005005645_receivables`. Validada no banco descartável, em banco novo e em uma cópia do DEV (13 → 16); **não aplicada no DEV**.
+- **Defeito encontrado e corrigido antes do commit:** o `CHECK` da forma de pagamento aceitava `PAYMENT` com forma nula (`NULL IN (...)` resulta em `NULL`, que um `CHECK` aceita); passou a exigir `IS NOT NULL`.
+- **Limitações:** sem juros/multa, sem renegociação de parcelas, sem cobrança automática, sem tela para alterar o fuso do restaurante, um pagamento abate uma conta por vez.

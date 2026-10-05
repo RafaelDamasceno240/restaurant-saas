@@ -8,8 +8,8 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { tablesApi } from '@/lib/tables-api';
 import { Tab, tabsApi } from '@/lib/tabs-api';
-import { PaymentMethod } from '@/lib/checkout-api';
-import { checkoutBlockReason, TAB_PAYMENT_OPTIONS } from '@/lib/tab-checkout-logic';
+import { StaffPaymentMethod } from '@/lib/checkout-api';
+import { checkoutBlockReason, TAB_PAYMENT_OPTIONS, tabPaymentOptions } from '@/lib/tab-checkout-logic';
 import { categoriesApi, productsApi } from '@/lib/cardapio-api';
 import { filterPosProducts } from '@/lib/pos-logic';
 import { formatCentsAsBRL } from '@/lib/money';
@@ -21,6 +21,8 @@ import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
 import { CashbackUseField } from '@/components/cashback/CashbackUseField';
 import { parseCashbackToUse, validateCashbackToUse } from '@/lib/cashback-logic';
+import { CreditTermsField } from '@/components/receivables/CreditTermsField';
+import { defaultTerms, localDateOnly, receivableErrorMessage, TermsDraft, toCreditTerms } from '@/lib/receivables-logic';
 
 // A comanda's items are never local state: every add/change/remove hits the
 // API immediately and re-renders from whatever it echoes back — the same
@@ -41,7 +43,11 @@ export default function MesaDetailPage() {
   const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<StaffPaymentMethod | null>(null);
+  // Fiado: how the debt will be paid back, and why the picked customer cannot take this bill
+  // on account right now (reported by CreditTermsField; null = may). Only the terms are sent.
+  const [creditTerms, setCreditTerms] = useState<TermsDraft>(() => defaultTerms(localDateOnly()));
+  const [creditBlock, setCreditBlock] = useState<string | null>(null);
   // Optional customer of the registry for this sale. Waiters close tabs but cannot see the
   // customer registry (the API refuses a customerId from them), so the picker is hidden.
   const [saleCustomer, setSaleCustomer] = useState<PickedCustomer | null>(null);
@@ -180,6 +186,8 @@ export default function MesaDetailPage() {
     setSaleCustomer(null);
     setCashbackInput('');
     setCashbackMaxCents(0);
+    setCreditTerms(defaultTerms(localDateOnly()));
+    setCreditBlock(null);
     checkoutKeyRef.current = crypto.randomUUID();
     setCheckoutOpen(true);
   }
@@ -190,6 +198,7 @@ export default function MesaDetailPage() {
     setSaleCustomer(null);
     setCashbackInput('');
     setCashbackMaxCents(0);
+    setCreditBlock(null);
     checkoutKeyRef.current = null;
   }
 
@@ -210,7 +219,10 @@ export default function MesaDetailPage() {
         idempotencyKey: checkoutKeyRef.current ?? crypto.randomUUID(),
         ...(saleCustomer ? { customerId: saleCustomer.id } : {}),
         ...(cashbackCents > 0 ? { cashbackToUseCents: cashbackCents } : {}),
+        ...(paymentMethod === 'ON_ACCOUNT' ? { creditTerms: toCreditTerms(creditTerms) } : {}),
       });
+      // A bill put on account opens a debt and uses the customer's limit.
+      if (paymentMethod === 'ON_ACCOUNT') void queryClient.invalidateQueries({ queryKey: ['receivables'] });
       setSale(result);
       setCheckoutOpen(false);
       await invalidateAfterChange();
@@ -218,7 +230,9 @@ export default function MesaDetailPage() {
       if (err instanceof ApiError && err.code === 'CASH_REGISTER_NOT_OPEN') {
         setError(`${err.message} Escolha PIX/Cartão ou abra o caixa (Menu: Caixa).`);
       } else {
-        setError(err instanceof ApiError ? err.message : 'Não foi possível fechar a conta.');
+        // The fiado refusals get a friendlier text; other codes keep the API message.
+        setError(err instanceof ApiError ? receivableErrorMessage(err.code, err.message) : 'Não foi possível fechar a conta.');
+        if (paymentMethod === 'ON_ACCOUNT') void queryClient.invalidateQueries({ queryKey: ['receivables'] });
       }
       // Refresh branchCashRegisterOpen / tab status after a rejection.
       await invalidateAfterChange();
@@ -248,7 +262,9 @@ export default function MesaDetailPage() {
           </p>
           <p className="text-3xl font-bold tracking-tight text-foreground">{formatCentsAsBRL(sale.order.totalCents)}</p>
           <p className="inline-block rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success">
-            {sale.order.payment?.status === 'CONFIRMED' ? 'Pagamento confirmado' : 'Pagamento pendente'} · {methodLabel}
+            {sale.order.paymentMethod === 'ON_ACCOUNT'
+              ? 'Lançado no fiado do cliente'
+              : `${sale.order.payment?.status === 'CONFIRMED' ? 'Pagamento confirmado' : 'Pagamento pendente'} · ${methodLabel}`}
           </p>
           <Link href="/dashboard/mesas" className="block">
             <Button size="lg" fullWidth>
@@ -450,6 +466,25 @@ export default function MesaDetailPage() {
                 paymentMethod={paymentMethod}
                 onPaymentMethod={setPaymentMethod}
                 cashRegisterOpen={tab.branchCashRegisterOpen ?? false}
+                options={tabPaymentOptions(canLinkCustomer)}
+                customerPicked={saleCustomer !== null}
+                creditBlock={creditBlock}
+                creditSlot={
+                  paymentMethod === 'ON_ACCOUNT' && saleCustomer ? (
+                    <CreditTermsField
+                      customerId={saleCustomer.id}
+                      // What goes on account: the bill minus the cashback being used on it.
+                      totalCents={
+                        tab.totalCents -
+                        (validateCashbackToUse(cashbackInput, cashbackMaxCents) ? 0 : (parseCashbackToUse(cashbackInput) ?? 0))
+                      }
+                      value={creditTerms}
+                      onChange={setCreditTerms}
+                      onBlockChange={setCreditBlock}
+                      disabled={isSubmitting}
+                    />
+                  ) : null
+                }
                 isSubmitting={isSubmitting}
                 onConfirm={handleCheckout}
                 onCancel={cancelCheckout}
@@ -496,6 +531,10 @@ function CheckoutPanel({
   paymentMethod,
   onPaymentMethod,
   cashRegisterOpen,
+  options,
+  customerPicked,
+  creditBlock,
+  creditSlot,
   isSubmitting,
   onConfirm,
   onCancel,
@@ -504,15 +543,21 @@ function CheckoutPanel({
   itemCount: number;
   subtotalCents: number;
   totalCents: number;
-  paymentMethod: PaymentMethod | null;
-  onPaymentMethod: (method: PaymentMethod) => void;
+  paymentMethod: StaffPaymentMethod | null;
+  onPaymentMethod: (method: StaffPaymentMethod) => void;
   cashRegisterOpen: boolean;
+  // The ways of paying this user may offer (fiado only for who may sell on account).
+  options: { value: StaffPaymentMethod; label: string }[];
+  customerPicked: boolean;
+  creditBlock: string | null;
+  // Terms of the fiado, shown when that is the chosen way of paying.
+  creditSlot?: React.ReactNode;
   isSubmitting: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   customerSlot?: React.ReactNode;
 }) {
-  const blockReason = checkoutBlockReason({ itemCount, paymentMethod, cashRegisterOpen });
+  const blockReason = checkoutBlockReason({ itemCount, paymentMethod, cashRegisterOpen, customerPicked, creditBlock });
   return (
     <div className="space-y-3 rounded-ctl border border-line bg-surface-2 p-3">
       <p className="text-sm font-semibold">Fechar conta</p>
@@ -540,7 +585,7 @@ function CheckoutPanel({
 
       <fieldset className="space-y-1" disabled={isSubmitting}>
         <legend className="mb-1 text-xs text-muted-foreground">Forma de pagamento</legend>
-        {TAB_PAYMENT_OPTIONS.map((option) => (
+        {options.map((option) => (
           <label key={option.value} className="flex items-center gap-2 text-sm">
             <input
               type="radio"
@@ -558,11 +603,14 @@ function CheckoutPanel({
         ))}
       </fieldset>
 
-      {blockReason && paymentMethod && <p className="text-xs text-warning">{blockReason}</p>}
+      {creditSlot}
+
+      {/* The credit reasons are already shown inside the fiado box. */}
+      {blockReason && paymentMethod && !(creditSlot && blockReason === creditBlock) && <p className="text-xs text-warning">{blockReason}</p>}
 
       <div className="flex gap-2">
         <Button className="flex-1" loading={isSubmitting} disabled={blockReason !== null} onClick={onConfirm}>
-          {isSubmitting ? 'Processando...' : 'Confirmar pagamento'}
+          {isSubmitting ? 'Processando...' : paymentMethod === 'ON_ACCOUNT' ? 'Lançar no fiado' : 'Confirmar pagamento'}
         </Button>
         <Button variant="outline" disabled={isSubmitting} onClick={onCancel}>
           Cancelar

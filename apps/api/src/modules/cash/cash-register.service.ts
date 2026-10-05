@@ -247,18 +247,48 @@ export class CashRegisterService {
   // PDV integration — called INSIDE OrderCreationService's transaction, so
   // the Order and its SALE movement commit or roll back together.
   // ---------------------------------------------------------------------
-  async lockOpenSessionForSale(tx: Tx, tenantId: string, branchId: string): Promise<string> {
+  async lockOpenSessionForSale(
+    tx: Tx,
+    tenantId: string,
+    branchId: string,
+    message = 'Não há caixa aberto nesta unidade. Abra o caixa antes de vender em dinheiro.',
+  ): Promise<string> {
     const rows = await tx.$queryRaw<{ id: string }[]>`
       SELECT id FROM "cash_register_sessions"
       WHERE "tenantId" = ${tenantId} AND "branchId" = ${branchId} AND "status" = 'OPEN'
       FOR UPDATE`;
     if (rows.length === 0) {
-      throw new ConflictException({
-        code: 'CASH_REGISTER_NOT_OPEN',
-        message: 'Não há caixa aberto nesta unidade. Abra o caixa antes de vender em dinheiro.',
-      });
+      throw new ConflictException({ code: 'CASH_REGISTER_NOT_OPEN', message });
     }
     return rows[0].id;
+  }
+
+  // Fiado (Fase 11, fatia 6): cash received for a receivable, or handed back when such a
+  // payment is reversed. Called INSIDE the receivables transaction, after the session was
+  // locked with lockOpenSessionForSale(): the ledger entry and the drawer movement commit or
+  // roll back together, and a concurrent close waits for them.
+  recordReceivableCash(
+    tx: Tx,
+    input: {
+      sessionId: string;
+      tenantId: string;
+      type: 'RECEIVABLE_PAYMENT' | 'RECEIVABLE_REFUND';
+      amountCents: number;
+      reason: string;
+      userId: string;
+    },
+  ) {
+    return tx.cashMovement.create({
+      data: {
+        sessionId: input.sessionId,
+        tenantId: input.tenantId,
+        type: input.type,
+        amountCents: input.amountCents,
+        reason: input.reason,
+        createdByUserId: input.userId,
+      },
+      select: { id: true },
+    });
   }
 
   recordSale(

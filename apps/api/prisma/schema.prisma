@@ -44,6 +44,9 @@ model Tenant {
   document  String       @unique
   slug      String       @unique
   status    TenantStatus @default(TRIAL)
+  // IANA time zone of the restaurant. "Today" for due dates, overdue receivables and report
+  // periods is the calendar day in this zone, never the server's.
+  timezone  String       @default("America/Sao_Paulo")
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -78,6 +81,9 @@ model Tenant {
   cashbackProgram   CashbackProgram?
   cashbackAccounts  CashbackAccount[]
   cashbackEntries   CashbackEntry[]
+  creditAccounts    CreditAccount[]
+  receivables       Receivable[]
+  receivableEntries ReceivableEntry[]
 
   @@map("tenants")
 }
@@ -121,6 +127,7 @@ model Branch {
   stockMovements    StockMovement[]
   inventoryCounts   InventoryCount[]
   purchases         Purchase[]
+  receivables       Receivable[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -157,6 +164,8 @@ model User {
   cancelledPurchases   Purchase[]            @relation("PurchaseCancelledBy")
   loyaltyEntries       LoyaltyEntry[]
   cashbackEntries      CashbackEntry[]
+  createdReceivables   Receivable[]
+  receivableEntries    ReceivableEntry[]
 
   @@index([tenantId])
   @@map("users")
@@ -332,6 +341,9 @@ enum PaymentMethod {
   CASH
   PIX
   CARD
+  // Fiado (Fase 11, fatia 6): nothing is received now; the order opens a Receivable for the
+  // linked customer. Staff flows only - the public checkout never accepts it.
+  ON_ACCOUNT
 }
 
 model Order {
@@ -394,6 +406,7 @@ model Order {
   redemption      CouponRedemption?
   loyaltyEntries  LoyaltyEntry[]
   cashbackEntries CashbackEntry[]
+  receivable      Receivable?
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, createdAt])
@@ -494,6 +507,10 @@ enum CashMovementType {
   WITHDRAWAL
   SUPPLY
   SALE
+  // Cash received for a receivable (fiado paid in cash): money IN, like a sale.
+  RECEIVABLE_PAYMENT
+  // A cash payment of a receivable that was reversed: money OUT.
+  RECEIVABLE_REFUND
 }
 
 model CashRegisterSession {
@@ -533,10 +550,11 @@ model CashMovement {
   createdByUserId String
   createdAt       DateTime         @default(now())
 
-  session   CashRegisterSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
-  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  order     Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  createdBy User                @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  session         CashRegisterSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order           Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdBy       User                @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  receivableEntry ReceivableEntry?
 
   @@index([sessionId, createdAt])
   @@map("cash_movements")
@@ -868,6 +886,8 @@ model Customer {
   redemptions     CouponRedemption[]
   loyaltyAccount  LoyaltyAccount?
   cashbackAccount CashbackAccount?
+  creditAccount   CreditAccount?
+  receivables     Receivable[]
 
   @@index([tenantId, active, name])
   @@map("customers")
@@ -1214,4 +1234,161 @@ model CashbackEntry {
   @@index([tenantId, createdAt])
   @@index([orderId])
   @@map("cashback_entries")
+}
+
+// ---------------------------------------------------------------------------------------
+// Fiado / contas a receber (Fase 11, fatia 6): money the CUSTOMER owes the restaurant, in
+// integer cents. Same ledger discipline as cashback: receivable_entries is the source of
+// truth and append-only; CreditAccount.balanceCents (the customer's open debt) is its running
+// total, changed only inside the transaction that appends an entry, with the account row
+// locked FOR UPDATE. A debt is never a bare mutable `debtBalance`.
+// Rule (docs/RECEIVABLES.md): a sale paid ON_ACCOUNT, or a manual charge, opens a Receivable
+// split in installments with due dates; payments (also partial) are allocated to installments,
+// oldest due first; a payment can be reversed; "overdue" is derived from the due date.
+// ---------------------------------------------------------------------------------------
+
+// One per customer, created when a limit is set or on the first charge.
+model CreditAccount {
+  id               String   @id @default(uuid())
+  tenantId         String
+  customerId       String   @unique
+  // 0 = this customer cannot buy on account. CHECK >= 0.
+  creditLimitCents Int      @default(0)
+  // Open debt = SUM(entries.amountCents). CHECK >= 0.
+  balanceCents     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer    Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  receivables Receivable[]
+  entries     ReceivableEntry[]
+
+  @@index([tenantId])
+  @@map("credit_accounts")
+}
+
+enum ReceivableStatus {
+  OPEN
+  PAID
+  CANCELLED
+}
+
+// One debt document: a sale on account (orderId set, unique) or a manual charge.
+// paidCents = SUM of its non-reversed payments; PAID exactly when paidCents = totalCents.
+model Receivable {
+  id          String           @id @default(uuid())
+  tenantId    String
+  branchId    String
+  customerId  String
+  accountId   String
+  orderId     String?          @unique
+  description String
+  totalCents  Int
+  paidCents   Int              @default(0)
+  status      ReceivableStatus @default(OPEN)
+
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  settledAt       DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch                  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer     Customer                @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  account      CreditAccount           @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  order        Order?                  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdBy    User                    @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  installments ReceivableInstallment[]
+  entries      ReceivableEntry[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, customerId, status])
+  @@index([tenantId, branchId, status])
+  @@map("receivables")
+}
+
+// A slice of the debt with its own due date. The amounts of the installments of a receivable
+// add up to its total. paidCents = what non-reversed payments allocated to it.
+model ReceivableInstallment {
+  id           String   @id @default(uuid())
+  tenantId     String
+  receivableId String
+  number       Int
+  dueDate      DateTime @db.Date
+  amountCents  Int
+  paidCents    Int      @default(0)
+
+  receivable  Receivable                    @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  allocations ReceivablePaymentAllocation[]
+
+  @@unique([receivableId, number])
+  @@index([tenantId, dueDate])
+  @@map("receivable_installments")
+}
+
+enum ReceivableEntryType {
+  // + the debt created by a sale on account or a manual charge
+  CHARGE
+  // - money received (paymentMethod set; a cash payment also has its cash movement)
+  PAYMENT
+  // undoes exactly one earlier entry (reversedEntryId, unique): a payment entered by mistake,
+  // or the charge of a cancelled receivable
+  REVERSAL
+}
+
+model ReceivableEntry {
+  id                String              @id @default(uuid())
+  tenantId          String
+  accountId         String
+  customerId        String
+  receivableId      String
+  type              ReceivableEntryType
+  // Signed cents, from the debt's point of view: CHARGE > 0, PAYMENT < 0, never 0.
+  amountCents       Int
+  // The customer's open debt right after this entry (>= 0).
+  balanceAfterCents Int
+
+  // How a PAYMENT was received (CASH, PIX or CARD), and where.
+  paymentMethod   PaymentMethod?
+  branchId        String?
+  cashMovementId  String?        @unique
+  reversedEntryId String?        @unique
+  reason          String?
+  idempotencyKey  String?
+  createdByUserId String
+  createdAt       DateTime       @default(now())
+
+  tenant        Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account       CreditAccount                 @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  receivable    Receivable                    @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  cashMovement  CashMovement?                 @relation(fields: [cashMovementId], references: [id], onDelete: Restrict)
+  reversedEntry ReceivableEntry?              @relation("ReceivableEntryReversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversal      ReceivableEntry?              @relation("ReceivableEntryReversal")
+  createdBy     User                          @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  allocations   ReceivablePaymentAllocation[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([accountId, createdAt])
+  @@index([receivableId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("receivable_entries")
+}
+
+// Which installments a PAYMENT entry paid, and how much of each: what a reversal undoes,
+// installment by installment. Append-only, like the entries.
+model ReceivablePaymentAllocation {
+  id            String @id @default(uuid())
+  entryId       String
+  installmentId String
+  amountCents   Int
+
+  entry       ReceivableEntry       @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  installment ReceivableInstallment @relation(fields: [installmentId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, installmentId])
+  @@index([installmentId])
+  @@map("receivable_payment_allocations")
 }

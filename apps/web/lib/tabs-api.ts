@@ -1,5 +1,6 @@
 import { apiFetch } from './api-client';
-import { PaymentMethod } from './checkout-api';
+import { PaymentMethod, StaffPaymentMethod } from './checkout-api';
+import type { CreditTerms } from './receivables-api';
 
 export type TabStatus = 'OPEN' | 'CLOSED';
 
@@ -39,8 +40,9 @@ export interface TabSale {
   id: string;
   orderNumber: string;
   status: string;
-  paymentMethod: PaymentMethod;
+  paymentMethod: StaffPaymentMethod;
   totalCents: number;
+  // null for a bill put on account (fiado): nothing was received, the debt is in contas a receber.
   payment: {
     status: 'PENDING' | 'CONFIRMED' | 'FAILED';
     method: PaymentMethod;
@@ -51,8 +53,10 @@ export interface TabSale {
 
 // No amount field: the backend always charges the sum of the tab's snapshots.
 export interface CheckoutTabInput {
-  paymentMethod: PaymentMethod;
+  paymentMethod: StaffPaymentMethod;
   idempotencyKey: string;
+  // Only with paymentMethod ON_ACCOUNT (needs receivables.sell and a customerId).
+  creditTerms?: CreditTerms;
   // A customer of the registry the sale belongs to (needs customers.read). Only the id travels.
   customerId?: string;
   // Cents of that customer's cashback balance to spend on this sale (needs cashback.use).

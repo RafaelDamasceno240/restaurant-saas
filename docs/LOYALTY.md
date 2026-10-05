@@ -11,7 +11,7 @@ Estado real implementado em 2026-10-04. Programa de pontos por restaurante: o cl
    - centavos abaixo de R$ 1,00 são desprezados (arredonda para baixo: o programa nunca dá mais que a taxa anunciada);
    - compra que não chega a 1 ponto não gera movimentação;
    - **uma vez por pedido**, garantido por índice único parcial no banco.
-3. **Quando**: na mesma transação em que o pedido é concluído. `COMPLETED` e `DELIVERED` são estados finais (não existe cancelamento depois deles), então pontos de compra nunca precisam ser retirados por cancelamento. Pedido cancelado, sem cliente ou com o programa desligado não gera pontos.
+3. **Quando**: na mesma transação em que o pedido é concluído. `COMPLETED` e `DELIVERED` são estados finais (não existe cancelamento depois deles), então pontos de compra nunca precisam ser retirados por cancelamento. Pedido cancelado, sem cliente ou com o programa desligado não gera pontos. **Pedido vendido fiado (`ON_ACCOUNT`) também não gera pontos**: o cliente ainda não pagou (ver `docs/RECEIVABLES.md`).
 4. **Cliente informado depois**: vincular um cliente a um pedido **já concluído** credita os pontos nesse momento (se o programa estiver ligado), uma única vez.
 5. **Resgate (`REDEEM`)**: pontos são trocados por uma **recompensa** do catálogo. Quem define quantos pontos saem é a recompensa (lida no servidor dentro da transação); o cliente da API nunca envia quantidade. Exige programa ligado, recompensa ativa e cliente ativo.
 6. **Ajuste (`ADJUSTMENT`)**: a gerência credita ou debita pontos manualmente, sempre com motivo.
@@ -48,7 +48,7 @@ Garantias que estão **no banco** (além da aplicação):
 
 - **Lock pessimista por conta.** Toda escrita trava a linha da conta; dois resgates simultâneos são processados um de cada vez e o segundo já vê o saldo deixado pelo primeiro. Medido: 20 resgates simultâneos com saldo para 3 → 3 concluídos, 17 recusados com `409`, saldo final correto, nenhum 5xx.
 - **Criação da conta** por `INSERT ... ON CONFLICT DO NOTHING`: os primeiros movimentos simultâneos de um cliente não criam duas contas.
-- **Ordem de locks:** o que o chamador já segura (linha do pedido, sessão de caixa, cupom, conta de cashback) e, por último, a conta de fidelidade. Sempre a mesma ordem, sem ciclo.
+- **Ordem de locks:** o que o chamador já segura (linha do pedido, sessão de caixa, cupom, conta de cashback, conta de crédito do fiado) e, por último, a conta de fidelidade. Sempre a mesma ordem, sem ciclo.
 - **Idempotência** de resgate, ajuste e estorno por `idempotencyKey` (8 a 100 caracteres, gerada pelo cliente uma vez por tentativa). A chave é conferida de novo **dentro da transação, depois do lock**: uma duplicata que chega enquanto a primeira ainda roda espera o lock e recebe a mesma movimentação (`idempotentReplay: true`), em vez de um falso "saldo insuficiente". Medido: 8 duplicatas simultâneas de um resgate com saldo para um só → as 8 respondem `200` com a mesma movimentação, um único débito. A mesma chave para outra operação, cliente ou valor responde `409 IDEMPOTENCY_KEY_REUSED`.
 - **Crédito de compra** é idempotente por pedido (verificação + índice único) e roda sob o lock da linha do pedido que o fluxo de conclusão já segura.
 

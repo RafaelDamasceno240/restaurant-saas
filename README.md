@@ -5,8 +5,8 @@
 > cardápio administrativo e público, carrinho, checkout público, pedidos, KDS,
 > PDV, caixa, mesas, comandas, estoque e compras. **PARCIAL:** pagamentos (só registro
 > interno, sem gateway), delivery (taxa, despacho, falha/reentrega, confirmação, entregador interno e histórico; sem mapas/GPS nem entregador externo),
-> CRM (clientes: cadastro, histórico e métricas; cupons e descontos; sem fidelidade/campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
-> NFC-e, fidelidade/cashback, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
+> CRM (clientes: cadastro, histórico, segmentos e métricas; cupons; fidelidade por pontos; cashback; fiado/contas a receber; sem campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
+> NFC-e, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
 > evidências em `docs/PROJECT_STATUS.md`.
 
 ## Visão geral
@@ -107,7 +107,7 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 38 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes e cupons
+pnpm --filter api test:e2e    # e2e: 40 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback e fiado
 ```
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do

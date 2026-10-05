@@ -24,6 +24,8 @@ import { isCouponError } from '../coupons/coupon-errors';
 import { OrderEffectsService } from '../order-effects/order-effects.service';
 import { CashbackService } from '../cashback/cashback.service';
 import { isCashbackError } from '../cashback/cashback-errors';
+import { CreditTerms, ReceivablesService } from '../receivables/receivables.service';
+import { isReceivableError } from '../receivables/receivable-errors';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 
 // Orders that use the SAME limited coupon queue on its row lock, each holding a pooled
@@ -85,6 +87,11 @@ export interface OrderCreationInput {
   // LOCKED balance, inside the order transaction: asking for more than the balance or more than
   // the items cost refuses the whole order.
   cashbackToUseCents?: number | null;
+  // Fase 11 (fatia 6): how a sale ON_ACCOUNT (fiado) is to be paid back - installments and
+  // first due date. Ignored for any other payment method; when absent, one installment due in
+  // 30 days. Only the staff flows (PDV, table checkout) sell on account, after checking
+  // receivables.sell; the customer's limit is checked here, on the locked credit account.
+  creditTerms?: CreditTerms | null;
   idempotencyKey?: string;
 }
 
@@ -139,6 +146,7 @@ export class OrderCreationService {
     private readonly coupons: CouponRedemptionService,
     private readonly effects: OrderEffectsService,
     private readonly cashback: CashbackService,
+    private readonly receivables: ReceivablesService,
   ) {}
 
   async createOrder(rawInput: OrderCreationInput): Promise<OrderWithItems> {
@@ -176,7 +184,10 @@ export class OrderCreationService {
       // it really is the same request) and never a spurious "coupon used up".
       if (
         input.idempotencyKey &&
-        (this.isIdempotencyKeyViolation(error) || isCouponError(error) || isCashbackError(error))
+        (this.isIdempotencyKeyViolation(error) ||
+          isCouponError(error) ||
+          isCashbackError(error) ||
+          isReceivableError(error))
       ) {
         const replay = await this.findReplay(input);
         if (replay) return replay;
@@ -355,6 +366,22 @@ export class OrderCreationService {
       throw orderTotalTooLarge();
     }
 
+    // Fase 11 (fatia 6): a sale on account is reserved AFTER the cashback (fixed lock order:
+    // cash -> coupon -> cashback account -> credit account) and BEFORE the order exists: the
+    // customer's credit account is locked FOR UPDATE and the total is checked against the limit
+    // it really has left. The receivable itself is opened right after the order is created,
+    // below, in this same transaction.
+    const creditReservation =
+      input.paymentMethod === 'ON_ACCOUNT'
+        ? await this.receivables.reserveSaleInTx(tx, {
+            tenantId: input.tenantId,
+            customerId: input.customerId ?? null,
+            totalCents,
+            terms: input.creditTerms ?? null,
+            actorUserId: input.recordCashSaleByUserId ?? null,
+          })
+        : null;
+
     const order = await tx.order.create({
       data: {
         tenantId: input.tenantId,
@@ -401,6 +428,11 @@ export class OrderCreationService {
     // without its order.
     if (reservation) {
       await this.cashback.commitUseInTx(tx, reservation, order.id);
+    }
+
+    // The debt points at the sale that created it: no sale on account without its receivable.
+    if (creditReservation) {
+      await this.receivables.commitSaleInTx(tx, creditReservation, order);
     }
 
     // A DELIVERY order always has its operational record, created in the same

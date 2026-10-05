@@ -9,6 +9,7 @@ import {
   CreditCard,
   ImageIcon,
   Minus,
+  NotebookPen,
   Plus,
   QrCode,
   ShoppingCart,
@@ -24,7 +25,7 @@ import { CouponPreview } from '@/lib/coupons-api';
 import { couponApplyMessage, couponPreviewKey, totalAfterCouponCents } from '@/lib/coupons-logic';
 import { useActiveBranch } from '@/lib/use-active-branch';
 import { AdminOrderDetail } from '@/lib/orders-api';
-import { PaymentMethod } from '@/lib/checkout-api';
+import { StaffPaymentMethod } from '@/lib/checkout-api';
 import {
   PosCartItem,
   addToCart,
@@ -42,16 +43,21 @@ import { Tooltip } from '@/components/ds/Tooltip';
 import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
 import { CashbackUseField } from '@/components/cashback/CashbackUseField';
 import { parseCashbackToUse, validateCashbackToUse } from '@/lib/cashback-logic';
+import { CreditTermsField } from '@/components/receivables/CreditTermsField';
+import { defaultTerms, localDateOnly, receivableErrorMessage, TermsDraft, toCreditTerms } from '@/lib/receivables-logic';
 import clsx from 'clsx';
 
 function formatBRL(cents: number): string {
   return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`;
 }
 
-const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; icon: typeof Banknote }[] = [
+// ON_ACCOUNT (fiado) is offered only to who may sell on account (receivables.sell), and needs a
+// customer of the registry with a credit limit; the API enforces both.
+const PAYMENT_OPTIONS: { value: StaffPaymentMethod; label: string; icon: typeof Banknote }[] = [
   { value: 'CASH', label: 'Dinheiro', icon: Banknote },
   { value: 'PIX', label: 'Pix', icon: QrCode },
   { value: 'CARD', label: 'Cartão', icon: CreditCard },
+  { value: 'ON_ACCOUNT', label: 'Fiado', icon: NotebookPen },
 ];
 
 // Only the counter (Balcão) flow exists in the backend today; the other
@@ -89,7 +95,11 @@ export default function PdvPage() {
   // checks it against the real balance when the sale is created.
   const [cashbackInput, setCashbackInput] = useState('');
   const [cashbackMaxCents, setCashbackMaxCents] = useState(0);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
+  const [paymentMethod, setPaymentMethod] = useState<StaffPaymentMethod>('CASH');
+  // Fiado: how the debt will be paid back, and why this customer cannot take this sale on
+  // account right now (reported by CreditTermsField; null = may). Only the terms are sent.
+  const [creditTerms, setCreditTerms] = useState<TermsDraft>(() => defaultTerms(localDateOnly()));
+  const [creditBlock, setCreditBlock] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<AdminOrderDetail | null>(null);
@@ -133,6 +143,17 @@ export default function PdvPage() {
   const cashbackProblem = customer ? validateCashbackToUse(cashbackInput, cashbackMaxCents) : null;
   const cashbackCents = customer && !cashbackProblem ? (parseCashbackToUse(cashbackInput) ?? 0) : 0;
   const totalCents = itemsAfterDiscountCents - cashbackCents;
+  // Selling on account needs receivables.sell: the same four roles (the API enforces it).
+  const canSellOnAccount = canPickCustomer;
+  const paymentOptions = PAYMENT_OPTIONS.filter((option) => option.value !== 'ON_ACCOUNT' || canSellOnAccount);
+  const onAccount = paymentMethod === 'ON_ACCOUNT';
+  const creditProblem = !onAccount
+    ? null
+    : !customer
+      ? 'Escolha um cliente cadastrado para vender fiado.'
+      : totalCents < 1
+        ? 'Não há valor a lançar no fiado nesta venda.'
+        : creditBlock;
 
   function addProduct(product: { id: string; name: string; price: number }) {
     setCart((prev) =>
@@ -187,6 +208,8 @@ export default function PdvPage() {
     setCashbackInput('');
     setCashbackMaxCents(0);
     setPaymentMethod('CASH');
+    setCreditTerms(defaultTerms(localDateOnly()));
+    setCreditBlock(null);
     setError(null);
     setConfirmation(null);
     setCartOpen(false);
@@ -205,6 +228,10 @@ export default function PdvPage() {
       setError(cashbackProblem);
       return;
     }
+    if (creditProblem) {
+      setError(creditProblem);
+      return;
+    }
     setError(null);
     setIsSubmitting(true);
     try {
@@ -218,21 +245,21 @@ export default function PdvPage() {
         paymentMethod,
         couponCode: couponCode || undefined,
         ...(cashbackCents > 0 ? { cashbackToUseCents: cashbackCents } : {}),
+        ...(onAccount ? { creditTerms: toCreditTerms(creditTerms) } : {}),
         idempotencyKey: saleKeyRef.current,
       });
       saleKeyRef.current = null;
       setConfirmation(order);
       // A CASH sale adds a SALE movement to the open cash session.
       queryClient.invalidateQueries({ queryKey: ['cash-current'] });
+      // A sale on account opens a debt and uses the customer's limit.
+      if (onAccount) queryClient.invalidateQueries({ queryKey: ['receivables'] });
     } catch (err) {
       if (err instanceof ApiError) saleKeyRef.current = null;
-      setError(
-        err instanceof ApiError
-          ? err.code === 'CASH_REGISTER_NOT_OPEN'
-            ? `${err.message} (Menu: Caixa → Abrir caixa)`
-            : err.message
-          : 'Não foi possível finalizar a venda.',
-      );
+      // Covers CASH_REGISTER_NOT_OPEN and the fiado refusals; other codes keep the API message.
+      setError(err instanceof ApiError ? receivableErrorMessage(err.code, err.message) : 'Não foi possível finalizar a venda.');
+      // The customer's credit may have changed since it was shown.
+      if (onAccount) queryClient.invalidateQueries({ queryKey: ['receivables'] });
     } finally {
       setIsSubmitting(false);
     }
@@ -279,6 +306,14 @@ export default function PdvPage() {
           {confirmation.discount > 0 && (
             <p className="text-sm text-success">
               Cupom {confirmation.couponCode}: desconto de {formatBRL(Math.round(confirmation.discount * 100))}
+            </p>
+          )}
+          {confirmation.paymentMethod === 'ON_ACCOUNT' && (
+            <p className="text-sm text-muted-foreground">
+              Lançado no fiado{confirmation.customerName ? ` de ${confirmation.customerName}` : ''}.{' '}
+              <Link href="/dashboard/fiado" className="font-medium text-accent hover:underline">
+                Ver contas a receber
+              </Link>
             </p>
           )}
           <div className="flex flex-col gap-2">
@@ -385,6 +420,8 @@ export default function PdvPage() {
             disabled={isSubmitting}
             onChange={(picked) => {
               setCustomer(picked);
+              // A message about the previous choice (no customer, no limit) no longer applies.
+              setError(null);
               // Another customer, another balance: never carry an amount over.
               setCashbackInput('');
               setCashbackMaxCents(0);
@@ -473,8 +510,12 @@ export default function PdvPage() {
           </div>
         )}
 
-        <div role="radiogroup" aria-label="Forma de pagamento" className="grid grid-cols-3 gap-2">
-          {PAYMENT_OPTIONS.map((option) => {
+        <div
+          role="radiogroup"
+          aria-label="Forma de pagamento"
+          className={clsx('grid gap-2', paymentOptions.length === 4 ? 'grid-cols-4' : 'grid-cols-3')}
+        >
+          {paymentOptions.map((option) => {
             const Icon = option.icon;
             const selected = paymentMethod === option.value;
             return (
@@ -483,7 +524,10 @@ export default function PdvPage() {
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                onClick={() => setPaymentMethod(option.value)}
+                onClick={() => {
+                  setPaymentMethod(option.value);
+                  setError(null);
+                }}
                 className={clsx(
                   'flex h-14 flex-col items-center justify-center gap-1 rounded-ctl border text-xs font-medium transition-colors active:scale-[0.97]',
                   selected
@@ -497,6 +541,22 @@ export default function PdvPage() {
             );
           })}
         </div>
+
+        {onAccount && customer && totalCents > 0 && (
+          <CreditTermsField
+            customerId={customer.id}
+            totalCents={totalCents}
+            value={creditTerms}
+            onChange={setCreditTerms}
+            onBlockChange={setCreditBlock}
+            disabled={isSubmitting}
+          />
+        )}
+        {onAccount && !customer && (
+          <p role="alert" className="text-xs text-warning">
+            Escolha um cliente cadastrado para vender fiado.
+          </p>
+        )}
 
         {(appliedCoupon || cashbackCents > 0) && (
           <div className="space-y-0.5 text-sm text-muted-foreground">

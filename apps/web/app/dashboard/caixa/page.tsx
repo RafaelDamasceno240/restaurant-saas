@@ -12,6 +12,7 @@ import {
   closeSession,
   formatCents,
   getCurrentSession,
+  isCashOutflow,
   openSession,
   parseBRLToCents,
 } from '@/lib/cash-api';
@@ -27,8 +28,20 @@ import { useToast } from '@/components/ds/Toast';
 
 type Panel = null | 'SUPPLY' | 'WITHDRAWAL' | 'CLOSE';
 
-const TYPE_LABEL: Record<string, string> = { SALE: 'Venda', SUPPLY: 'Suprimento', WITHDRAWAL: 'Sangria' };
-const TYPE_TONE = { SALE: 'success', SUPPLY: 'info', WITHDRAWAL: 'danger' } as const;
+const TYPE_LABEL: Record<string, string> = {
+  SALE: 'Venda',
+  SUPPLY: 'Suprimento',
+  WITHDRAWAL: 'Sangria',
+  RECEIVABLE_PAYMENT: 'Recebimento de fiado',
+  RECEIVABLE_REFUND: 'Estorno de fiado',
+};
+const TYPE_TONE = {
+  SALE: 'success',
+  SUPPLY: 'info',
+  WITHDRAWAL: 'danger',
+  RECEIVABLE_PAYMENT: 'success',
+  RECEIVABLE_REFUND: 'warning',
+} as const;
 
 const PANEL_TITLE = { SUPPLY: 'Suprimento', WITHDRAWAL: 'Sangria', CLOSE: 'Fechar caixa' } as const;
 const PANEL_CONFIRM = { SUPPLY: 'Confirmar suprimento', WITHDRAWAL: 'Confirmar sangria', CLOSE: 'Fechar caixa' } as const;
@@ -189,9 +202,19 @@ export default function CaixaPage() {
       ) : (
         <>
           <section aria-label="Resumo do caixa" className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
               <StatCard label="Saldo inicial" value={formatCents(session.openingBalanceCents)} />
               <StatCard label="Vendas em dinheiro" value={formatCents(session.totals.salesCents)} tone="success" />
+              <StatCard
+                label="Fiado recebido"
+                value={formatCents(session.totals.receivablePaymentsCents)}
+                hint={
+                  session.totals.receivableRefundsCents > 0
+                    ? `Estornos: − ${formatCents(session.totals.receivableRefundsCents)}`
+                    : 'Dívidas pagas em dinheiro'
+                }
+                tone="success"
+              />
               <StatCard label="Suprimentos" value={formatCents(session.totals.suppliesCents)} tone="info" />
               <StatCard label="Sangrias" value={formatCents(session.totals.withdrawalsCents)} tone="danger" />
               <StatCard label="Saldo esperado" value={formatCents(session.expectedBalanceCents)} featured />
@@ -273,7 +296,7 @@ export default function CaixaPage() {
           )}
 
           <Card>
-            <CardHeader title="Movimentações" description="Vendas em dinheiro, suprimentos e sangrias da sessão" />
+            <CardHeader title="Movimentações" description="Vendas em dinheiro, fiado recebido, suprimentos e sangrias da sessão" />
             {session.movements.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhuma movimentação ainda.</p>
             ) : (
@@ -300,10 +323,10 @@ export default function CaixaPage() {
                         </Td>
                         <Td
                           className={`whitespace-nowrap text-right font-semibold ${
-                            m.type === 'WITHDRAWAL' ? 'text-danger' : 'text-success'
+                            isCashOutflow(m.type) ? 'text-danger' : 'text-success'
                           }`}
                         >
-                          {m.type === 'WITHDRAWAL' ? '−' : '+'}
+                          {isCashOutflow(m.type) ? '−' : '+'}
                           {formatCents(m.amountCents)}
                         </Td>
                         <Td className="text-muted-foreground">{m.reason ?? '—'}</Td>

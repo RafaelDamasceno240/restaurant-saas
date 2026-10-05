@@ -12,7 +12,8 @@ Estado real implementado em 2026-10-04. **Domínio financeiro:** cashback é din
    `floor((subtotal − desconto do cupom − cashback usado) × earnRateBps / 10000)` centavos.
    - a base é o que foi pago **com dinheiro pelos itens**: a taxa de entrega não gera saldo, e a parte do pedido paga com cashback também não (senão saldo geraria saldo);
    - arredonda para baixo ao centavo; compra que não chega a 1 centavo não gera movimentação;
-   - **uma vez por pedido** (índice único parcial).
+   - **uma vez por pedido** (índice único parcial);
+   - **pedido vendido fiado (`ON_ACCOUNT`) não gera cashback**: o cliente ainda não pagou. O saldo pode ser **usado** numa venda fiado (reduz o que vai para a conta). Ver `docs/RECEIVABLES.md`.
 3. **Uso (`USE`)**: o saldo paga os **itens** de um pedido do mesmo cliente, no PDV e no fechamento de mesa.
    - o atendente informa quanto usar (`cashbackToUseCents`); o servidor confere contra o **saldo travado** e contra o valor dos itens depois do cupom, **dentro da transação que cria o pedido**;
    - pedir mais que o saldo recusa o pedido inteiro (`409 CASHBACK_INSUFFICIENT_BALANCE`); pedir mais que os itens custam é `400 CASHBACK_EXCEEDS_ORDER`; sem cliente vinculado é `400 CASHBACK_CUSTOMER_REQUIRED`; programa desligado é `409 CASHBACK_DISABLED`;
@@ -57,7 +58,7 @@ Garantias no **banco**:
 
 ## Concorrência, idempotência e reprocessamento
 
-- **Lock pessimista por conta**, com a mesma ordem em todos os fluxos de pedido: sessão de caixa → cupom → **conta de cashback** → conta de fidelidade. A conta de cashback sempre vem antes da de fidelidade, então dois pedidos do mesmo cliente nunca esperam um pelo outro em ciclo. Medido: 10 vendas simultâneas usando R$ 3,00 de um saldo de R$ 10,00 → 3 criadas, 7 recusadas com `409`, saldo final R$ 1,00, nenhum 5xx; 20 débitos simultâneos com saldo para 3 → 3 concluídos.
+- **Lock pessimista por conta**, com a mesma ordem em todos os fluxos de pedido: sessão de caixa → cupom → **conta de cashback** → conta de crédito (fiado) → conta de fidelidade. A conta de cashback sempre vem antes da de fidelidade, então dois pedidos do mesmo cliente nunca esperam um pelo outro em ciclo. Medido: 10 vendas simultâneas usando R$ 3,00 de um saldo de R$ 10,00 → 3 criadas, 7 recusadas com `409`, saldo final R$ 1,00, nenhum 5xx; 20 débitos simultâneos com saldo para 3 → 3 concluídos.
 - **Uso em duas etapas na mesma transação:** `reserveUseInTx` trava a conta e valida o valor antes de o pedido existir; `commitUseInTx` grava o `USE` apontando para o pedido recém-criado. Qualquer falha desfaz tudo.
 - **Idempotência do uso** é a do pedido: repetir a venda com a mesma `idempotencyKey` devolve o mesmo pedido e não debita de novo; a comparação da repetição inclui o valor de cashback (mesma chave com outro valor = `409 IDEMPOTENCY_KEY_REUSED`). Duplicatas **simultâneas** de uma venda que consome o saldo todo recebem todas o mesmo pedido (a que perde a corrida pelo saldo é reconhecida como repetição, não como "saldo insuficiente").
 - **Crédito de compra e devolução no cancelamento** são idempotentes por pedido (verificação + índices únicos) e rodam sob o lock da linha do pedido.

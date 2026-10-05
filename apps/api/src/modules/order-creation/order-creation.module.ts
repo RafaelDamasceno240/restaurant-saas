@@ -6,9 +6,10 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { CouponsModule } from '../coupons/coupons.module';
 import { OrderEffectsModule } from '../order-effects/order-effects.module';
 import { CashbackModule } from '../cashback/cashback.module';
+import { ReceivablesModule } from '../receivables/receivables.module';
 
 @Module({
-  imports: [AuditModule, CashModule, InventoryModule, CouponsModule, CashbackModule, OrderEffectsModule],
+  imports: [AuditModule, CashModule, InventoryModule, CouponsModule, CashbackModule, ReceivablesModule, OrderEffectsModule],
   providers: [OrderCreationService],
   exports: [OrderCreationService],
 })

@@ -5,7 +5,7 @@ import { formatBRL, formatTime } from '@/lib/format';
 import { Card } from '@/components/ds/Card';
 import { SourceBadge, StatusBadge } from './StatusBadge';
 
-export const PAYMENT_LABEL: Record<string, string> = { CASH: 'Dinheiro', PIX: 'Pix', CARD: 'Cartão' };
+export const PAYMENT_LABEL: Record<string, string> = { CASH: 'Dinheiro', PIX: 'Pix', CARD: 'Cartão', ON_ACCOUNT: 'Fiado' };
 
 export function customerLabel(order: Pick<AdminOrderListItem, 'customerName' | 'source'>): string {
   return order.customerName ?? (order.source === 'TABLE' ? 'Cliente mesa' : 'Cliente balcão');

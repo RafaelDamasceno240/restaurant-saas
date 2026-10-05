@@ -396,9 +396,19 @@ export class LoyaltyService {
 
     const order = await tx.order.findFirst({
       where: { id: input.orderId, tenantId: input.tenantId },
-      select: { id: true, branchId: true, customerId: true, status: true, subtotalCents: true, discountCents: true },
+      select: {
+        id: true,
+        branchId: true,
+        customerId: true,
+        status: true,
+        paymentMethod: true,
+        subtotalCents: true,
+        discountCents: true,
+      },
     });
     if (!order?.customerId || !isConcludedOrderStatus(order.status)) return null;
+    // A sale on account (fiado) has not been paid: it earns nothing, now or later.
+    if (order.paymentMethod === 'ON_ACCOUNT') return null;
 
     const earned = earnedPoints(order, program.pointsPerReal);
     if (earned < 1) return null;

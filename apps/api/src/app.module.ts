@@ -36,6 +36,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { LoyaltyModule } from './modules/loyalty/loyalty.module';
 import { CashbackModule } from './modules/cashback/cashback.module';
+import { ReceivablesModule } from './modules/receivables/receivables.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { CashbackModule } from './modules/cashback/cashback.module';
     CouponsModule,
     LoyaltyModule,
     CashbackModule,
+    ReceivablesModule,
   ],
   providers: [
     // Order matters: auth -> roles -> permissions -> rate limit.

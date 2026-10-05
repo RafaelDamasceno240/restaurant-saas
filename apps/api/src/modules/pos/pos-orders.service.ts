@@ -25,6 +25,7 @@ export class PosOrdersService {
     await this.branchAccess.assertAccess(user, dto.branchId);
     if (dto.couponCode) this.assertCanApplyCoupon(user);
     if (dto.cashbackToUseCents) this.assertCanUseCashback(user);
+    if (dto.paymentMethod === 'ON_ACCOUNT') this.assertCanSellOnAccount(user);
     const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
 
     const order = await this.orderCreation.createOrder({
@@ -40,6 +41,7 @@ export class PosOrdersService {
       customerId: customer?.id ?? null,
       couponCode: dto.couponCode ?? null,
       cashbackToUseCents: dto.cashbackToUseCents ?? null,
+      creditTerms: dto.paymentMethod === 'ON_ACCOUNT' ? (dto.creditTerms ?? null) : null,
       fulfillmentType: 'PICKUP',
       address: null,
       paymentMethod: dto.paymentMethod,
@@ -63,6 +65,14 @@ export class PosOrdersService {
       couponCode: dto.code,
       customerId: customer?.id ?? null,
     });
+  }
+
+  // Selling on account (fiado) is a permission of its own (receivables.sell): it puts the
+  // restaurant's money at risk, which a plain sale does not.
+  private assertCanSellOnAccount(user: AuthenticatedRequestUser) {
+    if (!user.permissions.includes('receivables.sell')) {
+      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para vender fiado.' });
+    }
   }
 
   // Spending a customer's cashback is a permission of its own (cashback.use).

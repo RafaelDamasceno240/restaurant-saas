@@ -1,5 +1,5 @@
 import { apiFetch } from './api-client';
-import { CheckoutAddressInput, FulfillmentType, PaymentMethod } from './checkout-api';
+import { CheckoutAddressInput, FulfillmentType, StaffPaymentMethod } from './checkout-api';
 
 export type OrderStatus =
   | 'PENDING'
@@ -54,7 +54,7 @@ export interface AdminOrderListItem {
   // through /customers, which has its own permission.
   customerId: string | null;
   fulfillmentType: AdminFulfillmentType;
-  paymentMethod: PaymentMethod;
+  paymentMethod: StaffPaymentMethod;
   notes: string | null;
   subtotal: number;
   // Coupon discount over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
@@ -100,7 +100,7 @@ export interface AdminOrderDetail {
   customerId: string | null;
   fulfillmentType: AdminFulfillmentType;
   address: CheckoutAddressInput | null;
-  paymentMethod: PaymentMethod;
+  paymentMethod: StaffPaymentMethod;
   notes: string | null;
   items: AdminOrderItem[];
   subtotal: number;

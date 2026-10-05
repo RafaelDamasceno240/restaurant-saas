@@ -17,6 +17,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
+import { CreditTermsDto } from '../../receivables/dto/receivables.dto';
 
 export class PosOrderItemDto {
   @ApiProperty() @IsUUID() productId!: string;
@@ -69,6 +70,14 @@ export class CreatePosOrderDto {
   @Min(1)
   @Max(2_147_483_647)
   cashbackToUseCents?: number;
+
+  // Fase 11 (fatia 6): terms of a sale paid ON_ACCOUNT (fiado). Needs a customerId and the
+  // receivables.sell permission; ignored for any other payment method.
+  @ApiPropertyOptional({ type: CreditTermsDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreditTermsDto)
+  creditTerms?: CreditTermsDto;
 
   @ApiPropertyOptional({ example: 'Cliente balcão' })
   @IsOptional()

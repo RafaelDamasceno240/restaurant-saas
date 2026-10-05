@@ -3,6 +3,9 @@ import type { CouponPreview } from './coupons-api';
 
 export type FulfillmentType = 'DELIVERY' | 'PICKUP';
 export type PaymentMethod = 'CASH' | 'PIX' | 'CARD';
+// What the staff screens (PDV, table checkout, order lists) deal with: the three above plus
+// ON_ACCOUNT (fiado), which the public checkout never offers and the API refuses from it.
+export type StaffPaymentMethod = PaymentMethod | 'ON_ACCOUNT';
 
 export interface CheckoutAddressInput {
   street: string;

@@ -2,7 +2,14 @@ import { apiFetch } from './api-client';
 
 // All money in the cash module travels as INTEGER CENTS, both ways. Expected
 // balance and difference are always computed by the backend.
-export type CashMovementType = 'SALE' | 'SUPPLY' | 'WITHDRAWAL';
+// RECEIVABLE_PAYMENT / RECEIVABLE_REFUND: a customer's debt (fiado) received in cash, and the
+// reversal of such a receipt. Both are written by the receivables module, never by this screen.
+export type CashMovementType = 'SALE' | 'SUPPLY' | 'WITHDRAWAL' | 'RECEIVABLE_PAYMENT' | 'RECEIVABLE_REFUND';
+
+// Money leaving the drawer (shown with a minus sign).
+export function isCashOutflow(type: CashMovementType): boolean {
+  return type === 'WITHDRAWAL' || type === 'RECEIVABLE_REFUND';
+}
 
 export interface CashMovement {
   id: string;
@@ -21,7 +28,13 @@ export interface CashSession {
   branchName: string;
   status: 'OPEN' | 'CLOSED';
   openingBalanceCents: number;
-  totals: { salesCents: number; suppliesCents: number; withdrawalsCents: number };
+  totals: {
+    salesCents: number;
+    suppliesCents: number;
+    withdrawalsCents: number;
+    receivablePaymentsCents: number;
+    receivableRefundsCents: number;
+  };
   expectedBalanceCents: number | null;
   countedClosingBalanceCents: number | null;
   differenceCents: number | null;

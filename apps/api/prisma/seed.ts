@@ -68,6 +68,10 @@ const PERMISSIONS: string[] = [
   'cashback.use',
   'cashback.adjust',
   'cashback.configure',
+  'receivables.read',
+  'receivables.sell',
+  'receivables.receive',
+  'receivables.manage',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -134,6 +138,11 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'cashback.read',
     'cashback.use',
     'cashback.adjust',
+    // Fiado: sets customer limits, enters manual charges, reverses payments and cancels.
+    'receivables.read',
+    'receivables.sell',
+    'receivables.receive',
+    'receivables.manage',
   ],
   CASHIER: [
     'orders.read',
@@ -159,6 +168,11 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     // Sees the balance and spends it on a sale; never adjusts it by hand.
     'cashback.read',
     'cashback.use',
+    // Sells on account within the limit management set, and receives payments at the counter;
+    // never changes a limit, reverses a payment or cancels a debt.
+    'receivables.read',
+    'receivables.sell',
+    'receivables.receive',
   ],
   WAITER: [
     'orders.read',

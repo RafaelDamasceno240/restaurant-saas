@@ -2,7 +2,6 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
-  IsEnum,
   IsIn,
   IsInt,
   IsOptional,
@@ -19,6 +18,9 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { FulfillmentType, PaymentMethod } from '@prisma/client';
 import { AllowExtraFields } from '../../../common/decorators/allow-extra-fields.decorator';
+
+// What a guest can pay with. ON_ACCOUNT (fiado) is never one of them.
+const PUBLIC_PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'PIX', 'CARD'];
 
 export class OrderItemInputDto {
   @ApiProperty() @IsUUID() productId!: string;
@@ -91,8 +93,10 @@ export class CreateOrderDto {
   @Type(() => AddressInputDto)
   address?: AddressInputDto;
 
-  @ApiProperty({ enum: PaymentMethod })
-  @IsEnum(PaymentMethod)
+  // Only what a guest can actually pay with. ON_ACCOUNT (fiado) is a staff decision about a
+  // registered customer with a credit limit: the public checkout never accepts it.
+  @ApiProperty({ enum: PUBLIC_PAYMENT_METHODS })
+  @IsIn(PUBLIC_PAYMENT_METHODS)
   paymentMethod!: PaymentMethod;
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) notes?: string;

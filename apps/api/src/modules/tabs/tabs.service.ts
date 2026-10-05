@@ -43,7 +43,8 @@ const tabDetailInclude = {
 type ExistingSale = { id: string; tabId: string | null; idempotencyKey: string | null };
 
 type CheckoutTxResult =
-  | { kind: 'created'; created: OrderCreationResult; paymentId: string }
+  // paymentId is null for a bill put on account (fiado): nothing was received yet.
+  | { kind: 'created'; created: OrderCreationResult; paymentId: string | null }
   | { kind: 'existing'; existing: ExistingSale };
 
 type TabWithDetail = Prisma.TabGetPayload<{ include: typeof tabDetailInclude }>;
@@ -289,6 +290,9 @@ export class TabsService {
     if (dto.cashbackToUseCents && !user.permissions.includes('cashback.use')) {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para usar cashback.' });
     }
+    if (dto.paymentMethod === 'ON_ACCOUNT' && !user.permissions.includes('receivables.sell')) {
+      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para vender fiado.' });
+    }
 
     const auditBase = {
       tenantId: user.tenantId,
@@ -403,6 +407,7 @@ export class TabsService {
       customerPhone: customer?.phone ?? null,
       customerId: customer?.id ?? null,
       cashbackToUseCents: dto.cashbackToUseCents ?? null,
+      creditTerms: dto.paymentMethod === 'ON_ACCOUNT' ? (dto.creditTerms ?? null) : null,
       address: null,
       notes: null,
       items: buildPricedItemsFromTab(items),
@@ -410,19 +415,24 @@ export class TabsService {
       idempotencyKey: dto.idempotencyKey,
     });
 
-    const payment = await this.payments.recordInternalConfirmed(tx, {
-      tenantId: user.tenantId,
-      orderId: created.order.id,
-      method: dto.paymentMethod,
-      amountCents: created.order.totalCents,
-    });
+    // A Payment row is money actually received. A bill put on account received nothing: its
+    // receivable (opened inside createPricedOrderInTx) is what tracks it from here on.
+    const payment =
+      dto.paymentMethod === 'ON_ACCOUNT'
+        ? null
+        : await this.payments.recordInternalConfirmed(tx, {
+            tenantId: user.tenantId,
+            orderId: created.order.id,
+            method: dto.paymentMethod,
+            amountCents: created.order.totalCents,
+          });
 
     await tx.tab.update({
       where: { id: tab.id },
       data: { status: 'CLOSED', closedAt: new Date() },
     });
 
-    return { kind: 'created', created, paymentId: payment.id };
+    return { kind: 'created', created, paymentId: payment?.id ?? null };
   }
 
   private findSaleByKey(tenantId: string, idempotencyKey: string) {
