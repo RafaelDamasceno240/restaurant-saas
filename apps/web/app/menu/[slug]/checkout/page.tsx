@@ -247,10 +247,13 @@ export default function CheckoutPage({ params }: PageProps) {
       <form onSubmit={handleSubmit} className="space-y-6">
         <section className="space-y-3 rounded-xl border border-line bg-surface p-4">
           <h2 className="text-sm font-medium text-muted-foreground">Seus dados</h2>
-          <Input placeholder="Nome" required value={name} onChange={(e) => setName(e.target.value)} />
+          <Input placeholder="Nome" required autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
           <Input
             placeholder="Telefone (com DDD)"
             required
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
           />
@@ -331,6 +334,8 @@ export default function CheckoutPage({ params }: PageProps) {
               <Input
                 placeholder="CEP"
                 required
+                inputMode="numeric"
+                autoComplete="postal-code"
                 value={address.zipCode}
                 onChange={(e) => setAddress({ ...address, zipCode: e.target.value })}
               />
