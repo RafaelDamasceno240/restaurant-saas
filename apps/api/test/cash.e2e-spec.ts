@@ -83,6 +83,7 @@ describe('Cash register (e2e)', () => {
       withdrawalsCents: 3000,
       receivablePaymentsCents: 0,
       receivableRefundsCents: 0,
+      saleRefundsCents: 0,
     });
     expect(detail.expectedBalanceCents).toBe(12000);
   });

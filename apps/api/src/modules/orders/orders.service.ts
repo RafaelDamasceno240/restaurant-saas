@@ -15,6 +15,7 @@ import { InventoryService } from '../inventory/inventory.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { CustomerLookupService } from '../customers/customer-lookup.service';
 import { OrderEffectsService } from '../order-effects/order-effects.service';
+import { CashRegisterService } from '../cash/cash-register.service';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
@@ -41,6 +42,7 @@ export class OrdersService {
     private readonly branchAccess: BranchAccessService,
     private readonly customers: CustomerLookupService,
     private readonly effects: OrderEffectsService,
+    private readonly cashRegister: CashRegisterService,
   ) {}
 
   // Every query below is scoped by `tenantId` taken from the caller
@@ -144,14 +146,24 @@ export class OrdersService {
     let result: { before: OrderStatus; movements: StockMovement[] };
     try {
       result = await this.prisma.$transaction(async (tx) => {
-        const rows = await tx.$queryRaw<{ status: OrderStatus; branchId: string; fulfillmentType: string }[]>`
-          SELECT "status", "branchId", "fulfillmentType" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+        const rows = await tx.$queryRaw<{ status: OrderStatus; branchId: string; fulfillmentType: string; orderNumber: string }[]>`
+          SELECT "status", "branchId", "fulfillmentType", "orderNumber" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
         if (rows.length === 0 || (allowedBranchIds && !allowedBranchIds.includes(rows[0].branchId))) {
           throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
         }
         const before = rows[0].status;
         const isDelivery = rows[0].fulfillmentType === 'DELIVERY';
-        // Lock order: ORDER (above), then DELIVERY — the same order DeliveryService uses.
+        // Cancelling a sale that was paid in cash gives the money back from the drawer, so the
+        // cash session comes next in the lock order (ORDER -> CASH SESSION -> ..., the order the
+        // sale itself used). Only asked for when this request can actually cancel the order: a
+        // transition that will be refused below must fail for its own reason, not for a closed
+        // drawer. No open session in the branch = no cancellation (CASH_REGISTER_NOT_OPEN).
+        const mayCancel =
+          newStatus === 'CANCELLED' && (isValidOrderStatusTransition(before, 'CANCELLED') || (before === 'READY' && isDelivery));
+        const cashRefund = mayCancel
+          ? await this.cashRegister.lockSessionForSaleRefund(tx, { tenantId, branchId: rows[0].branchId, orderId: id })
+          : null;
+        // Then DELIVERY — the same order DeliveryService uses (it never touches the cash session).
         const deliveryStatus = isDelivery ? await this.lockDeliveryStatus(tx, tenantId, id) : null;
         // The one exception to the order flow: after a FAILED delivery the order (READY)
         // may be cancelled, as an explicit decision (orders.cancel). Anything else keeps
@@ -178,6 +190,26 @@ export class OrdersService {
         // also in this transaction: cancelled and refunded commit together.
         if (newStatus === 'CANCELLED') {
           await this.effects.onOrderCancelledInTx(tx, { tenantId, orderId: id, actorUserId: actor.userId });
+        }
+        // ...and so does the cash it put in the drawer. The movement and its audit entry are part
+        // of the cancellation: cancelled and refunded commit together, or neither does.
+        if (cashRefund) {
+          const refund = await this.cashRegister.recordSaleRefund(tx, {
+            sessionId: cashRefund.sessionId,
+            tenantId,
+            orderId: id,
+            orderNumber: rows[0].orderNumber,
+            amountCents: cashRefund.amountCents,
+            userId: actor.userId,
+          });
+          await this.audit.recordTx(tx, {
+            tenantId,
+            userId: actor.userId,
+            action: 'CASH_SALE_REFUNDED',
+            entity: 'CashMovement',
+            entityId: refund.id,
+            afterData: { orderId: id, sessionId: cashRefund.sessionId, type: 'SALE_REFUND', amountCents: cashRefund.amountCents },
+          });
         }
         // Cancelling the order cancels its delivery in the same transaction: PENDING for
         // PENDING..PREPARING orders, FAILED for the explicit cancel after a failed delivery.

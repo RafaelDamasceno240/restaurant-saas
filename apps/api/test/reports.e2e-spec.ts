@@ -447,6 +447,7 @@ describe('Reports (e2e)', () => {
         withdrawalsCents: 300,
         receivablePaymentsCents: 700,
         receivableRefundsCents: 0,
+        saleRefundsCents: 0,
         shortageCents: -100,
         surplusCents: 0,
         sessionsWithDifference: 1,

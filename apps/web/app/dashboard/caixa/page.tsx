@@ -34,6 +34,7 @@ const TYPE_LABEL: Record<string, string> = {
   WITHDRAWAL: 'Sangria',
   RECEIVABLE_PAYMENT: 'Recebimento de fiado',
   RECEIVABLE_REFUND: 'Estorno de fiado',
+  SALE_REFUND: 'Estorno de venda',
 };
 const TYPE_TONE = {
   SALE: 'success',
@@ -41,6 +42,7 @@ const TYPE_TONE = {
   WITHDRAWAL: 'danger',
   RECEIVABLE_PAYMENT: 'success',
   RECEIVABLE_REFUND: 'warning',
+  SALE_REFUND: 'warning',
 } as const;
 
 const PANEL_TITLE = { SUPPLY: 'Suprimento', WITHDRAWAL: 'Sangria', CLOSE: 'Fechar caixa' } as const;
@@ -204,7 +206,16 @@ export default function CaixaPage() {
           <section aria-label="Resumo do caixa" className="space-y-3">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
               <StatCard label="Saldo inicial" value={formatCents(session.openingBalanceCents)} />
-              <StatCard label="Vendas em dinheiro" value={formatCents(session.totals.salesCents)} tone="success" />
+              <StatCard
+                label="Vendas em dinheiro"
+                value={formatCents(session.totals.salesCents)}
+                hint={
+                  session.totals.saleRefundsCents > 0
+                    ? `Estornos: − ${formatCents(session.totals.saleRefundsCents)}`
+                    : undefined
+                }
+                tone="success"
+              />
               <StatCard
                 label="Fiado recebido"
                 value={formatCents(session.totals.receivablePaymentsCents)}

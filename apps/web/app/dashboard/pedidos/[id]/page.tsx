@@ -79,6 +79,8 @@ export default function OrderDetailPage({ params }: PageProps) {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: ['order', params.id] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Cancelling a sale paid in cash writes a refund in the open cash session.
+      queryClient.invalidateQueries({ queryKey: ['cash-current'] });
       toast.success('Status do pedido atualizado.');
     },
     onError: (err) => {

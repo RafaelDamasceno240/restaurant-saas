@@ -63,11 +63,11 @@ continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 
 ## Modelos adicionados depois da Fase 01
 
-Existem no schema atual (16 migrations em `prisma/migrations`, da `20260928001733_initial_mvp_schema` à `20261005005645_receivables`):
+Existem no schema atual (17 migrations em `prisma/migrations`, da `20260928001733_initial_mvp_schema` à `20261010230000_cash_sale_refund`):
 
 - **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
 - **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
-- **Caixa:** `CashRegisterSession` e `CashMovement`.
+- **Caixa:** `CashRegisterSession` e `CashMovement`. Movimentos são só de inclusão (trigger). `orderId` único liga a venda (`SALE`) ao pedido; `refundedOrderId` único liga o estorno de venda (`SALE_REFUND`) ao pedido cancelado, e um CHECK garante que só o estorno tem essa coluna preenchida.
 - **Salão:** `DiningTable`, `Tab`, `TabItem`.
 - **Estoque:** `InventoryItem`, `InventoryBalance`, `StockMovement`, `ProductRecipe`, `ProductRecipeItem`, `InventoryCount`, `InventoryCountItem`.
 - **Compras:** `Supplier`, `Purchase`, `PurchaseItem` e `PurchaseSequence` (migration `20260930100000_purchases`). `Purchase` é único por `(tenantId, purchaseNumber)`, tem índices por unidade, data e status, e CHECKs de valores não negativos (`purchases`) e quantidade positiva (`purchase_items`). O enum `StockReferenceType` inclui `PURCHASE`, usado como referência das entradas de estoque de cada item de compra.

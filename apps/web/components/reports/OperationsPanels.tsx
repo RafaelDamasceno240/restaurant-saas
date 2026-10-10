@@ -234,7 +234,13 @@ export function CashPanel({ filters }: { filters: ReportFilters }) {
         <StatCard
           label="Vendas em dinheiro"
           value={totals ? formatMoney(totals.salesCents) : '—'}
-          hint={totals ? `${plural(totals.sessions, 'sessão', 'sessões')}, ${totals.open} aberta(s)` : undefined}
+          hint={
+            totals
+              ? `${plural(totals.sessions, 'sessão', 'sessões')}, ${totals.open} aberta(s)${
+                  totals.saleRefundsCents > 0 ? ` · estornos: − ${formatMoney(totals.saleRefundsCents)}` : ''
+                }`
+              : undefined
+          }
           loading={query.isPending}
           featured
         />
@@ -297,7 +303,7 @@ export function CashPanel({ filters }: { filters: ReportFilters }) {
                     </Td>
                     <Td className="text-muted-foreground">{row.branch.name}</Td>
                     <Td className="text-right tabular-nums">{formatMoney(row.openingBalanceCents)}</Td>
-                    <Td className="text-right tabular-nums">{formatMoney(row.totals.salesCents)}</Td>
+                    <Td className="text-right tabular-nums">{formatMoney(row.totals.salesCents - row.totals.saleRefundsCents)}</Td>
                     <Td className="text-right tabular-nums">{formatMoney(row.totals.receivablePaymentsCents - row.totals.receivableRefundsCents)}</Td>
                     <Td className="whitespace-nowrap text-right tabular-nums">
                       + {formatMoney(row.totals.suppliesCents)} / − {formatMoney(row.totals.withdrawalsCents)}

@@ -4,11 +4,18 @@ import { apiFetch } from './api-client';
 // balance and difference are always computed by the backend.
 // RECEIVABLE_PAYMENT / RECEIVABLE_REFUND: a customer's debt (fiado) received in cash, and the
 // reversal of such a receipt. Both are written by the receivables module, never by this screen.
-export type CashMovementType = 'SALE' | 'SUPPLY' | 'WITHDRAWAL' | 'RECEIVABLE_PAYMENT' | 'RECEIVABLE_REFUND';
+// SALE_REFUND: a sale paid in cash that was cancelled; written by the order cancellation.
+export type CashMovementType =
+  | 'SALE'
+  | 'SUPPLY'
+  | 'WITHDRAWAL'
+  | 'RECEIVABLE_PAYMENT'
+  | 'RECEIVABLE_REFUND'
+  | 'SALE_REFUND';
 
 // Money leaving the drawer (shown with a minus sign).
 export function isCashOutflow(type: CashMovementType): boolean {
-  return type === 'WITHDRAWAL' || type === 'RECEIVABLE_REFUND';
+  return type === 'WITHDRAWAL' || type === 'RECEIVABLE_REFUND' || type === 'SALE_REFUND';
 }
 
 export interface CashMovement {
@@ -34,6 +41,8 @@ export interface CashSession {
     withdrawalsCents: number;
     receivablePaymentsCents: number;
     receivableRefundsCents: number;
+    // Cancelled cash sales given back. salesCents stays gross: net = salesCents - saleRefundsCents.
+    saleRefundsCents: number;
   };
   expectedBalanceCents: number | null;
   countedClosingBalanceCents: number | null;

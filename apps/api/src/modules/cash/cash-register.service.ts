@@ -25,6 +25,7 @@ const sessionDetailInclude = {
     include: {
       createdBy: { select: { id: true, name: true } },
       order: { select: { orderNumber: true } },
+      refundedOrder: { select: { orderNumber: true } },
     },
   },
 } satisfies Prisma.CashRegisterSessionInclude;
@@ -36,10 +37,10 @@ type SessionWithDetail = Prisma.CashRegisterSessionGetPayload<{ include: typeof 
 //  - every money value is integer cents, computed server-side only;
 //  - opening is serialized per branch (SELECT ... FOR UPDATE on the branch row)
 //    + a partial unique index as DB-level backstop (prisma/sql/...);
-//  - closing / adding a movement / recording a CASH sale all lock the SESSION
-//    row FOR UPDATE and re-check status inside the transaction, so a movement
-//    can never land in a session that is being closed, and a session can
-//    never be closed twice;
+//  - closing / adding a movement / recording a CASH sale or its refund all lock
+//    the SESSION row FOR UPDATE and re-check status inside the transaction, so a
+//    movement can never land in a session that is being closed, and a session
+//    can never be closed twice;
 //  - movements are append-only (no update/delete path exists; DB trigger too);
 //  - tenantId always from the JWT; branch always re-validated via
 //    BranchAccessService.
@@ -311,6 +312,58 @@ export class CashRegisterService {
   }
 
   // ---------------------------------------------------------------------
+  // Cancellation of a cash sale — called INSIDE OrdersService's transaction, which already
+  // holds the order row lock. A sale that put money in the drawer gives it back when it is
+  // cancelled: a SALE_REFUND for the same amount, in the session that is OPEN in the order's
+  // branch NOW (not necessarily the one that took the sale: the money leaves the drawer that
+  // exists today). Same rule as a reversed fiado payment: no open session, no cancellation.
+  //
+  // Returns null when there is nothing to give back: the order has no SALE movement (Pix, card,
+  // fiado, an online order nobody received yet), the sale was of zero, or it was refunded
+  // already (unreachable under the order lock; the unique key on refundedOrderId is the backstop).
+  // ---------------------------------------------------------------------
+  async lockSessionForSaleRefund(
+    tx: Tx,
+    input: { tenantId: string; branchId: string; orderId: string },
+  ): Promise<{ sessionId: string; amountCents: number } | null> {
+    const sale = await tx.cashMovement.findUnique({
+      where: { orderId: input.orderId },
+      select: { amountCents: true, tenantId: true },
+    });
+    if (!sale || sale.tenantId !== input.tenantId || sale.amountCents <= 0) return null;
+    const refunded = await tx.cashMovement.findUnique({
+      where: { refundedOrderId: input.orderId },
+      select: { id: true },
+    });
+    if (refunded) return null;
+    const sessionId = await this.lockOpenSessionForSale(
+      tx,
+      input.tenantId,
+      input.branchId,
+      'Não há caixa aberto nesta unidade. Abra o caixa para cancelar uma venda paga em dinheiro: o valor é devolvido pelo caixa.',
+    );
+    return { sessionId, amountCents: sale.amountCents };
+  }
+
+  recordSaleRefund(
+    tx: Tx,
+    input: { sessionId: string; tenantId: string; orderId: string; orderNumber: string; amountCents: number; userId: string },
+  ) {
+    return tx.cashMovement.create({
+      data: {
+        sessionId: input.sessionId,
+        tenantId: input.tenantId,
+        type: 'SALE_REFUND',
+        amountCents: input.amountCents,
+        refundedOrderId: input.orderId,
+        reason: `Estorno da venda ${input.orderNumber} (pedido cancelado)`,
+        createdByUserId: input.userId,
+      },
+      select: { id: true },
+    });
+  }
+
+  // ---------------------------------------------------------------------
 
   private async findSessionForWrite(user: AuthenticatedRequestUser, sessionId: string) {
     const session = await this.prisma.cashRegisterSession.findFirst({
@@ -359,8 +412,9 @@ export class CashRegisterService {
         type: m.type,
         amountCents: m.amountCents,
         reason: m.reason,
-        orderId: m.orderId,
-        orderNumber: m.order?.orderNumber ?? null,
+        // For a SALE_REFUND these point to the cancelled order it gives back.
+        orderId: m.orderId ?? m.refundedOrderId,
+        orderNumber: m.order?.orderNumber ?? m.refundedOrder?.orderNumber ?? null,
         createdBy: m.createdBy,
         createdAt: m.createdAt,
       })),

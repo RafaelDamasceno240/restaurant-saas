@@ -15,6 +15,7 @@ describe('cash-calculations', () => {
       withdrawalsCents: 3000,
       receivablePaymentsCents: 0,
       receivableRefundsCents: 0,
+      saleRefundsCents: 0,
     });
   });
 
@@ -39,6 +40,21 @@ describe('cash-calculations', () => {
     const totals = computeCashTotals(withFiado);
     expect(totals).toMatchObject({ salesCents: 3690, receivablePaymentsCents: 5500, receivableRefundsCents: 1500 });
     expect(computeExpectedBalanceCents(10000, totals)).toBe(10000 + 5000 + 3690 - 3000 + 5500 - 1500);
+  });
+
+  it('keeps cash sales gross and takes a cancelled sale out of the expected balance', () => {
+    const withRefund = [...movements, { type: 'SALE_REFUND' as const, amountCents: 1200 }];
+    const totals = computeCashTotals(withRefund);
+    expect(totals).toMatchObject({ salesCents: 3690, saleRefundsCents: 1200, withdrawalsCents: 3000 });
+    expect(computeExpectedBalanceCents(10000, totals)).toBe(10000 + 5000 + 3690 - 3000 - 1200);
+  });
+
+  it('a sale and its refund cancel out', () => {
+    const totals = computeCashTotals([
+      { type: 'SALE' as const, amountCents: 4000 },
+      { type: 'SALE_REFUND' as const, amountCents: 4000 },
+    ]);
+    expect(computeExpectedBalanceCents(10000, totals)).toBe(10000);
   });
 
   it('handles an empty session', () => {

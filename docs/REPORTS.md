@@ -92,7 +92,7 @@ Menu **Relatórios** → `/dashboard/relatorios` (proprietário, administrador, 
 - Os presets de período usam a data do aparelho; se o fuso do aparelho for diferente do fuso do restaurante, "Hoje" pode divergir em um dia perto da meia-noite. O período exibido é sempre o que a API usou.
 - Sem cache: cada consulta agrega na hora. Suficiente para o volume de um restaurante; um período de um ano em um tenant muito grande pede tabelas de resumo.
 - `byCourier` limitado a 100 linhas.
-- **Venda em dinheiro cancelada:** o relatório de vendas deixa de contá-la, mas o movimento de venda continua na sessão de caixa (o caixa não registra devolução automática; ver `docs/CASH_REGISTER_PLAN.md`). Enquanto essa regra não for decidida, "vendas em dinheiro" do relatório de caixa pode ser maior que o "Dinheiro" do relatório de vendas na medida dos pedidos em dinheiro cancelados.
+- **Venda em dinheiro cancelada:** o relatório de vendas deixa de contá-la; no caixa, o movimento de venda continua (o histórico não é reescrito) e o cancelamento grava um **estorno de venda** (`SALE_REFUND`) na sessão aberta. O relatório de caixa mostra `salesCents` bruto e `saleRefundsCents` à parte: "Dinheiro" do relatório de vendas = vendas em dinheiro − estornos de venda, quando as duas coisas caem no mesmo período. Vendas em dinheiro canceladas antes da migration `20261010230000_cash_sale_refund` não têm estorno (ver `docs/CASH_REGISTER_PLAN.md`).
 
 ## Deploy
 

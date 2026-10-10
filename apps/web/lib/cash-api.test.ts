@@ -23,9 +23,10 @@ describe('cash-api money helpers', () => {
 });
 
 describe('isCashOutflow', () => {
-  it('a withdrawal and a fiado refund take money out; the rest puts money in', () => {
+  it('a withdrawal, a fiado refund and a sale refund take money out; the rest puts money in', () => {
     expect(isCashOutflow('WITHDRAWAL')).toBe(true);
     expect(isCashOutflow('RECEIVABLE_REFUND')).toBe(true);
+    expect(isCashOutflow('SALE_REFUND')).toBe(true);
     expect(isCashOutflow('SALE')).toBe(false);
     expect(isCashOutflow('SUPPLY')).toBe(false);
     expect(isCashOutflow('RECEIVABLE_PAYMENT')).toBe(false);

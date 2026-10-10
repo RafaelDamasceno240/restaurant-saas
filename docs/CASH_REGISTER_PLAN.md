@@ -13,13 +13,28 @@
 > migration `20260928001733_initial_mvp_schema` e os índices parciais e o trigger de
 > imutabilidade em `20260930000000_partial_indexes_and_cash_immutability`.
 >
-> **Limitação conhecida (medida em 2026-10-05, ainda sem decisão):** cancelar um pedido pago em
-> **dinheiro** não gera movimento de devolução. O movimento `SALE` permanece e o saldo esperado
-> continua contando a venda. Se o dinheiro for devolvido ao cliente, o operador precisa registrar
-> uma **sangria com motivo**; caso contrário o fechamento acusa falta. Corrigir isso exige uma
-> regra de negócio nova (devolução automática, movimento de estorno de venda ou bloqueio do
-> cancelamento) e não foi feito sem autorização. O fiado recebido em dinheiro, por outro lado,
-> já tem estorno próprio (`RECEIVABLE_REFUND`, ver `docs/RECEIVABLES.md`).
+> **Estorno de venda em dinheiro (decidido e implementado em 2026-10-10):** cancelar um pedido
+> que gerou um movimento `SALE` grava, **na mesma transação do cancelamento**, um movimento
+> `SALE_REFUND` do mesmo valor na sessão de caixa **aberta agora** na unidade do pedido (não
+> necessariamente a sessão que recebeu a venda). Regras:
+>
+> - **Sem caixa aberto na unidade, o cancelamento é recusado** (`409 CASH_REGISTER_NOT_OPEN`):
+>   mesma regra do estorno de fiado em dinheiro (`RECEIVABLE_REFUND`, ver `docs/RECEIVABLES.md`).
+> - O movimento `SALE` original **não é alterado nem apagado**; `salesCents` continua bruto e o
+>   detalhe da sessão ganhou `totals.saleRefundsCents`. Saldo esperado = abertura + suprimentos
+>   + vendas + fiado recebido − sangrias − estornos de fiado − estornos de venda.
+> - **Um estorno por pedido**: a linha do pedido é travada antes da sessão de caixa, e
+>   `cash_movements.refundedOrderId` é único no banco. Um CHECK garante que só `SALE_REFUND`
+>   preenche essa coluna.
+> - Pedido sem movimento `SALE` (Pix, cartão, fiado, pedido online ainda não recebido) e venda
+>   de valor zero não geram estorno e não exigem caixa aberto.
+> - A auditoria `CASH_SALE_REFUNDED` é gravada na mesma transação: se ela falha, nada é
+>   cancelado.
+> - Pedidos já concluídos (`COMPLETED`, incluindo o fechamento de mesa) continuam não
+>   canceláveis; para eles a devolução segue sendo uma sangria com motivo.
+> - **Não é retroativo:** vendas em dinheiro canceladas antes da migration
+>   `20261010230000_cash_sale_refund` continuam sem estorno.
+> - O endpoint manual de movimentos continua aceitando só suprimento e sangria.
 
 ## 1. Objetivo
 

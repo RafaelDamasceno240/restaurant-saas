@@ -59,6 +59,8 @@ Criar, concluir e cancelar um pedido movem vários registros financeiros (caixa,
 linha do pedido → sessão de caixa → cupom → conta de cashback → conta de crédito (fiado) → conta de fidelidade → saldos de estoque
 ```
 
+O cancelamento só trava a sessão de caixa quando o pedido tem uma venda em dinheiro a devolver (movimento `SALE_REFUND`, na sessão aberta da unidade; sem caixa aberto o cancelamento é recusado). A entrega (`deliveries`) é travada depois da sessão de caixa, e o fluxo de entrega nunca toca o caixa.
+
 A ordem única é o que impede deadlock entre, por exemplo, o fechamento de uma mesa e o cancelamento de outro pedido do mesmo cliente. Um fluxo novo que trave mais de um desses registros deve seguir essa ordem. `test/financial-chain.e2e-spec.ts` exercita os módulos juntos, inclusive esse cenário.
 
 Dinheiro é sempre `Int` em centavos; o servidor recalcula preço, desconto, taxa e total e nunca confia em valor vindo do cliente.

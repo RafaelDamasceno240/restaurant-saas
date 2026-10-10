@@ -398,7 +398,8 @@ model Order {
   branch          Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
   tab             Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
   items           OrderItem[]
-  cashMovement    CashMovement?
+  cashMovement    CashMovement?     @relation("CashSaleOrder")
+  cashRefund      CashMovement?     @relation("CashRefundedOrder")
   payment         Payment?
   delivery        Delivery?
   customer        Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -511,6 +512,8 @@ enum CashMovementType {
   RECEIVABLE_PAYMENT
   // A cash payment of a receivable that was reversed: money OUT.
   RECEIVABLE_REFUND
+  // A sale paid in cash that was cancelled: what it put in the drawer goes back OUT.
+  SALE_REFUND
 }
 
 model CashRegisterSession {
@@ -547,12 +550,17 @@ model CashMovement {
   amountCents     Int
   reason          String?
   orderId         String?          @unique
+  // SALE_REFUND only: the cancelled order whose cash sale this movement gives back. Unique, so
+  // the database itself refuses a second refund of the same sale. A CHECK in the migration ties
+  // the column to the type (set on SALE_REFUND, null on everything else).
+  refundedOrderId String?          @unique
   createdByUserId String
   createdAt       DateTime         @default(now())
 
   session         CashRegisterSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
   tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  order           Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  order           Order?              @relation("CashSaleOrder", fields: [orderId], references: [id], onDelete: Restrict)
+  refundedOrder   Order?              @relation("CashRefundedOrder", fields: [refundedOrderId], references: [id], onDelete: Restrict)
   createdBy       User                @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
   receivableEntry ReceivableEntry?
 

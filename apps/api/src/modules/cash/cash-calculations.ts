@@ -7,6 +7,8 @@ export interface CashTotals {
   // Fiado paid in cash (money in) and cash payments of fiado that were reversed (money out).
   receivablePaymentsCents: number;
   receivableRefundsCents: number;
+  // Cash sales that were cancelled and given back (money out). salesCents stays gross.
+  saleRefundsCents: number;
 }
 
 // Pure, integer-cents-only. amountCents is always positive in storage; the
@@ -20,6 +22,7 @@ export function computeCashTotals(
     withdrawalsCents: 0,
     receivablePaymentsCents: 0,
     receivableRefundsCents: 0,
+    saleRefundsCents: 0,
   };
   for (const m of movements) {
     if (m.type === 'SALE') totals.salesCents += m.amountCents;
@@ -27,11 +30,12 @@ export function computeCashTotals(
     else if (m.type === 'WITHDRAWAL') totals.withdrawalsCents += m.amountCents;
     else if (m.type === 'RECEIVABLE_PAYMENT') totals.receivablePaymentsCents += m.amountCents;
     else if (m.type === 'RECEIVABLE_REFUND') totals.receivableRefundsCents += m.amountCents;
+    else if (m.type === 'SALE_REFUND') totals.saleRefundsCents += m.amountCents;
   }
   return totals;
 }
 
-// expected = opening + SUPPLY + SALE + RECEIVABLE_PAYMENT - WITHDRAWAL - RECEIVABLE_REFUND
+// expected = opening + SUPPLY + SALE + RECEIVABLE_PAYMENT - WITHDRAWAL - RECEIVABLE_REFUND - SALE_REFUND
 export function computeExpectedBalanceCents(openingBalanceCents: number, totals: CashTotals): number {
   return (
     openingBalanceCents +
@@ -39,7 +43,8 @@ export function computeExpectedBalanceCents(openingBalanceCents: number, totals:
     totals.salesCents +
     totals.receivablePaymentsCents -
     totals.withdrawalsCents -
-    totals.receivableRefundsCents
+    totals.receivableRefundsCents -
+    totals.saleRefundsCents
   );
 }
 
