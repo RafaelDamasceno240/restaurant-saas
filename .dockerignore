@@ -1,0 +1,24 @@
+# Build context for deploy/api.Dockerfile and deploy/web.Dockerfile (context = repository root).
+# Nothing built or installed on the host enters an image: dependencies are installed and the
+# code is compiled inside it, on Linux.
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+
+# Never ship local configuration or secrets. Variables reach the containers through Compose.
+**/.env
+**/.env.*
+
+# Not needed to build or run.
+.git
+.husky
+.vercel
+docs
+deploy/.env
+RELATORIO_*.txt
+MANIFEST.sha256
+docker-compose.yml
