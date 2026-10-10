@@ -12,7 +12,12 @@ import { PrismaService } from '../src/prisma/prisma.service';
 // environment. Intended for a disposable test database — see
 // docs/architecture.md "Testes" for how to point this at one.
 export async function createTestApp(): Promise<INestApplication> {
-  process.env.AUTH_RATE_LIMIT_PER_MINUTE ??= '10000';
+  // Every spec registers and signs in far more often than a person would. The value is SET, not
+  // defaulted: AppModule is imported at the top of this file and its ConfigModule has already
+  // loaded apps/api/.env by now, so a `??=` would keep the 10 per minute of .env.example and
+  // the suites would fail with 429. The limit is read per request, and the specs that test it
+  // (security-hardening, trust-proxy) lower it themselves after the app is up.
+  process.env.AUTH_RATE_LIMIT_PER_MINUTE = '10000';
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
   app.use(cookieParser());
