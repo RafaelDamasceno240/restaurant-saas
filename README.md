@@ -45,7 +45,7 @@ packages/
 
 ## Requisitos
 
-- Node.js 20+
+- Node.js 20+ (as suítes e as imagens Docker rodam em 24.14.1; 20 não foi testado nesta rodada)
 - pnpm 9+ (`corepack enable` habilita a versão do `packageManager`)
 - Docker + Docker Compose (para Postgres/Redis locais)
 
@@ -107,8 +107,12 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 42 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback, fiado, relatórios e a cadeia financeira do pedido
+pnpm --filter api test:e2e    # e2e: 45 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, equipe e senhas, cardápio, pedidos, KDS, PDV, caixa, estorno de venda em dinheiro, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback, fiado, relatórios e a cadeia financeira do pedido
 ```
+
+Resultado em 2026-10-10: API unit 297, API e2e 757 (45 suítes), web unit 278, sem falhas — nesta
+máquina, em um clone limpo seguindo este README e dentro de um container Linux
+(`deploy/README.md`).
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do
 ambiente — aponte para um banco de teste descartável antes de rodá-los.
@@ -159,6 +163,7 @@ provedor é versionado.
 
 | Etapa | Comando |
 | --- | --- |
+| Instalação | `pnpm install --frozen-lockfile` **com devDependencies** (ver aviso abaixo) |
 | Build | `pnpm --filter api build` (`prisma generate && nest build`; precisa das devDependencies) |
 | Migrations | `pnpm --filter api prisma:deploy` |
 | Seed de papéis e permissões | `pnpm --filter api prisma:seed:prod` (seed compilado, não precisa de `ts-node`) |
@@ -170,6 +175,16 @@ e o Swagger fica público), `DATABASE_URL`, `REDIS_URL`, `JWT_ACCESS_SECRET`,
 e, opcionais, `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`,
 `AUTH_RATE_LIMIT_PER_MINUTE`. A porta vem de `PORT`. Health checks:
 `/health/live` (processo) e `/health/ready` (PostgreSQL + Redis).
+
+**Instalação em modo produção.** Com `NODE_ENV=production` no momento do `pnpm install`, o pnpm
+pula as devDependencies: o script `prepare` (husky) falha, a instalação termina com erro e não há
+`prisma`, `nest` nem `tsc` para o build (medido em 2026-10-10). O build do frontend também precisa
+delas (TypeScript, Tailwind, PostCSS). Se a plataforma define `NODE_ENV=production` nessa fase,
+defina também `NPM_CONFIG_PRODUCTION=false`, ou use as imagens de `deploy/`, que compilam em um
+estágio com devDependencies e entregam a imagem final sem elas.
+
+São 17 migrations (`prisma/migrations`). O `postinstall` do `@prisma/client` não gera o cliente
+neste monorepo: ele só existe depois de `prisma generate`, que faz parte do build.
 
 O seed é obrigatório num banco novo — sem papéis e permissões o registro de
 restaurante responde `500` — e é idempotente. Num banco que **já tenha
@@ -186,6 +201,12 @@ e para a execução. Não existe mais `NEXT_PUBLIC_API_URL`.
 
 **Conferir no ambiente real antes de abrir para usuários**
 
+- **Endereço do cliente.** Medido em 2026-10-10 com o frontend em `next start`: o `/api` do Next
+  **não envia `X-Forwarded-For`** à API. Nessa montagem a API enxerga todos os navegadores como um
+  único endereço (o do frontend), qualquer que seja `TRUST_PROXY_HOPS`, e os limites por endereço
+  (10 logins, 30 renovações de sessão e 100 requisições por rota, por minuto) valem para todos os
+  usuários juntos. Ver `deploy/README.md`, "Limites conhecidos". Em outra plataforma de frontend o
+  comportamento pode ser diferente e precisa ser medido:
 - `TRUST_PROXY_HOPS`: faça login pelo site e veja `refresh_tokens.ip`. Tem de
   ser o seu IP público. Se aparecer um endereço do proxy ou da plataforma do
   frontend, todos os usuários estão dividindo o mesmo limite de requisições
@@ -193,6 +214,20 @@ e para a execução. Não existe mais `NEXT_PUBLIC_API_URL`.
 - Cookie de sessão: `refresh_token` guardado para o domínio do **frontend**,
   com `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
 - `/docs` da API respondendo `404`.
+
+## Containers (Linux)
+
+`deploy/` tem as imagens Docker da API e do frontend e um Compose que sobe o sistema inteiro
+(API, frontend, PostgreSQL e Redis) com as migrations em um job separado:
+
+```bash
+cp deploy/.env.example deploy/.env
+docker compose -f deploy/compose.yml up -d --build
+```
+
+Comandos de verificação, logs, encerramento, testes e2e em Linux e limites conhecidos estão em
+`deploy/README.md`. O `docker-compose.yml` da raiz continua sendo só o PostgreSQL e o Redis do
+desenvolvimento, e as duas pilhas não compartilham banco, rede nem volume.
 
 ## Estrutura de pastas (resumo)
 
@@ -211,6 +246,7 @@ Ver `docs/architecture.md` para a árvore completa e as decisões por trás dela
 - `docs/LOYALTY.md`, `docs/CASHBACK.md`, `docs/RECEIVABLES.md` — fidelidade, cashback e fiado
 - `docs/PWA.md` — app instalável, service worker, offline, avisos e uso com o dedo
 - `docs/REPORTS.md` — relatórios de vendas, produtos, clientes, estoque, delivery e caixa
+- `deploy/README.md` — imagens Docker, Compose do sistema inteiro, migrations, saúde e limites
 
 ## Roadmap (não implementar sem aprovação explícita)
 

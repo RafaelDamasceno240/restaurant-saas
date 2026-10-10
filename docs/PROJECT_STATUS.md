@@ -3,7 +3,8 @@
 ## AUDITORIA TÉCNICA — 2026-09-30 (estado real, prevalece sobre as seções históricas abaixo)
 
 > Os números de teste desta auditoria são de 2026-09-30. O estado mais recente (testes, migrations,
-> pendências) está na seção **"Fechamento técnico do salto (2026-10-05)"**, no fim deste arquivo.
+> pendências) está nas seções **"Fechamento técnico do salto (2026-10-05)"** e **"Núcleo operacional e
+> implantação em containers (2026-10-10)"**, no fim deste arquivo. A segunda prevalece onde divergirem.
 
 As seções seguintes são um registro cronológico. Os trechos que dizem que nada
 foi executado no ambiente ("Motivo, sem meias-palavras", "Pendência
@@ -15,6 +16,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Área | Estado | Evidência |
 |---|---|---|
 | Auth/RBAC | IMPLEMENTADO | `auth.e2e-spec`, guards globais, refresh com rotação |
+| Equipe (usuários) | IMPLEMENTADO (2026-10-10) | `users-management` e `users-password` e2e; cadastro, papel, unidades, inativação, redefinição e troca de senha; tela `/dashboard/usuarios`. Sem convite nem recuperação por e-mail. Ver `docs/authentication.md` |
 | Multi-tenancy | IMPLEMENTADO | `tenant-isolation.e2e-spec`; `tenantId` sempre vem do JWT |
 | Unidades (branch access) | IMPLEMENTADO | `BranchAccessService` usado em caixa, estoque, PDV, mesas, comandas e pedidos |
 | Cardápio | IMPLEMENTADO | `menu`/`public-menu` e2e |
@@ -2632,7 +2634,25 @@ Validação e endurecimento do que foi entregue nas oito etapas do salto, sem fu
   - deadlock entre fechamento de mesa e cancelamento do mesmo cliente sobre o mesmo insumo (ordem de travas invertida); corrigido com uma ordem única, descrita em `docs/architecture.md`;
   - repetição idempotente de venda fiado ignorava parcelas e vencimento;
   - checkout público: telefone sem teclado de telefone e área de texto com 14px no toque.
-- **Limitação conhecida, sem decisão:** cancelar venda em **dinheiro** não gera devolução no caixa (anterior ao salto; ver `docs/CASH_REGISTER_PLAN.md`).
+- **Limitação conhecida, sem decisão:** cancelar venda em **dinheiro** não gera devolução no caixa (anterior ao salto; ver `docs/CASH_REGISTER_PLAN.md`). **Superado em 2026-10-10:** decidido e implementado o estorno automático (seção seguinte).
 - **Migrations:** 16 no código. No banco de desenvolvimento estavam aplicadas 13 no momento do fechamento; `20261005001215_loyalty`, `20261005003323_cashback` e `20261005005645_receivables` aguardavam autorização, com preflight sem violações, backup verificado por restauração e ensaio do upgrade em cópia. Depois delas é preciso rodar o seed (70 permissões) e os usuários entrarem de novo.
 - **Não validado:** aparelho físico (celular, tablet, iOS), Safari e Firefox, teste de carga, validação manual por pessoa.
 - **Fora do escopo, não iniciado:** WhatsApp, IA, gateway de pagamento, NFC-e, cobrança SaaS, campanhas, push com o app fechado.
+
+## Núcleo operacional e implantação em containers (2026-10-10)
+
+Meta em vigor: colocar o núcleo operacional em uso em um restaurante real até 31/10/2026. Detalhes e evidências em `RELATORIO_VALIDACAO_COMPRAS.txt`, seções 35 a 38. **O produto não está pronto para produção:** não existe ambiente publicado validado, o banco publicado tem estado desconhecido e nada foi testado em aparelho real.
+
+- **Equipe e senhas** (`bf25f60`): a gestão cria funcionários com papel e unidades, inativa, reativa e redefine senhas; qualquer pessoa troca a própria senha. Mudar papel, inativar ou trocar senha encerra as sessões da conta. Sem migration. Ver `docs/authentication.md`, "Equipe e senhas".
+- **Estorno de venda em dinheiro** (`d4924e1`): cancelar um pedido pago em dinheiro grava um `SALE_REFUND` no caixa aberto da unidade, na mesma transação; sem caixa aberto o cancelamento é recusado. Migration `20261010230000_cash_sale_refund` (a 17ª, só acrescenta). Não é retroativo. Ver `docs/CASH_REGISTER_PLAN.md`.
+- **Testes em 2026-10-10:** API unit 30 suítes / 297 testes; API E2E 45 suítes / 757 testes; web unit 21 suítes / 278 testes; lint, typecheck e build sem erro. O E2E completo passou em três ambientes: nesta máquina, em um clone limpo com banco criado do zero e dentro de um container Linux.
+- **Correção de reprodutibilidade** (`39bda9e`): com o `.env` copiado do exemplo, o E2E falhava com `429` em 368 de 757 testes, porque o limite de autenticação do exemplo (10 por minuto) prevalecia sobre o do utilitário de testes.
+- **Containers:** `deploy/` traz as imagens da API e do frontend (Node 24.14.1, pnpm 9.12.0, Debian 12) e um Compose com API, frontend, PostgreSQL 16 e Redis 7. Migrations e seed rodam em um job separado, nunca na partida da API; PostgreSQL e Redis não publicam porta; a imagem final não tem devDependencies. Validado localmente: 17 migrations e seed em banco vazio, saúde da API e do frontend, 28 verificações em navegador real e 33 sondagens de segurança. Ver `deploy/README.md`.
+- **Migrations:** 17 no código. Banco de desenvolvimento: 16 aplicadas; a 17ª aguarda autorização. Banco publicado: desconhecido.
+- **Riscos abertos:**
+  - o `/api` do Next não repassa o endereço do cliente à API: os limites por endereço (10 logins, 30 renovações de sessão e 100 requisições por rota, por minuto) valem para todos os usuários do restaurante juntos, o que pode devolver `429` com vários aparelhos;
+  - o cookie de sessão exige HTTPS fora de `localhost`, então teste em aparelhos precisa de um endereço com HTTPS;
+  - instalar com `NODE_ENV=production` sem forçar devDependencies quebra a instalação e o build fora das imagens de `deploy/`;
+  - o e-mail de login diferencia maiúsculas de minúsculas; o dono que esquecer a senha não tem recuperação; o caixa não cancela pedidos; só existe uma unidade por restaurante sem intervenção no banco.
+- **Não validado:** hospedagem real, HTTPS, aparelho físico, Node 20, carga, uso por uma pessoa.
+- **Fora do escopo, não iniciado:** impressão, NFC-e, WhatsApp, IA, gateway de pagamento, cobrança SaaS.
