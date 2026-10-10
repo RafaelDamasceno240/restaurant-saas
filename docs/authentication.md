@@ -191,6 +191,40 @@ Ambos os guards são globais (`APP_GUARD`) e são "no-op" (permitem a
 requisição) quando o decorator não é usado na rota — só entram em ação onde
 explicitamente aplicados.
 
+## Equipe e senhas
+
+Contas de funcionários são criadas pela gestão em `/dashboard/usuarios`
+(`POST /v1/users`, `PATCH /v1/users/:id`, `POST /v1/users/:id/reset-password`).
+Não há convite nem recuperação por e-mail: quem cadastra define a senha inicial e
+a entrega à pessoa.
+
+- **Quem pode**: `users.create` / `users.update` (OWNER e ADMIN no seed). O gerente
+  só lê (`users.read`). Regras adicionais em `modules/users/user-rules.ts`: o papel
+  OWNER nunca é atribuído; só o OWNER cria, promove ou altera um ADMIN; a conta do
+  OWNER não é alterada por ninguém; ninguém altera a própria conta por essas rotas.
+- **Unidades**: papéis que não são OWNER/ADMIN precisam de ao menos uma unidade. Com
+  uma única unidade ativa ela é atribuída sozinha; com várias, a lista é obrigatória
+  (`400 BRANCHES_REQUIRED`). Unidade inexistente ou de outro restaurante: `404`.
+- **E-mail** é o login e é único entre todos os restaurantes (`409 EMAIL_ALREADY_EXISTS`),
+  como no cadastro. Não é editável.
+- **Inativar** (`active: false`) em vez de excluir: o histórico da pessoa continua.
+- **Sessões**: o access token carrega papéis e permissões. Mudar o papel, inativar ou
+  redefinir a senha revoga os refresh tokens na mesma transação e, logo após o commit,
+  os access tokens (denylist por usuário). Renomear ou trocar unidades não encerra a
+  sessão: os vínculos de unidade são relidos a cada requisição.
+- **Trocar a própria senha**: `POST /v1/auth/change-password` (exige a senha atual,
+  limitado como o login). Encerra todas as sessões da conta, inclusive a atual, e limpa
+  o cookie. É o único caminho para o OWNER, que não tem quem redefina a senha por ele:
+  **não existe recuperação para um OWNER que esqueceu a senha** (exigiria e-mail).
+- **Auditoria**: `USER_CREATED`, `USER_UPDATED` e `USER_PASSWORD_RESET` são gravadas na
+  mesma transação; `PASSWORD_CHANGED` e `PASSWORD_CHANGE_FAILED` são best-effort. Nenhuma
+  guarda nome, e-mail ou senha.
+- **Limite conhecido**: um refresh que já passou das próprias verificações no instante
+  do commit pode emitir tokens novos. A redefinição de senha faz uma segunda revogação
+  depois do commit para fechar essa janela; na mudança de papel e na inativação a
+  exposição é limitada pela validade do access token (15 min) e pela checagem de
+  status no refresh seguinte.
+
 ## Multi-tenancy na autenticação
 
 O `tenantId` do usuário autenticado vem **exclusivamente** do payload do JWT

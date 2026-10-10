@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import clsx from 'clsx';
-import { HelpCircle, LifeBuoy, LogOut, Menu, PanelLeftClose, X } from 'lucide-react';
+import { HelpCircle, KeyRound, LifeBuoy, LogOut, Menu, PanelLeftClose, X } from 'lucide-react';
 import { Tooltip } from '@/components/ds/Tooltip';
 import { isItemActive, NavGroup, NavItem } from './nav';
 
@@ -25,6 +25,7 @@ export interface SidebarProps {
   brandName: string;
   brandSubtitle?: string;
   user: SidebarUser;
+  onChangePassword?: () => void;
   onLogout?: () => void;
 }
 
@@ -132,6 +133,7 @@ export function Sidebar({
   brandName,
   brandSubtitle,
   user,
+  onChangePassword,
   onLogout,
 }: SidebarProps) {
   const collapsed = drawer ? false : collapsedProp;
@@ -253,6 +255,18 @@ export function Sidebar({
               <span className="block truncate text-xs font-medium text-foreground">{user.name}</span>
               <span className="block truncate text-2xs text-subtle">{user.email}</span>
             </span>
+          )}
+          {onChangePassword && (
+            <Tooltip label="Trocar minha senha" side="right" disabled={!collapsed}>
+              <button
+                type="button"
+                onClick={onChangePassword}
+                aria-label="Trocar minha senha"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-10 touch:w-10"
+              >
+                <KeyRound className="h-4 w-4" />
+              </button>
+            </Tooltip>
           )}
           {onLogout && (
             <Tooltip label="Sair" side="right" disabled={!collapsed}>

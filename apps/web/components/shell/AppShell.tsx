@@ -18,6 +18,7 @@ export function AppShell({
   brandName,
   brandSubtitle,
   user,
+  onChangePassword,
   onLogout,
   topbarChips,
   banner,
@@ -28,6 +29,7 @@ export function AppShell({
   brandName: string;
   brandSubtitle?: string;
   user: SidebarUser;
+  onChangePassword?: () => void;
   onLogout?: () => void;
   topbarChips?: ReactNode;
   banner?: ReactNode;
@@ -85,6 +87,7 @@ export function AppShell({
     brandName,
     brandSubtitle,
     user,
+    onChangePassword,
     onLogout,
   };
 

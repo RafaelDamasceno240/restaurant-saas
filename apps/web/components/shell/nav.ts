@@ -79,7 +79,7 @@ export const DASHBOARD_NAV: NavGroup[] = [
     key: 'admin',
     label: 'Administração',
     items: [
-      { key: 'usuarios', label: 'Usuários', icon: Users, roles: MANAGEMENT, soon: true },
+      { key: 'usuarios', label: 'Usuários', icon: Users, href: '/dashboard/usuarios', roles: MANAGEMENT },
       { key: 'config', label: 'Configurações', icon: Settings, roles: MANAGEMENT, soon: true },
     ],
   },

@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode, useEffect, useMemo } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ActiveBranchProvider } from '@/lib/use-active-branch';
@@ -9,6 +9,7 @@ import { ErrorState, LoadingState } from '@/components/ds/States';
 import { AppShell } from '@/components/shell/AppShell';
 import { DashboardChips } from '@/components/shell/DashboardChips';
 import { DASHBOARD_NAV, filterNav } from '@/components/shell/nav';
+import { ChangeOwnPasswordDialog } from '@/components/users/PasswordDialogs';
 
 const ROLE_LABEL: Record<string, string> = {
   OWNER: 'Proprietário',
@@ -17,6 +18,8 @@ const ROLE_LABEL: Record<string, string> = {
   CASHIER: 'Caixa',
   WAITER: 'Garçom',
   KITCHEN: 'Cozinha',
+  DELIVERY: 'Entregador',
+  VIEWER: 'Somente leitura',
 };
 
 // One shared frame for every /dashboard/* screen. The real auth check lives
@@ -24,6 +27,7 @@ const ROLE_LABEL: Record<string, string> = {
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const { user, isLoading, logout, sessionUnavailable, retrySession } = useAuth();
+  const [changingPassword, setChangingPassword] = useState(false);
 
   // No user because the API REFUSED the session -> login. No user because the API could not be
   // reached -> stay here and say so: the operator is still signed in (see lib/auth-context.tsx).
@@ -75,6 +79,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             email: user.email,
             roleLabel: user.roles.map((r) => ROLE_LABEL[r] ?? r).join(', '),
           }}
+          onChangePassword={() => setChangingPassword(true)}
           onLogout={async () => {
             await logout();
             router.push('/login');
@@ -83,6 +88,16 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         >
           {children}
         </AppShell>
+        {/* The API ended every session of the account with the change: sign out here too. */}
+        <ChangeOwnPasswordDialog
+          open={changingPassword}
+          onClose={() => setChangingPassword(false)}
+          onChanged={async () => {
+            setChangingPassword(false);
+            await logout();
+            router.push('/login');
+          }}
+        />
       </ActiveBranchProvider>
     </ToastProvider>
   );

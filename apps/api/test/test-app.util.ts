@@ -98,8 +98,9 @@ export async function createActiveProductE2E(
   return product.body as { id: string };
 }
 
-// No user-invite endpoint exists yet, so limited-role staff are inserted via
-// Prisma (optionally linked to branches via UserBranch) and logged in for real.
+// Limited-role staff are inserted via Prisma (optionally linked to branches via UserBranch,
+// including "no branch at all", which POST /users refuses) and logged in for real. The
+// users API itself is covered by users-management.e2e-spec.ts.
 export async function createStaffAndLoginE2E(
   app: INestApplication,
   server: HttpServer,

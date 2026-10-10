@@ -20,6 +20,7 @@ import { AuthenticatedRequestUser } from '../../common/types/authenticated-reque
 import { AuthService, AuthResult, RequestMeta } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 const authRateLimit = (): number => Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE) || 10;
 
@@ -104,6 +105,22 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const token = req.cookies?.[REFRESH_COOKIE_NAME];
     await this.authService.logout(token, this.meta(req));
+    res.clearCookie(REFRESH_COOKIE_NAME, this.refreshCookieOptions());
+  }
+
+  // Authenticated (no @Public): the access token says whose password it is. The session ends
+  // with the change, so the cookie goes too and the client signs in again.
+  @Throttle({ default: { limit: authRateLimit, ttl: 60_000 } })
+  @Post('change-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Troca a própria senha (exige a atual) e encerra todas as sessões da conta' })
+  async changePassword(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Body() dto: ChangePasswordDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.changePassword(user.userId, dto, this.meta(req));
     res.clearCookie(REFRESH_COOKIE_NAME, this.refreshCookieOptions());
   }
 

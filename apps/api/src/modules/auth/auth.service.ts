@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -15,6 +16,7 @@ import { AuditService } from '../audit/audit.service';
 import { isTenantBlocked } from '../../common/util/tenant-status.util';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { durationToMs, hashToken } from './token.util';
 import { AccessTokenPayload } from './strategies/jwt.strategy';
 import { SessionRevocationService } from './session-revocation.service';
@@ -318,6 +320,53 @@ export class AuthService {
       action: 'LOGOUT',
       entity: 'User',
       entityId: payload.sub,
+      ip: meta.ip,
+      userAgent: meta.userAgent,
+    });
+  }
+
+  // The person changes their own password, proving they know the current one. Every session of
+  // the account ends with it — this one included, so the caller signs in again with the new
+  // password and anyone else who was signed in with the old one is out.
+  async changePassword(userId: string, dto: ChangePasswordDto, meta: RequestMeta): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || !(await argon2.verify(user.passwordHash, dto.currentPassword))) {
+      if (user) {
+        await this.audit.record({
+          tenantId: user.tenantId,
+          userId: user.id,
+          action: 'PASSWORD_CHANGE_FAILED',
+          entity: 'User',
+          entityId: user.id,
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+      }
+      throw new BadRequestException({ code: 'INVALID_CURRENT_PASSWORD', message: 'Senha atual incorreta.' });
+    }
+    if (dto.newPassword === dto.currentPassword) {
+      throw new BadRequestException({
+        code: 'PASSWORD_UNCHANGED',
+        message: 'A nova senha precisa ser diferente da atual.',
+      });
+    }
+
+    const passwordHash = await argon2.hash(dto.newPassword);
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
+      this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+    await this.revocations.revokeUser(user.id);
+
+    await this.audit.record({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'PASSWORD_CHANGED',
+      entity: 'User',
+      entityId: user.id,
       ip: meta.ip,
       userAgent: meta.userAgent,
     });

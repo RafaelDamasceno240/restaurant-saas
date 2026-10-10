@@ -11,6 +11,6 @@ import { AuditModule } from '../audit/audit.module';
   imports: [PassportModule, JwtModule.register({}), AuditModule],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, SessionRevocationService],
-  exports: [AuthService],
+  exports: [AuthService, SessionRevocationService],
 })
 export class AuthModule {}
