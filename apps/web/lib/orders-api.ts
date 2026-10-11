@@ -128,6 +128,24 @@ export function listOrders(
   return apiFetch<AdminOrderListResponse>(`/orders${qs ? `?${qs}` : ''}`, { accessToken });
 }
 
+// The kitchen board: the in-progress statuses, each with its newest orders (at most
+// `columnLimit`) and its total, in ONE request. The kitchen screen polls this instead of asking
+// for each status separately (lib/kds-logic.ts).
+export interface OrdersBoardColumn {
+  status: OrderStatus;
+  data: AdminOrderListItem[];
+  total: number;
+}
+
+export interface OrdersBoard {
+  columns: OrdersBoardColumn[];
+  columnLimit: number;
+}
+
+export function getOrdersBoard(accessToken: string): Promise<OrdersBoard> {
+  return apiFetch<OrdersBoard>('/orders/board', { accessToken });
+}
+
 export function getOrderDetail(accessToken: string, id: string): Promise<AdminOrderDetail> {
   return apiFetch<AdminOrderDetail>(`/orders/${id}`, { accessToken });
 }

@@ -18,8 +18,13 @@ import { OrderEffectsService } from '../order-effects/order-effects.service';
 import { CashRegisterService } from '../cash/cash-register.service';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
-import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
-import { OrderDetailDto, OrderListItemDto, OrderListResponseDto } from './dto/order-admin-response.dto';
+import { ListOrdersQueryDto, OrdersBoardQueryDto } from './dto/list-orders-query.dto';
+import {
+  OrderDetailDto,
+  OrderListItemDto,
+  OrderListResponseDto,
+  OrdersBoardResponseDto,
+} from './dto/order-admin-response.dto';
 
 type DeliverySummary = { id: string; status: DeliveryStatus; notes: string | null } | null;
 type OrderWithItemsAndCount = Order & {
@@ -32,6 +37,11 @@ type OrderWithItems = Order & { items: OrderItem[]; delivery: DeliverySummary };
 const deliverySummarySelect = { select: { id: true, status: true, notes: true } } as const;
 
 const DEFAULT_PAGE_SIZE = 20;
+
+// The kitchen board: the statuses an order is in while the kitchen works on it, in the order
+// of the flow, and how many orders each column carries at most.
+export const ORDER_BOARD_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as const satisfies readonly OrderStatus[];
+export const ORDER_BOARD_COLUMN_LIMIT = 50;
 
 @Injectable()
 export class OrdersService {
@@ -49,36 +59,12 @@ export class OrdersService {
   // (the controller passes it from @CurrentUser(), i.e. the JWT) — never
   // from a query param, body field, or route param. See docs/multi-tenancy.md.
   async findAllForUser(user: AuthenticatedRequestUser, query: ListOrdersQueryDto): Promise<OrderListResponseDto> {
-    const tenantId = user.tenantId;
-    const allowedBranchIds = await this.branchAccess.accessibleBranchIds(user);
-    if (query.branchId && allowedBranchIds && !allowedBranchIds.includes(query.branchId)) {
-      throw new ForbiddenException({
-        code: 'BRANCH_ACCESS_DENIED',
-        message: 'Você não tem acesso a esta unidade.',
-      });
-    }
-    // OWNER/ADMIN have no branch list to be checked against, so the branch itself is checked:
-    // one that is not of this tenant is "not found", like in every other module, instead of an
-    // empty page. (Any status: the history of a deactivated branch stays readable.)
-    if (query.branchId && !allowedBranchIds) {
-      const branch = await this.prisma.branch.findFirst({
-        where: { id: query.branchId, tenantId },
-        select: { id: true },
-      });
-      if (!branch) {
-        throw new NotFoundException({ code: 'BRANCH_NOT_FOUND', message: 'Unidade não encontrada.' });
-      }
-    }
+    const scope = await this.listScope(user, query.branchId);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
     const where: Prisma.OrderWhereInput = {
-      tenantId,
+      ...scope,
       ...(query.status ? { status: query.status } : {}),
-      ...(query.branchId
-        ? { branchId: query.branchId }
-        : allowedBranchIds
-          ? { branchId: { in: allowedBranchIds } }
-          : {}),
     };
 
     const [total, orders] = await this.prisma.$transaction([
@@ -95,6 +81,64 @@ export class OrdersService {
     return {
       data: orders.map((o) => this.toListItemDto(o)),
       meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    };
+  }
+
+  // The kitchen board in ONE request: the four in-progress statuses, each with its newest
+  // orders and its total. The screen used to ask for each status separately, every few
+  // seconds; with the per-address request limit that left room for a single kitchen screen per
+  // network. Same scope as the list above (tenant from the token, branches the caller may see),
+  // same order (newest first) and the same item shape, so nothing changes in what is shown.
+  async boardForUser(user: AuthenticatedRequestUser, query: OrdersBoardQueryDto): Promise<OrdersBoardResponseDto> {
+    const scope = await this.listScope(user, query.branchId);
+    const results = await this.prisma.$transaction(
+      ORDER_BOARD_STATUSES.flatMap((status) => [
+        this.prisma.order.count({ where: { ...scope, status } }),
+        this.prisma.order.findMany({
+          where: { ...scope, status },
+          orderBy: { createdAt: 'desc' },
+          take: ORDER_BOARD_COLUMN_LIMIT,
+          include: { items: true, delivery: deliverySummarySelect, _count: { select: { items: true } } },
+        }),
+      ]),
+    );
+    return {
+      columnLimit: ORDER_BOARD_COLUMN_LIMIT,
+      columns: ORDER_BOARD_STATUSES.map((status, index) => ({
+        status,
+        total: results[index * 2] as number,
+        data: (results[index * 2 + 1] as OrderWithItemsAndCount[]).map((o) => this.toListItemDto(o)),
+      })),
+    };
+  }
+
+  // Which orders a listing may show: always the caller's tenant (from the JWT), narrowed to the
+  // branch asked for, or to the branches the caller is linked to. Shared by the list and the
+  // board so the two can never disagree about who sees what.
+  private async listScope(user: AuthenticatedRequestUser, branchId?: string): Promise<Prisma.OrderWhereInput> {
+    const tenantId = user.tenantId;
+    const allowedBranchIds = await this.branchAccess.accessibleBranchIds(user);
+    if (branchId && allowedBranchIds && !allowedBranchIds.includes(branchId)) {
+      throw new ForbiddenException({
+        code: 'BRANCH_ACCESS_DENIED',
+        message: 'Você não tem acesso a esta unidade.',
+      });
+    }
+    // OWNER/ADMIN have no branch list to be checked against, so the branch itself is checked:
+    // one that is not of this tenant is "not found", like in every other module, instead of an
+    // empty page. (Any status: the history of a deactivated branch stays readable.)
+    if (branchId && !allowedBranchIds) {
+      const branch = await this.prisma.branch.findFirst({
+        where: { id: branchId, tenantId },
+        select: { id: true },
+      });
+      if (!branch) {
+        throw new NotFoundException({ code: 'BRANCH_NOT_FOUND', message: 'Unidade não encontrada.' });
+      }
+    }
+    return {
+      tenantId,
+      ...(branchId ? { branchId } : allowedBranchIds ? { branchId: { in: allowedBranchIds } } : {}),
     };
   }
 

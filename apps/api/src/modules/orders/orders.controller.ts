@@ -4,7 +4,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { OrdersService } from './orders.service';
-import { ListOrdersQueryDto } from './dto/list-orders-query.dto';
+import { ListOrdersQueryDto, OrdersBoardQueryDto } from './dto/list-orders-query.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
 import { SetOrderCustomerDto } from './dto/set-order-customer.dto';
 
@@ -19,6 +19,14 @@ export class OrdersController {
   @ApiOperation({ summary: 'Lista pedidos do tenant autenticado (paginado, filtrável por status)' })
   findAll(@CurrentUser() user: AuthenticatedRequestUser, @Query() query: ListOrdersQueryDto) {
     return this.ordersService.findAllForUser(user, query);
+  }
+
+  // Declared before ':id' so "board" is never taken for an order id.
+  @Get('board')
+  @RequirePermissions('orders.read')
+  @ApiOperation({ summary: 'Quadro da cozinha: pedidos em andamento, uma coluna por status, em uma chamada' })
+  board(@CurrentUser() user: AuthenticatedRequestUser, @Query() query: OrdersBoardQueryDto) {
+    return this.ordersService.boardForUser(user, query);
   }
 
   @Get(':id')

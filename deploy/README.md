@@ -94,7 +94,7 @@ docker compose -f deploy/compose.yml --profile e2e run --rm e2e
 
 Roda a suíte completa dentro de um container, contra um banco **separado** no PostgreSQL desta pilha
 (`<POSTGRES_DB>_e2e`, criado na primeira execução). O banco em que você está testando o sistema não
-recebe nada. Resultado em 2026-10-10: 45 suítes, 757 testes, 0 falhas.
+recebe nada. Resultado em 2026-10-10: 46 suítes, 777 testes, 0 falhas.
 
 ## Usar as imagens em uma hospedagem
 
@@ -180,7 +180,14 @@ tentativa. Antes da correção, com `TRUST_PROXY_HOPS=1`, o endereço forjado er
   que ela envia à API não foi medido.
 - **Limites em memória, por instância da API.** 10 logins, 30 renovações de sessão e 100 requisições
   por rota, por minuto e por endereço. Aparelhos atrás do mesmo roteador, vistos de fora, têm o
-  mesmo endereço público e dividem esses limites.
+  mesmo endereço público e **dividem esses limites**: eles valem, na prática, por restaurante.
+  O que cada tela gasta (medido nesta pilha em 2026-10-10): a Cozinha faz 12 requisições por minuto
+  na rota do quadro (`/orders/board`, uma por leitura); todo aparelho com o painel aberto faz 3 por
+  minuto na rota de pedidos (o aviso de pedidos novos) e 2 na do caixa; a lista de Pedidos soma 4.
+  Cinco telas de cozinha mais três aparelhos na lista de Pedidos ficaram em 60 e 36 de 100, sem
+  nenhuma recusa. Passando de cerca de 8 telas de cozinha, ou de umas 30 telas no total, no mesmo
+  endereço, a API volta a responder `429` e o endereço fica bloqueado nessa rota por um minuto.
+  Limitar por usuário em vez de por endereço é uma decisão ainda não tomada.
 - **Cookie de sessão exige HTTPS fora de `localhost`.** Com `NODE_ENV=production` o cookie sai com
   `Secure`. Em `http://localhost:3000` funciona (validado no Chrome); em `http://<IP-da-rede>:3000`,
   aberto de um celular, o navegador não guarda o cookie e o login não se mantém (comportamento padrão

@@ -266,7 +266,13 @@ O `tenantId` do usuário autenticado vem **exclusivamente** do payload do JWT
   login e registro usam `AUTH_RATE_LIMIT_PER_MINUTE` (padrão 10), refresh e
   logout 30, prévia pública de cupom 20. O contador é em memória, por instância
   (com mais de uma instância os limites se multiplicam; mover para o Redis é
-  pendência conhecida)
+  pendência conhecida). Passado o limite, o endereço fica bloqueado naquela
+  rota por um minuto. "Por endereço" é, na prática, por restaurante: os
+  aparelhos de um mesmo Wi-Fi saem por um endereço só. Por isso as telas que
+  consultam sozinhas gastam pouco: a Cozinha lê o quadro inteiro em uma
+  requisição (`GET /orders/board`, 12 por minuto por tela, em vez de 48 na
+  rota da lista), e o frontend não repete sozinho uma requisição que a API
+  recusou (4xx, incluindo `429`); só falha de rede e 5xx são repetidas
 - `TRUST_PROXY_HOPS` — quantos proxies reversos na frente da API têm a entrada
   de `X-Forwarded-For` aceita como endereço do cliente (padrão 0 = nenhum). É
   um número, nunca "confiar em tudo": com o valor errado, ou todos os clientes

@@ -107,10 +107,10 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 45 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, equipe e senhas, cardápio, pedidos, KDS, PDV, caixa, estorno de venda em dinheiro, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback, fiado, relatórios e a cadeia financeira do pedido
+pnpm --filter api test:e2e    # e2e: 46 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, equipe e senhas, cardápio, pedidos, KDS e quadro da cozinha, PDV, caixa, estorno de venda em dinheiro, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback, fiado, relatórios e a cadeia financeira do pedido
 ```
 
-Resultado em 2026-10-10: API unit 297, API e2e 757 (45 suítes), web unit 278, sem falhas — nesta
+Resultado em 2026-10-10: API unit 297, API e2e 777 (46 suítes), web unit 312, sem falhas — nesta
 máquina, em um clone limpo seguindo este README e dentro de um container Linux
 (`deploy/README.md`).
 

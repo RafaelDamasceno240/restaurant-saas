@@ -62,6 +62,19 @@ export class OrderListResponseDto {
   @ApiProperty() meta!: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
+// One column of the kitchen board: the newest orders in that status (capped) and how many
+// there are in all, so the screen can say when it is not showing everything.
+export class OrdersBoardColumnDto {
+  @ApiProperty({ enum: OrderStatus }) status!: OrderStatus;
+  @ApiProperty({ type: [OrderListItemDto] }) data!: OrderListItemDto[];
+  @ApiProperty() total!: number;
+}
+
+export class OrdersBoardResponseDto {
+  @ApiProperty({ type: [OrdersBoardColumnDto] }) columns!: OrdersBoardColumnDto[];
+  @ApiProperty({ description: 'Máximo de pedidos devolvidos por coluna' }) columnLimit!: number;
+}
+
 export class OrderDetailDto {
   @ApiProperty() id!: string;
   @ApiProperty() orderNumber!: string;

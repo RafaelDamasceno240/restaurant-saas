@@ -29,3 +29,9 @@ export class ListOrdersQueryDto {
   @Max(100)
   pageSize?: number;
 }
+
+// The kitchen board takes no status, page or size: what it shows is fixed (see
+// ORDER_BOARD_STATUSES), so a client cannot turn it into an unbounded listing.
+export class OrdersBoardQueryDto {
+  @ApiPropertyOptional() @IsOptional() @IsUUID() branchId?: string;
+}
