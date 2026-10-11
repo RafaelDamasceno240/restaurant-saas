@@ -10,7 +10,8 @@
 #   - DATABASE_URL and REDIS_URL are built here from the service names, never read from the
 #     environment: the stack cannot be pointed at an existing or external database by accident;
 #   - PostgreSQL and Redis publish no port: only the other containers reach them;
-#   - API and web are published on BIND_ADDRESS, 127.0.0.1 unless you change it.
+#   - the web is published on BIND_ADDRESS, 127.0.0.1 unless you change it;
+#   - the API is published on 127.0.0.1 only, for health checks: browsers go through the web.
 name: restaurant-saas-stack
 
 x-database-url: &database-url postgresql://${POSTGRES_USER:?set POSTGRES_USER in deploy/.env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB in deploy/.env}?schema=public
@@ -72,11 +73,11 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in deploy/.env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in deploy/.env}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
-      # Nobody in front of the API is trusted to say who the client is. The web container is
-      # the only thing in front of it here, and Next's /api rewrite sends no X-Forwarded-For
-      # (measured, see deploy/README.md): with 1 the API would gain nothing and a direct caller
-      # could invent an address.
-      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      # How many proxies stand between the browser and the API. Here exactly one: the web
+      # container, whose server appends the browser's address to X-Forwarded-For. Put a TLS
+      # proxy in front of the web and this becomes 2. It must be the exact number: too low and
+      # every device shares one address, too high and a client can forge its own.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
       AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-10}
     depends_on:
       postgres:
@@ -86,7 +87,10 @@ services:
       migrate:
         condition: service_completed_successfully
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-4000}:4000"
+      # Always this machine only, whatever BIND_ADDRESS says: it is here for health checks.
+      # Browsers go through the web. Anything that reached the API directly would write its
+      # own X-Forwarded-For, and the API would believe it (TRUST_PROXY_HOPS above).
+      - "127.0.0.1:${API_PORT:-4000}:4000"
     stop_grace_period: 15s
 
   web:

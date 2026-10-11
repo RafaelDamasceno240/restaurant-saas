@@ -56,6 +56,9 @@ COPY --from=prod-deps --chown=node:node /app /app
 COPY --from=build --chown=node:node /app/apps/web/.next /app/apps/web/.next
 COPY --chown=node:node apps/web/public /app/apps/web/public
 COPY --chown=node:node apps/web/next.config.js /app/apps/web/next.config.js
+# The HTTP server in front of Next: appends each client's address to X-Forwarded-For.
+COPY --chown=node:node apps/web/server.js /app/apps/web/server.js
+COPY --chown=node:node apps/web/server /app/apps/web/server
 WORKDIR /app/apps/web
 USER node
 EXPOSE 3000
@@ -63,4 +66,4 @@ EXPOSE 3000
 # the API (which answers 401 to an anonymous /auth/me; a 5xx means the proxy cannot reach it).
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
   CMD node -e "const base = 'http://127.0.0.1:3000'; Promise.all([fetch(base + '/login'), fetch(base + '/api/auth/me')]).then(([page, api]) => process.exit(page.ok && api.status === 401 ? 0 : 1)).catch(() => process.exit(1))"
-CMD ["node", "node_modules/next/dist/bin/next", "start", "-p", "3000"]
+CMD ["node", "server.js"]

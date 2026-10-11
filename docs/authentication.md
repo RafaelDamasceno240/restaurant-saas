@@ -274,6 +274,19 @@ O `tenantId` do usuário autenticado vem **exclusivamente** do payload do JWT
   escolhe o próprio endereço (proxy contado a mais). O valor certo depende da
   plataforma e precisa ser conferido no ambiente real: depois de um login pelo
   site, `refresh_tokens.ip` tem de mostrar o IP público de quem acessou
+- **Endereço do cliente.** O navegador só fala com o frontend, então o
+  frontend é um proxy na frente da API e **conta em `TRUST_PROXY_HOPS`**. O
+  `/api` do Next, sozinho, não envia `X-Forwarded-For` (ou repassa o que o
+  cliente mandou); por isso o frontend sobe com `apps/web/server.js`, que
+  acrescenta ao cabeçalho o endereço de quem conectou nele, sem substituir
+  nem interpretar o que chegou. Navegador → frontend → API = 1; com um proxy
+  TLS ou balanceador na frente do frontend = 2. A API só pode ser alcançável
+  por esses proxies: quem a chama direto escreve o próprio cabeçalho. Os
+  cenários (aparelhos diferentes, mesmo aparelho, cabeçalho forjado, um e
+  dois proxies, contagem errada para menos e para mais, chamada direta) estão
+  em `test/trust-proxy.e2e-spec.ts` e em `apps/web/server/*.test.ts`. Na
+  Vercel o `/api` é executado pela plataforma e `server.js` não roda: o que
+  ela envia à API precisa ser medido
 - `ValidationPipe({ whitelist: true, forbidNonWhitelisted: true })` — qualquer
   campo não declarado no DTO é rejeitado, mitigando mass assignment
 - Segredos apenas via variáveis de ambiente, nunca hardcoded; `.env` está no

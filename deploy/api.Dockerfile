@@ -88,6 +88,8 @@ CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/prisma/se
 # database of its own, never one that is in use. ----
 FROM build AS e2e
 ENV NODE_ENV=test
+# trust-proxy.e2e-spec.ts checks the API against the header the frontend's server really sends.
+COPY apps/web/server /app/apps/web/server
 WORKDIR /app/apps/api
 USER node
 CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/prisma/seed.js && node_modules/.bin/jest --config ./test/jest-e2e.json --ci --cacheDirectory /tmp/jest"]

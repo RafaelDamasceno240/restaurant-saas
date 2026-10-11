@@ -37,7 +37,8 @@ O primeiro build leva alguns minutos. A ordem de partida é: PostgreSQL e Redis 
 job `migrate` termina com sucesso → API saudável → web.
 
 - Web: http://localhost:3000
-- API: http://localhost:4000 (só para verificação; o navegador fala apenas com o web, em `/api`)
+- API: http://localhost:4000 (só para verificação e só nesta máquina; o navegador fala apenas com o
+  web, em `/api`)
 
 O primeiro restaurante é criado em http://localhost:3000/register.
 
@@ -124,23 +125,70 @@ Dockerfiles já declaram `HEALTHCHECK`.
 - Processo como usuário `node`, não root.
 - Nenhum `.env` entra na imagem.
 
+## Endereço do cliente (`TRUST_PROXY_HOPS`)
+
+O navegador nunca chama a API: chama o web, que repassa `/api` para ela. A API precisa saber quem é
+cada aparelho para os limites de requisição, a auditoria e `refresh_tokens.ip`. O `/api` do Next,
+sozinho, não informa isso: não envia `X-Forwarded-For`, ou repassa o que o próprio cliente mandou.
+
+Por isso o web sobe com um servidor próprio (`apps/web/server.js`) que **acrescenta ao
+`X-Forwarded-For` o endereço real de quem conectou nele**. Ele nunca substitui o cabeçalho nem
+confia no que chegou: o que o cliente escreveu fica à esquerda e não vale nada, porque a API conta
+`TRUST_PROXY_HOPS` entradas **a partir da direita**, e essas foram escritas por proxies.
+
+`TRUST_PROXY_HOPS` é o número de proxies entre o navegador e a API, **contando o web**:
+
+| Caminho | Valor |
+| --- | --- |
+| navegador → web → API (este Compose) | 1 |
+| navegador → proxy TLS ou balanceador → web → API | 2 |
+| cada proxy a mais na frente | +1 |
+
+Tem de ser o número exato. Os três erros possíveis estão fixados em teste
+(`apps/api/test/trust-proxy.e2e-spec.ts`):
+
+- **a menos**: seguro, mas todos os aparelhos viram um endereço só e dividem os limites;
+- **a mais**: inseguro — a API acredita em uma entrada escrita pelo cliente;
+- **API alcançável por fora dos proxies**: quem chega nela direto escreve o próprio cabeçalho, e a
+  API acredita. Por isso este Compose publica a API **apenas em 127.0.0.1**, qualquer que seja
+  `BIND_ADDRESS`. Em uma hospedagem, deixe a API sem endereço público (rede privada entre web e
+  API). Se ela tiver endereço público, um chamador direto consegue forjar o endereço e escapar dos
+  limites por endereço.
+
+Conferir depois de entrar pelo web em dois aparelhos:
+
+```bash
+docker compose -f deploy/compose.yml exec postgres sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "select ip, count(*) from refresh_tokens group by 1"'
+```
+
+Tem de aparecer o endereço de cada aparelho. Nunca o do container do web, e nunca um valor mandado
+no cabeçalho. Abrindo do próprio computador, o endereço é o do gateway da rede Docker.
+
+Medido nesta pilha em 2026-10-10, com dois endereços reais de origem e limite de 3 logins por
+minuto: os dois foram gravados com o próprio endereço, com e sem cabeçalho forjado; o primeiro
+recebeu `429` na quarta tentativa e continuou recebendo ao forjar três cabeçalhos diferentes; o
+segundo não foi afetado, nem ao forjar o endereço do primeiro, e recebeu `429` na própria quarta
+tentativa. Antes da correção, com `TRUST_PROXY_HOPS=1`, o endereço forjado era o gravado.
+
 ## Limites conhecidos
 
-- **A API não sabe o endereço de quem acessa pelo web.** O `/api` do Next (em `next start`) não envia
-  `X-Forwarded-For` (medido: só `x-forwarded-host`). Para a API, todos os navegadores são um único
-  endereço, o do web. Consequência: os limites por endereço valem para **o restaurante inteiro
-  junto** — 10 logins por minuto, 30 renovações de sessão por minuto e 100 requisições por minuto em
-  cada rota — e o endereço gravado em `refresh_tokens.ip` e na auditoria é o do web. Com vários
-  aparelhos ao mesmo tempo isso pode devolver `429`. Corrigir exige mudança de código (fazer o web
-  repassar o endereço, ou limitar por usuário) e ainda não foi feito. Por isso `TRUST_PROXY_HOPS=0`.
+- **O endereço do cliente depende de `TRUST_PROXY_HOPS` estar certo** e de a API não ser alcançável
+  por fora do web (seção acima). Só foi medido neste Compose. Em uma hospedagem, o que o balanceador
+  da plataforma faz com o `X-Forwarded-For` (acrescentar ou sobrescrever) precisa ser conferido com a
+  consulta acima. Na Vercel o `/api` é executado pela plataforma e `apps/web/server.js` não roda: o
+  que ela envia à API não foi medido.
+- **Limites em memória, por instância da API.** 10 logins, 30 renovações de sessão e 100 requisições
+  por rota, por minuto e por endereço. Aparelhos atrás do mesmo roteador, vistos de fora, têm o
+  mesmo endereço público e dividem esses limites.
 - **Cookie de sessão exige HTTPS fora de `localhost`.** Com `NODE_ENV=production` o cookie sai com
   `Secure`. Em `http://localhost:3000` funciona (validado no Chrome); em `http://<IP-da-rede>:3000`,
   aberto de um celular, o navegador não guarda o cookie e o login não se mantém (comportamento padrão
   dos navegadores; não testado aqui). Teste em aparelhos pede um endereço com HTTPS.
 - **Uma instância da API.** O limite de requisições é em memória.
 - **Sem backup.** O volume `pgdata` é o único lugar em que os dados desta pilha existem.
-- **`BIND_ADDRESS`**: mudar de `127.0.0.1` publica API e web na rede. PostgreSQL e Redis continuam sem
-  porta publicada em qualquer caso.
+- **`BIND_ADDRESS`**: mudar de `127.0.0.1` publica o web na rede. A API continua só em `127.0.0.1`,
+  e PostgreSQL e Redis continuam sem porta publicada.
 - **Tamanho das imagens**: API 531 MB, web 949 MB, migrator 1,05 GB. Não foram otimizadas.
 - A API encerra com código 143 no `stop`: o Nest termina as requisições em andamento, desconecta do
   banco e reenvia o sinal recebido.

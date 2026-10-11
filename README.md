@@ -199,14 +199,19 @@ keep-alive), então a plataforma precisa dar esse tempo antes do `SIGKILL`.
 Variável: `API_URL` = URL pública da API **com `/v1`**, definida para o build
 e para a execução. Não existe mais `NEXT_PUBLIC_API_URL`.
 
+Start: `pnpm --filter web start` (`node server.js`, porta em `PORT`, padrão 3000). É o servidor do
+Next com uma diferença: acrescenta ao `X-Forwarded-For` o endereço de quem conectou, antes de o
+`/api` repassar a requisição à API. O frontend conta, portanto, como um proxy em
+`TRUST_PROXY_HOPS`.
+
 **Conferir no ambiente real antes de abrir para usuários**
 
-- **Endereço do cliente.** Medido em 2026-10-10 com o frontend em `next start`: o `/api` do Next
-  **não envia `X-Forwarded-For`** à API. Nessa montagem a API enxerga todos os navegadores como um
-  único endereço (o do frontend), qualquer que seja `TRUST_PROXY_HOPS`, e os limites por endereço
-  (10 logins, 30 renovações de sessão e 100 requisições por rota, por minuto) valem para todos os
-  usuários juntos. Ver `deploy/README.md`, "Limites conhecidos". Em outra plataforma de frontend o
-  comportamento pode ser diferente e precisa ser medido:
+- **Endereço do cliente.** `TRUST_PROXY_HOPS` é o número exato de proxies entre o navegador e a
+  API, contando o frontend: 1 quando o navegador abre o frontend direto, 2 com um proxy TLS ou
+  balanceador na frente dele. A menos, todos os aparelhos dividem os limites; a mais, o cliente
+  consegue forjar o próprio endereço. A API não pode ser alcançável por fora desses proxies. Ver
+  `deploy/README.md`, "Endereço do cliente". Na Vercel o `/api` é executado pela plataforma (o
+  `server.js` não roda) e o que ela envia à API precisa ser medido:
 - `TRUST_PROXY_HOPS`: faça login pelo site e veja `refresh_tokens.ip`. Tem de
   ser o seu IP público. Se aparecer um endereço do proxy ou da plataforma do
   frontend, todos os usuários estão dividindo o mesmo limite de requisições
