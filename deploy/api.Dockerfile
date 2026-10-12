@@ -1,20 +1,22 @@
 # syntax=docker/dockerfile:1
 
-# API image (NestJS + Prisma). Build context: the repository root.
+# API image (NestJS + Prisma): the PRODUCTION image, and nothing else. Build context: the
+# repository root.
 #
-#   docker build -f deploy/api.Dockerfile --target runtime  -t restaurant-saas-api .
-#   docker build -f deploy/api.Dockerfile --target migrator -t restaurant-saas-api-migrator .
+#   docker build -f deploy/api.Dockerfile -t restaurant-saas-api .
 #
-# Two images come out of this file on purpose:
-#   runtime   what serves requests. Production dependencies only, NODE_ENV=production, non-root.
-#             It NEVER touches the schema: starting it does not run migrations or the seed.
-#   migrator  a one-shot job with the Prisma CLI: `prisma migrate deploy` and then the seed of
-#             roles and permissions (idempotent, no tenants, users or demo data). It runs against
-#             whatever DATABASE_URL it is given, so whoever starts it decides which database.
-# A third target, e2e, is a test tool and is never deployed (see deploy/README.md).
+# This file has one deliverable, and it is the LAST stage on purpose: a build with no target
+# (plain `docker build`, or a hosting platform that does not let you choose one) produces the
+# image that serves requests. Production dependencies only, NODE_ENV=production, non-root.
+# Starting it runs the API and nothing else: it NEVER applies migrations, runs the seed or
+# runs tests. Those live in files of their own, so no build of this one can select them:
+#   deploy/api.migrate.Dockerfile   one-shot job: migrations and the seed of roles/permissions
+#   deploy/api.e2e.Dockerfile       test tool, never deployed
+# `node deploy/verify-images.js` checks all of this against the images Docker really builds.
 #
 # Versions are pinned here and nowhere else. Node 24.14.1 and pnpm 9.12.0 are the versions the
-# test suites were run with; package.json asks for Node >= 20.
+# test suites were run with; package.json asks for Node >= 20. The three API Dockerfiles and
+# deploy/web.Dockerfile must pin the same versions (verify-images.js fails if they differ).
 ARG NODE_VERSION=24.14.1
 ARG PNPM_VERSION=9.12.0
 
@@ -59,11 +61,13 @@ RUN cp -rL "$(dirname "$(node -p "require.resolve('@prisma/client/package.json',
 FROM manifests AS prod-deps
 ENV NODE_ENV=production
 RUN pnpm install --frozen-lockfile --prod --ignore-scripts --filter "api..."
-RUN --mount=type=bind,from=build,source=/prisma-client,target=/prisma-client \
-  dest="$(dirname "$(node -p "require.resolve('@prisma/client/package.json', { paths: ['/app/apps/api'] })")")/../../.prisma" \
-  && mkdir -p "$dest" && rm -rf "$dest/client" && cp -r /prisma-client "$dest/client"
+# The client generated in the build stage, put where this install expects it. A plain COPY
+# (no BuildKit-only mount), so any builder that understands multi-stage files can build this.
+COPY --from=build /prisma-client /tmp/prisma-client
+RUN dest="$(dirname "$(node -p "require.resolve('@prisma/client/package.json', { paths: ['/app/apps/api'] })")")/../../.prisma" \
+  && mkdir -p "$dest" && rm -rf "$dest/client" && mv /tmp/prisma-client "$dest/client"
 
-# ---- runtime ----
+# ---- runtime: the image that serves requests. Keep this the LAST stage of the file. ----
 FROM base AS runtime
 ENV NODE_ENV=production
 ENV PORT=4000
@@ -71,25 +75,11 @@ COPY --from=prod-deps --chown=node:node /app /app
 COPY --from=build --chown=node:node /app/apps/api/dist /app/apps/api/dist
 WORKDIR /app/apps/api
 USER node
+# Refuse to produce an image whose Prisma Client was not generated for this OS: without it the
+# API would only fail at its first query, after the platform already called the deploy done.
+RUN node -e "const fs = require('fs'), path = require('path'); const client = require('@prisma/client'); const dir = path.join(path.dirname(require.resolve('@prisma/client/package.json')), '..', '..', '.prisma', 'client'); if (!client.Prisma || !client.Prisma.ModelName || !fs.readdirSync(dir).some((file) => file.startsWith('libquery_engine-'))) { console.error('The generated Prisma Client is missing from the runtime image.'); process.exit(1); }"
 EXPOSE 4000
 # Ready means PostgreSQL and Redis answered, not that the port is open.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
   CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 4000) + '/health/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 CMD ["node", "dist/src/main.js"]
-
-# ---- migrator ----
-FROM build AS migrator
-ENV NODE_ENV=production
-WORKDIR /app/apps/api
-USER node
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/prisma/seed.js"]
-
-# ---- e2e: the end-to-end suite on Linux. It creates tenants and data on every run: give it a
-# database of its own, never one that is in use. ----
-FROM build AS e2e
-ENV NODE_ENV=test
-# trust-proxy.e2e-spec.ts checks the API against the header the frontend's server really sends.
-COPY apps/web/server /app/apps/web/server
-WORKDIR /app/apps/api
-USER node
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/prisma/seed.js && node_modules/.bin/jest --config ./test/jest-e2e.json --ci --cacheDirectory /tmp/jest"]

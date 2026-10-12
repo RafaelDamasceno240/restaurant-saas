@@ -43,14 +43,15 @@ services:
       timeout: 5s
       retries: 20
 
-  # One-shot job: applies the migrations of prisma/migrations and the seed of roles and
-  # permissions to THIS stack's database, then exits. The API only starts if it succeeded.
-  # The seed creates no tenant, user or demo data and can run again safely.
+  # One-shot job (deploy/migrate.js): applies the pending migrations of prisma/migrations and
+  # then the seed of roles and permissions to THIS stack's database, and exits. The API only
+  # starts if it succeeded. The seed creates no tenant, user or demo data and can run again
+  # safely. One step at a time:
+  #   docker compose -f deploy/compose.yml run --rm migrate node /app/deploy/migrate.js status
   migrate:
     build:
       context: ..
-      dockerfile: deploy/api.Dockerfile
-      target: migrator
+      dockerfile: deploy/api.migrate.Dockerfile
     restart: "no"
     environment:
       DATABASE_URL: *database-url
@@ -58,11 +59,12 @@ services:
       postgres:
         condition: service_healthy
 
+  # No build target here or on the web, on purpose: this stack runs whatever a build with no
+  # target produces, which is what a platform that cannot choose a stage would run.
   api:
     build:
       context: ..
       dockerfile: deploy/api.Dockerfile
-      target: runtime
     restart: unless-stopped
     init: true
     environment:
@@ -97,7 +99,6 @@ services:
     build:
       context: ..
       dockerfile: deploy/web.Dockerfile
-      target: runtime
       args:
         # The API as seen from the web container, written into the build (the /api rewrite).
         API_URL: http://api:4000/v1
@@ -119,8 +120,7 @@ services:
     profiles: ["e2e"]
     build:
       context: ..
-      dockerfile: deploy/api.Dockerfile
-      target: e2e
+      dockerfile: deploy/api.e2e.Dockerfile
     restart: "no"
     environment:
       NODE_ENV: test
