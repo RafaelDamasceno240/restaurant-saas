@@ -108,3 +108,74 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Tema do cardápio público (vitrine do restaurante): claro, para fotos de comida, com a cor da
+   marca do RESTAURANTE em --primary (definida por restaurante em app/menu/[slug]/layout.tsx,
+   lib/menu-display.ts). Sem cor configurada, usa o caramelo da plataforma. Mesmos nomes de
+   tokens do .theme-app: os componentes não mudam, só os valores. */
+.theme-menu {
+  color-scheme: light;
+
+  --background: 245 245 246;
+  --foreground: 28 27 31;
+
+  --surface: 255 255 255;
+  --surface-2: 244 244 246;
+  --surface-hover: 238 238 241;
+  --sidebar: 255 255 255;
+
+  --border: 230 230 234;
+  --border-strong: 208 208 214;
+
+  --primary: var(--brand-primary);
+  --primary-foreground: 255 255 255;
+  --primary-hover: 134 81 20;
+
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-foreground);
+
+  --muted: 244 244 246;
+  --muted-foreground: 98 98 108; /* 6:1 sobre branco */
+  --subtle: 128 128 138;
+
+  --success: 21 128 61;
+  --warning: 161 98 7;
+  --danger: 200 30 45;
+  --danger-foreground: 255 255 255;
+  --info: 37 99 235;
+
+  --font-heading: var(--font-sans);
+
+  background-color: rgb(var(--background));
+  color: rgb(var(--foreground));
+  font-family: var(--font-sans);
+  font-feature-settings: 'tnum' 1;
+}
+
+.theme-menu h1,
+.theme-menu h2,
+.theme-menu h3 {
+  letter-spacing: -0.015em;
+}
+
+.theme-menu ::selection {
+  background: rgb(var(--primary) / 0.2);
+}
+
+/* Faixas roláveis na horizontal (categorias, destaques) sem barra visível. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-menu *,
+  .theme-menu *::before,
+  .theme-menu *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

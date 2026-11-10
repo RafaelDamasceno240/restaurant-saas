@@ -38,59 +38,70 @@ enum RoleName {
 }
 
 model Tenant {
-  id        String       @id @default(uuid())
-  name      String
-  legalName String
-  document  String       @unique
-  slug      String       @unique
-  status    TenantStatus @default(TRIAL)
+  id           String       @id @default(uuid())
+  name         String
+  legalName    String
+  document     String       @unique
+  slug         String       @unique
+  status       TenantStatus @default(TRIAL)
   // IANA time zone of the restaurant. "Today" for due dates, overdue receivables and report
   // periods is the calendar day in this zone, never the server's.
-  timezone  String       @default("America/Sao_Paulo")
+  timezone     String       @default("America/Sao_Paulo")
   // Public profile of the brand, shown on the public menu. The contact, the address and the
   // opening hours belong to the branch that receives online orders (Branch).
-  description String?
+  description  String?
   // Instagram handle, without "@".
-  instagram   String?
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  instagram    String?
+  // Look of the public menu. The images live in media_assets (GET /public/media/:id) and
+  // brandColor ("#RRGGBB") only tints the public pages; NULL keeps the neutral defaults.
+  logoMediaId  String?
+  coverMediaId String?
+  brandColor   String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
-  branches          Branch[]
-  users             User[]
-  userRoles         UserRole[]
-  auditLogs         AuditLog[]
-  categories        Category[]
-  products          Product[]
-  orders            Order[]
-  deliveries        Delivery[]
-  cashSessions      CashRegisterSession[]
-  cashMovements     CashMovement[]
-  diningTables      DiningTable[]
-  tabs              Tab[]
-  tabRounds         TabRound[]
+  branches             Branch[]
+  users                User[]
+  userRoles            UserRole[]
+  auditLogs            AuditLog[]
+  categories           Category[]
+  products             Product[]
+  orders               Order[]
+  deliveries           Delivery[]
+  cashSessions         CashRegisterSession[]
+  cashMovements        CashMovement[]
+  diningTables         DiningTable[]
+  tabs                 Tab[]
+  tabRounds            TabRound[]
   tabItemCancellations TabItemCancellation[]
-  payments          Payment[]
-  inventoryItems    InventoryItem[]
-  inventoryBalances InventoryBalance[]
-  stockMovements    StockMovement[]
-  suppliers         Supplier[]
-  customers         Customer[]
-  coupons           Coupon[]
-  couponRedemptions CouponRedemption[]
-  purchases         Purchase[]
-  purchaseSequence  PurchaseSequence?
-  productRecipes    ProductRecipe[]
-  inventoryCounts   InventoryCount[]
-  loyaltyProgram    LoyaltyProgram?
-  loyaltyRewards    LoyaltyReward[]
-  loyaltyAccounts   LoyaltyAccount[]
-  loyaltyEntries    LoyaltyEntry[]
-  cashbackProgram   CashbackProgram?
-  cashbackAccounts  CashbackAccount[]
-  cashbackEntries   CashbackEntry[]
-  creditAccounts    CreditAccount[]
-  receivables       Receivable[]
-  receivableEntries ReceivableEntry[]
+  payments             Payment[]
+  inventoryItems       InventoryItem[]
+  inventoryBalances    InventoryBalance[]
+  stockMovements       StockMovement[]
+  suppliers            Supplier[]
+  customers            Customer[]
+  coupons              Coupon[]
+  couponRedemptions    CouponRedemption[]
+  purchases            Purchase[]
+  purchaseSequence     PurchaseSequence?
+  productRecipes       ProductRecipe[]
+  inventoryCounts      InventoryCount[]
+  loyaltyProgram       LoyaltyProgram?
+  loyaltyRewards       LoyaltyReward[]
+  loyaltyAccounts      LoyaltyAccount[]
+  loyaltyEntries       LoyaltyEntry[]
+  cashbackProgram      CashbackProgram?
+  cashbackAccounts     CashbackAccount[]
+  cashbackEntries      CashbackEntry[]
+  creditAccounts       CreditAccount[]
+  receivables          Receivable[]
+  receivableEntries    ReceivableEntry[]
+  mediaAssets          MediaAsset[]
+  optionGroups         OptionGroup[]
+  optionItems          OptionItem[]
+  productOptionGroups  ProductOptionGroup[]
+  logoMedia            MediaAsset?           @relation("TenantLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+  coverMedia           MediaAsset?           @relation("TenantCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
 
   @@map("tenants")
 }
@@ -117,9 +128,12 @@ model Branch {
 
   // Delivery settings (Fase 10). Defaults keep the behavior that existed before
   // the module: delivery accepted, no fee, no minimum.
-  deliveryEnabled       Boolean @default(true)
-  deliveryFeeCents      Int     @default(0)
-  deliveryMinOrderCents Int     @default(0)
+  deliveryEnabled        Boolean @default(true)
+  deliveryFeeCents       Int     @default(0)
+  deliveryMinOrderCents  Int     @default(0)
+  // Items subtotal from which the delivery fee is not charged (NULL = always charged). Compared
+  // with the subtotal BEFORE any coupon, like the minimum.
+  deliveryFreeAboveCents Int?
 
   // Weekly opening hours, validated by the API (modules/tenants/opening-hours.ts):
   // [{ "weekday": 0-6 (0 = Sunday), "opens": "HH:MM", "closes": "HH:MM" }], sorted, never
@@ -316,38 +330,149 @@ model Category {
   description  String?
   active       Boolean  @default(true)
   displayOrder Int      @default(0)
+  // Id of this row in the system it was imported from (menu importer); NULL when created here.
+  externalId   String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   products Product[]
 
+  @@unique([tenantId, externalId])
   @@index([tenantId])
   @@map("categories")
 }
 
 model Product {
-  id           String   @id @default(uuid())
-  tenantId     String
-  categoryId   String
-  name         String
-  description  String?
-  priceCents   Int
-  imageUrl     String?
-  active       Boolean  @default(true)
-  displayOrder Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String         @id @default(uuid())
+  tenantId            String
+  categoryId          String
+  name                String
+  description         String?
+  priceCents          Int
+  // Promotion: the full price shown struck through ("de R$ 35 por R$ 32"). Always above
+  // priceCents (CHECK); priceCents is still what is charged.
+  compareAtPriceCents Int?
+  imageUrl            String?
+  // An uploaded/imported photo (media_assets). When set it wins over imageUrl.
+  imageMediaId        String?
+  active              Boolean        @default(true)
+  // Shown on the public menu but cannot be ordered ("Esgotado"). `active = false` hides it.
+  soldOut             Boolean        @default(false)
+  // Listed again in the highlights strip at the top of the public menu.
+  featured            Boolean        @default(false)
+  badges              ProductBadge[] @default([])
+  displayOrder        Int            @default(0)
+  externalId          String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category   Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  orderItems OrderItem[]
-  tabItems   TabItem[]
-  recipe     ProductRecipe?
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category     Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  imageMedia   MediaAsset?          @relation("ProductImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
+  orderItems   OrderItem[]
+  tabItems     TabItem[]
+  recipe       ProductRecipe?
+  optionGroups ProductOptionGroup[]
 
+  @@unique([tenantId, externalId])
   @@index([tenantId])
   @@index([categoryId])
   @@map("products")
+}
+
+enum ProductBadge {
+  NEW
+  VEGETARIAN
+}
+
+// A set of add-ons/choices ("Turbine seu lanche!", "Refrigerante do combo"), reusable by many
+// products of the same tenant. The customer picks between minSelect and maxSelect units in
+// total (minSelect > 0 makes the group required); each option has its own maxQuantity.
+// Validated again by the API on every order: the client never prices anything.
+model OptionGroup {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  minSelect  Int      @default(0)
+  maxSelect  Int      @default(1)
+  active     Boolean  @default(true)
+  externalId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  options  OptionItem[]
+  products ProductOptionGroup[]
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@map("option_groups")
+}
+
+model OptionItem {
+  id           String   @id @default(uuid())
+  tenantId     String
+  groupId      String
+  name         String
+  description  String?
+  // Added to the product price for each unit chosen (0 = free choice).
+  priceCents   Int      @default(0)
+  maxQuantity  Int      @default(1)
+  active       Boolean  @default(true)
+  soldOut      Boolean  @default(false)
+  displayOrder Int      @default(0)
+  imageMediaId String?
+  externalId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group      OptionGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  imageMedia MediaAsset?       @relation("OptionImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
+  orderLines OrderItemOption[]
+
+  @@unique([tenantId, externalId])
+  @@index([groupId])
+  @@map("option_items")
+}
+
+model ProductOptionGroup {
+  tenantId     String
+  productId    String
+  groupId      String
+  displayOrder Int    @default(0)
+
+  tenant  Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  group   OptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([productId, groupId])
+  @@index([groupId])
+  @@index([tenantId])
+  @@map("product_option_groups")
+}
+
+// Images of the public menu (logo, cover, products, options), kept in the database so a backup
+// carries them and no file storage is needed. Content-addressed per tenant (sha256), served by
+// GET /public/media/:id with a long cache: a row is never rewritten.
+model MediaAsset {
+  id          String   @id @default(uuid())
+  tenantId    String
+  contentType String
+  sizeBytes   Int
+  sha256      String
+  data        Bytes
+  createdAt   DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products     Product[]    @relation("ProductImage")
+  options      OptionItem[] @relation("OptionImage")
+  tenantLogos  Tenant[]     @relation("TenantLogo")
+  tenantCovers Tenant[]     @relation("TenantCover")
+
+  @@unique([tenantId, sha256])
+  @@map("media_assets")
 }
 
 enum OrderStatus {
@@ -465,14 +590,37 @@ model OrderItem {
   // B9: the tab item this line bills (table checkout only). Unique: a tab item is charged at most
   // once, whatever happens.
   tabItemId           String? @unique
+  // The customer's note for this line ("sem cebola"), separate from the order's notes.
+  notes               String?
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  tabItem TabItem? @relation(fields: [tabItemId], references: [id], onDelete: SetNull)
+  order   Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  tabItem TabItem?          @relation(fields: [tabItemId], references: [id], onDelete: SetNull)
+  options OrderItemOption[]
 
   @@index([orderId])
   @@index([productId])
   @@map("order_items")
+}
+
+// The add-ons chosen for ONE unit of an order line, frozen at order time (names and prices are
+// snapshots, like the line itself). The line's unitPriceCents already includes them:
+// unitPriceCents = product price + sum(option unitPriceCents * quantity).
+model OrderItemOption {
+  id                 String  @id @default(uuid())
+  orderItemId        String
+  optionItemId       String?
+  groupNameSnapshot  String
+  optionNameSnapshot String
+  unitPriceCents     Int
+  quantity           Int
+
+  orderItem  OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  optionItem OptionItem? @relation(fields: [optionItemId], references: [id], onDelete: SetNull)
+
+  @@index([orderItemId])
+  @@index([optionItemId])
+  @@map("order_item_options")
 }
 
 // Operational state of a delivery, independent of the commercial OrderStatus.

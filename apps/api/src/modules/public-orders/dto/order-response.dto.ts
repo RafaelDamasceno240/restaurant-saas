@@ -3,12 +3,23 @@ import { FulfillmentType, OrderStatus, PaymentMethod } from '@prisma/client';
 
 // Explicit, hand-shaped response — never the raw Prisma row. No tenantId,
 // no internal ids beyond the order's own.
+// An add-on of the line, as it was charged (per unit of the line).
+export class OrderItemOptionResponseDto {
+  @ApiProperty() group!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty({ example: 4 }) unitPrice!: number;
+  @ApiProperty() quantity!: number;
+}
+
 export class OrderItemResponseDto {
   @ApiProperty() productId!: string;
   @ApiProperty() name!: string;
+  // Includes the add-ons of one unit.
   @ApiProperty({ example: 24.9 }) unitPrice!: number;
   @ApiProperty() quantity!: number;
   @ApiProperty({ example: 49.8 }) subtotal!: number;
+  @ApiPropertyOptional({ nullable: true }) notes!: string | null;
+  @ApiProperty({ type: [OrderItemOptionResponseDto] }) options!: OrderItemOptionResponseDto[];
 }
 
 export class OrderAddressResponseDto {

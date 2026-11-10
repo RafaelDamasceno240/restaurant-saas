@@ -3,6 +3,7 @@ import {
   FulfillmentType,
   Order,
   OrderItem,
+  OrderItemOption,
   OrderSource,
   OrderStatus,
   PaymentMethod,
@@ -28,6 +29,13 @@ import { CreditTerms, ReceivablesService } from '../receivables/receivables.serv
 import { isReceivableError } from '../receivables/receivable-errors';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import { MAX_UNITS_PER_PRODUCT, productOverUnitLimit } from '../../common/util/item-quantity.util';
+import {
+  ChosenOption,
+  PricedOption,
+  normalizeLineNote,
+  optionsSignature,
+  priceOptions,
+} from './option-pricing';
 
 // Orders that use the SAME limited coupon queue on its row lock, each holding a pooled
 // connection while it waits. Prisma's defaults (5 s to finish, 2 s to get a connection) are tuned
@@ -38,6 +46,16 @@ const ORDER_TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 export interface OrderCreationItemInput {
   productId: string;
   quantity: number;
+  // Add-ons for EACH unit of the line (ids and quantities only; priced by priceItems).
+  options?: ChosenOption[];
+  // The customer's note for this line ("sem cebola").
+  notes?: string | null;
+}
+
+// How priceItems treats the add-ons. The public checkout offers them and must satisfy every
+// required group; the PDV does not offer them yet (the product is sold at its base price).
+export interface PriceItemsOptions {
+  enforceRequiredOptions: boolean;
 }
 
 export interface OrderCreationAddressInput {
@@ -108,6 +126,9 @@ export interface PricedOrderItem {
   quantity: number;
   // B9: the tab item this line bills (table checkout only; UNIQUE in the database).
   tabItemId?: string;
+  // unitPriceCents already includes these (see option-pricing.ts).
+  options?: PricedOption[];
+  notes?: string | null;
 }
 
 export interface PricedOrderInput extends Omit<OrderCreationInput, 'items'> {
@@ -121,7 +142,10 @@ export interface PricedOrderInput extends Omit<OrderCreationInput, 'items'> {
   stockHandledByCaller?: boolean;
 }
 
-export type OrderWithItems = Order & { items: OrderItem[] };
+export type OrderWithItems = Order & { items: (OrderItem & { options: OrderItemOption[] })[] };
+
+// Every read of an order this service returns carries its lines with their add-ons.
+const ITEMS_WITH_OPTIONS = { items: { include: { options: true } } } as const;
 
 export interface OrderCreationResult {
   order: OrderWithItems;
@@ -175,7 +199,9 @@ export class OrderCreationService {
       });
     }
 
-    const pricedItems = await this.priceItems(input.tenantId, input.items);
+    const pricedItems = await this.priceItems(input.tenantId, input.items, {
+      enforceRequiredOptions: input.source === 'ONLINE',
+    });
 
     let result: OrderCreationResult;
     try {
@@ -211,12 +237,34 @@ export class OrderCreationService {
   // Anything not in this result set - wrong id, another tenant's product, or inactive - is simply
   // unavailable; the caller never learns which, to avoid leaking cross-tenant existence.
   // Client-supplied price/name for any item is structurally impossible to reach here:
-  // OrderCreationItemInput only ever carries productId + quantity. Shared by the order and by
-  // the coupon preview, so both always price the basket the same way.
-  async priceItems(tenantId: string, items: OrderCreationItemInput[]): Promise<PricedOrderItem[]> {
+  // OrderCreationItemInput only ever carries productId + quantity (+ option ids and quantities).
+  // Shared by the order and by the coupon preview, so both always price the basket the same way.
+  // A product marked "sold out" is unavailable too, and so is an add-on that is not one of the
+  // product's own (another product's, another tenant's, inactive or sold out).
+  async priceItems(
+    tenantId: string,
+    items: OrderCreationItemInput[],
+    { enforceRequiredOptions }: PriceItemsOptions = { enforceRequiredOptions: false },
+  ): Promise<PricedOrderItem[]> {
     const productIds = [...new Set(items.map((i) => i.productId))];
     const products = await this.prisma.product.findMany({
-      where: { id: { in: productIds }, tenantId, active: true },
+      where: { id: { in: productIds }, tenantId, active: true, soldOut: false },
+      include: {
+        optionGroups: {
+          where: { tenantId, group: { tenantId } },
+          orderBy: { displayOrder: 'asc' },
+          include: {
+            group: {
+              include: {
+                options: {
+                  where: { tenantId },
+                  orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+                },
+              },
+            },
+          },
+        },
+      },
     });
     const productById = new Map(products.map((p) => [p.id, p]));
 
@@ -239,11 +287,20 @@ export class OrderCreationService {
 
     return items.map((item) => {
       const product = productById.get(item.productId)!;
+      const priced = priceOptions(
+        product.name,
+        product.optionGroups.map((link) => link.group),
+        item.options ?? [],
+        enforceRequiredOptions,
+      );
+      if (!priced.ok) throw new BadRequestException(priced.error);
       return {
         productId: product.id,
         productNameSnapshot: product.name,
-        unitPriceCents: product.priceCents,
+        unitPriceCents: product.priceCents + priced.extraCents,
         quantity: item.quantity,
+        options: priced.options,
+        notes: normalizeLineNote(item.notes),
       };
     });
   }
@@ -257,8 +314,11 @@ export class OrderCreationService {
     items: OrderCreationItemInput[];
     couponCode: string;
     customerId: string | null;
+    enforceRequiredOptions?: boolean;
   }) {
-    const priced = await this.priceItems(input.tenantId, input.items);
+    const priced = await this.priceItems(input.tenantId, input.items, {
+      enforceRequiredOptions: input.enforceRequiredOptions ?? false,
+    });
     const subtotalCents = priced.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
     const applied = await this.coupons.preview({
       tenantId: input.tenantId,
@@ -285,15 +345,38 @@ export class OrderCreationService {
   private async findReplay(input: OrderCreationInput): Promise<OrderWithItems | null> {
     const existing = await this.prisma.order.findUnique({
       where: { tenantId_idempotencyKey: { tenantId: input.tenantId, idempotencyKey: input.idempotencyKey! } },
-      include: { items: true },
+      include: ITEMS_WITH_OPTIONS,
     });
     if (!existing) return null;
 
-    const signature = (items: { productId: string; quantity: number }[]) =>
+    // A line is its product, its quantity, its add-ons and its note.
+    const signature = (
+      items: {
+        productId: string;
+        quantity: number;
+        notes?: string | null;
+        options: { optionItemId: string | null; quantity: number }[];
+      }[],
+    ) =>
       items
-        .map((item) => `${item.productId}:${item.quantity}`)
+        .map(
+          (item) =>
+            `${item.productId}:${item.quantity}:${optionsSignature(item.options)}:${item.notes ?? ''}`,
+        )
         .sort()
         .join('|');
+    const requested = input.items.map((item) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      notes: normalizeLineNote(item.notes),
+      // The same option sent twice was stored once, with the quantities added up.
+      options: [
+        ...(item.options ?? []).reduce(
+          (sum, o) => sum.set(o.optionId, (sum.get(o.optionId) ?? 0) + o.quantity),
+          new Map<string, number>(),
+        ),
+      ].map(([optionItemId, quantity]) => ({ optionItemId, quantity })),
+    }));
     const sameRequest =
       existing.tabId === null &&
       existing.source === input.source &&
@@ -305,7 +388,7 @@ export class OrderCreationService {
       existing.customerId === (input.customerId ?? null) &&
       existing.couponCode === (input.couponCode ?? null) &&
       existing.cashbackUsedCents === (input.cashbackToUseCents ?? 0) &&
-      signature(existing.items) === signature(input.items);
+      signature(existing.items) === signature(requested);
     // A sale on account is also defined by how it is to be paid back: the same key with other
     // installments or another due date is another request, not a repetition.
     const sameTerms =
@@ -329,6 +412,8 @@ export class OrderCreationService {
       quantity: item.quantity,
       subtotalCents: item.unitPriceCents * item.quantity,
       tabItemId: item.tabItemId ?? null,
+      notes: item.notes ?? null,
+      options: { create: item.options ?? [] },
     }));
     const subtotalCents = orderItemsData.reduce((sum, i) => sum + i.subtotalCents, 0);
     const isDelivery = input.fulfillmentType === 'DELIVERY';
@@ -437,7 +522,7 @@ export class OrderCreationService {
         idempotencyKey: input.idempotencyKey,
         items: { create: orderItemsData },
       },
-      include: { items: true },
+      include: ITEMS_WITH_OPTIONS,
     });
 
     if (applied) {
@@ -535,13 +620,19 @@ export class OrderCreationService {
   ): Promise<DeliverySettings> {
     const branch = await tx.branch.findFirst({
       where: { id: branchId, tenantId },
-      select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+      select: {
+        deliveryEnabled: true,
+        deliveryFeeCents: true,
+        deliveryMinOrderCents: true,
+        deliveryFreeAboveCents: true,
+      },
     });
     if (!branch) throw new NotFoundException({ code: 'BRANCH_NOT_FOUND', message: 'Unidade não encontrada.' });
     return {
       enabled: branch.deliveryEnabled,
       feeCents: branch.deliveryFeeCents,
       minOrderCents: branch.deliveryMinOrderCents,
+      freeAboveCents: branch.deliveryFreeAboveCents,
     };
   }
 

@@ -194,11 +194,19 @@ export default function OrderDetailPage({ params }: PageProps) {
               <Card>
                 <CardHeader title="Itens" />
                 <ul className="divide-y divide-line">
-                  {order.items.map((item) => (
-                    <li key={item.productId} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                  {order.items.map((item, index) => (
+                    <li key={`${item.productId}-${index}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                       <span className="min-w-0 text-foreground">
                         <span className="font-semibold">{item.quantity}×</span> {item.name}
                         <span className="ml-1.5 text-xs text-subtle">({formatBRL(item.unitPrice)} un.)</span>
+                        {(item.options ?? []).map((option, i) => (
+                          <span key={i} className="block pl-5 text-xs text-muted-foreground">
+                            + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                            {option.name}
+                            {option.unitPrice > 0 ? ` (${formatBRL(option.unitPrice * option.quantity)})` : ''}
+                          </span>
+                        ))}
+                        {item.notes && <span className="block pl-5 text-xs italic text-warning">Obs.: {item.notes}</span>}
                       </span>
                       <span className="shrink-0 font-medium text-foreground">{formatBRL(item.subtotal)}</span>
                     </li>

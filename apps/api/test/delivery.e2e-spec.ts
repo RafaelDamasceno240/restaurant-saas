@@ -40,7 +40,10 @@ describe('Delivery (e2e)', () => {
   }
   type Ctx = Awaited<ReturnType<typeof setup>>;
 
-  const settings = (ctx: Ctx, body: Partial<{ enabled: boolean; feeCents: number; minOrderCents: number }> = {}) =>
+  const settings = (
+    ctx: Ctx,
+    body: Partial<{ enabled: boolean; feeCents: number; minOrderCents: number; freeAboveCents: number | null }> = {},
+  ) =>
     put(ctx.accessToken, '/v1/delivery/settings', {
       branchId: ctx.branchId,
       enabled: true,
@@ -165,8 +168,28 @@ describe('Delivery (e2e)', () => {
       const ctx = await setup();
       await settings(ctx, { feeCents: 750, minOrderCents: 2500 }).expect(200);
       const menu = (await request(server).get(`/v1/public/menu/${ctx.slug}`).expect(200)).body;
-      expect(menu.delivery).toEqual({ enabled: true, fee: 7.5, minOrder: 25 });
+      expect(menu.delivery).toEqual({ enabled: true, fee: 7.5, minOrder: 25, freeAbove: null });
       expect(JSON.stringify(menu)).not.toContain(ctx.tenantId);
+    });
+
+    it('free delivery from an items subtotal on: no fee at or above it, the fee below it', async () => {
+      const ctx = await setup();
+      // Product R$ 25: 2 units = R$ 50 (free from R$ 50), 1 unit = R$ 25 (pays R$ 3).
+      await settings(ctx, { feeCents: 300, freeAboveCents: 5000 }).expect(200);
+      const menu = (await request(server).get(`/v1/public/menu/${ctx.slug}`).expect(200)).body;
+      expect(menu.delivery).toMatchObject({ fee: 3, freeAbove: 50 });
+      const free = await publicOrder(ctx, {}, 2).expect(201);
+      expect(free.body).toMatchObject({ deliveryFee: 0, total: 50 });
+      const paid = await publicOrder(ctx, {}, 1).expect(201);
+      expect(paid.body).toMatchObject({ deliveryFee: 3, total: 28 });
+      // An older client that does not send the field keeps it; null removes it; 0 is refused.
+      await settings(ctx, { feeCents: 300 }).expect(200);
+      const kept = await get(ctx.accessToken, `/v1/delivery/settings?branchId=${ctx.branchId}`).expect(200);
+      expect(kept.body.freeAboveCents).toBe(5000);
+      await settings(ctx, { freeAboveCents: 0 }).expect(400);
+      await settings(ctx, { feeCents: 300, freeAboveCents: null }).expect(200);
+      const again = await publicOrder(ctx, {}, 2).expect(201);
+      expect(again.body.deliveryFee).toBe(3);
     });
   });
 
@@ -180,12 +203,18 @@ describe('Delivery (e2e)', () => {
 
       await settings(ctx, { enabled: true, feeCents: 600, minOrderCents: 1500 }).expect(200);
       const read = await get(ctx.accessToken, `/v1/delivery/settings?branchId=${ctx.branchId}`).expect(200);
-      expect(read.body).toEqual({ branchId: ctx.branchId, enabled: true, feeCents: 600, minOrderCents: 1500 });
+      expect(read.body).toEqual({
+        branchId: ctx.branchId,
+        enabled: true,
+        feeCents: 600,
+        minOrderCents: 1500,
+        freeAboveCents: null,
+      });
       const log = await getPrisma(app).auditLog.findFirstOrThrow({
         where: { tenantId: ctx.tenantId, action: 'DELIVERY_SETTINGS_UPDATED' },
         orderBy: { createdAt: 'desc' },
       });
-      expect(log.afterData).toEqual({ enabled: true, feeCents: 600, minOrderCents: 1500 });
+      expect(log.afterData).toEqual({ enabled: true, feeCents: 600, minOrderCents: 1500, freeAboveCents: null });
       expect(log.userId).not.toBeNull();
     });
   });

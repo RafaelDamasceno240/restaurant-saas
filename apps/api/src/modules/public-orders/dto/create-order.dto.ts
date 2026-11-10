@@ -23,6 +23,14 @@ import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/i
 // What a guest can pay with. ON_ACCOUNT (fiado) is never one of them.
 const PUBLIC_PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'PIX', 'CARD'];
 
+// One add-on chosen for each unit of the line. Only the id and how many: the price, the group and
+// whether it belongs to this product at all are decided by the server (option-pricing.ts).
+export class OrderItemOptionInputDto {
+  @ApiProperty() @IsUUID() optionId!: string;
+
+  @ApiProperty({ example: 1, maximum: 50 }) @IsInt() @Min(1) @Max(50) quantity!: number;
+}
+
 export class OrderItemInputDto {
   @ApiProperty() @IsUUID() productId!: string;
 
@@ -33,6 +41,20 @@ export class OrderItemInputDto {
   @Min(1)
   @Max(MAX_UNITS_PER_PRODUCT, { message: MAX_UNITS_MESSAGE })
   quantity!: number;
+
+  @ApiPropertyOptional({ type: [OrderItemOptionInputDto] })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => OrderItemOptionInputDto)
+  @ArrayMaxSize(50)
+  options?: OrderItemOptionInputDto[];
+
+  // "Sem cebola": what the kitchen needs to know about THIS line.
+  @ApiPropertyOptional({ example: 'Sem cebola' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(140)
+  notes?: string;
 }
 
 export class CustomerInputDto {

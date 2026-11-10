@@ -98,6 +98,7 @@ export class PublicOrdersService {
         items: dto.items,
         couponCode: dto.code,
         customerId: null,
+        enforceRequiredOptions: true,
       });
     } catch (error) {
       throw toPublicCouponError(error);
@@ -117,7 +118,7 @@ export class PublicOrdersService {
 
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, tenantId: tenant.id },
-      include: { items: true },
+      include: { items: { include: { options: true } } },
     });
     if (!order) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
@@ -163,6 +164,13 @@ export class PublicOrdersService {
         unitPrice: fromCents(item.unitPriceCents),
         quantity: item.quantity,
         subtotal: fromCents(item.subtotalCents),
+        notes: item.notes,
+        options: item.options.map((option) => ({
+          group: option.groupNameSnapshot,
+          name: option.optionNameSnapshot,
+          unitPrice: fromCents(option.unitPriceCents),
+          quantity: option.quantity,
+        })),
       })),
       subtotal: fromCents(order.subtotalCents),
       discount: fromCents(order.discountCents),

@@ -85,6 +85,15 @@ export class UpdateDeliverySettingsDto {
   @Min(0)
   @Max(MAX_DELIVERY_MIN_ORDER_CENTS)
   minOrderCents!: number;
+
+  // Optional so older clients keep working: absent = unchanged, null = the fee always applies.
+  @ApiPropertyOptional({ example: 2300, nullable: true, description: 'Entrega grátis a partir desta soma dos itens, em centavos' })
+  @IsOptional()
+  @ValidateIf((_dto, value) => value !== null)
+  @IsInt()
+  @Min(1)
+  @Max(MAX_DELIVERY_MIN_ORDER_CENTS)
+  freeAboveCents?: number | null;
 }
 
 export class FailDeliveryDto {

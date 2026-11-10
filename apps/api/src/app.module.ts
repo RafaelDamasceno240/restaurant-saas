@@ -23,6 +23,7 @@ import { HealthModule } from './modules/health/health.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { ProductsModule } from './modules/products/products.module';
 import { PublicMenuModule } from './modules/public-menu/public-menu.module';
+import { MediaModule } from './modules/media/media.module';
 import { PublicOrdersModule } from './modules/public-orders/public-orders.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PosModule } from './modules/pos/pos.module';
@@ -60,6 +61,7 @@ import { PlatformModule } from './modules/platform/platform.module';
     CategoriesModule,
     ProductsModule,
     PublicMenuModule,
+    MediaModule,
     PublicOrdersModule,
     OrdersModule,
     PosModule,

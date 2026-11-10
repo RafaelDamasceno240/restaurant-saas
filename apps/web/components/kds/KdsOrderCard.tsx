@@ -106,10 +106,18 @@ export function KdsOrderCard({
       </div>
 
       <ul className="space-y-1.5 border-t border-line pt-3">
-        {order.items.map((item) => (
-          <li key={item.productId} className="text-lg leading-snug text-foreground">
+        {order.items.map((item, index) => (
+          <li key={`${item.productId}-${index}`} className="text-lg leading-snug text-foreground">
             <span className="mr-1 font-bold text-accent">{item.quantity}×</span>
             {item.name}
+            {/* Add-ons are per unit of the line; the note is what the customer asked for it. */}
+            {(item.options ?? []).map((option, i) => (
+              <span key={i} className="block pl-7 text-base text-muted-foreground">
+                + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                {option.name}
+              </span>
+            ))}
+            {item.notes && <span className="block pl-7 text-base font-medium text-warning">Obs.: {item.notes}</span>}
           </li>
         ))}
       </ul>
