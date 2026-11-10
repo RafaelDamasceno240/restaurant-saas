@@ -87,15 +87,16 @@ export function KdsOrderCard({
         </span>
       )}
       <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-3xl font-bold leading-none tracking-tight text-foreground">#{order.orderNumber}</p>
+        {/* As in KdsTableRoundCard: the number may wrap, the time badge never shrinks. */}
+        <div className="min-w-0">
+          <p className="break-words text-3xl font-bold leading-none tracking-tight text-foreground">#{order.orderNumber}</p>
           <p className="mt-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {FULFILLMENT_LABEL[order.fulfillmentType] ?? order.fulfillmentType}
           </p>
         </div>
         <span
           className={clsx(
-            'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-base font-bold',
+            'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-base font-bold',
             isUrgent ? 'bg-danger/15 text-danger' : 'bg-surface-hover text-foreground',
           )}
         >

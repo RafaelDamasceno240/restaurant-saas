@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { getOrder } from '@/lib/checkout-api';
 import { ApiError } from '@/lib/api-client';
 import { formatCentsAsBRL, toCents } from '@/lib/money';
+import { trackingHeading } from '@/lib/order-tracking';
 
 interface PageProps {
   params: { slug: string; orderId: string };
@@ -55,13 +56,15 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
     );
   }
 
+  const heading = trackingHeading(order.status);
+
   return (
     <main className="mx-auto min-h-screen max-w-2xl space-y-6 bg-background px-4 py-10">
       <div className="rounded-xl border border-line bg-surface p-6 text-center">
         <p className="text-3xl" aria-hidden>
-          ✅
+          {heading.icon}
         </p>
-        <h1 className="mt-2 text-xl font-semibold">Pedido recebido!</h1>
+        <h1 className="mt-2 text-xl font-semibold">{heading.title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Pedido <span className="font-medium text-foreground">#{order.orderNumber}</span> ·{' '}
           {STATUS_LABEL[order.status] ?? order.status}
