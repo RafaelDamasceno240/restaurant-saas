@@ -131,10 +131,29 @@ export function listOrders(
 // The kitchen board: the in-progress statuses, each with its newest orders (at most
 // `columnLimit`) and its total, in ONE request. The kitchen screen polls this instead of asking
 // for each status separately (lib/kds-logic.ts).
+// B9: production status of a table item while the kitchen has it.
+export type KitchenRoundStatus = 'SENT' | 'PREPARING' | 'READY';
+
+// B9: one round sent from a table ("Mesa 4 · rodada 2") with only its items still to be made.
+// `status` is the least advanced of them; the card's action moves exactly those.
+export interface KitchenTableRound {
+  id: string;
+  tabId: string;
+  roundNumber: number;
+  tableNumber: number;
+  tableName: string | null;
+  sentAt: string;
+  status: KitchenRoundStatus;
+  items: { id: string; name: string; quantity: number; notes: string | null; status: KitchenRoundStatus }[];
+}
+
 export interface OrdersBoardColumn {
   status: OrderStatus;
   data: AdminOrderListItem[];
   total: number;
+  // B9: table rounds in this stage (SENT ones in PENDING, "Novos"). Absent = none.
+  tableRounds?: KitchenTableRound[];
+  tableRoundsTotal?: number;
 }
 
 export interface OrdersBoard {
@@ -146,18 +165,31 @@ export function getOrdersBoard(accessToken: string): Promise<OrdersBoard> {
   return apiFetch<OrdersBoard>('/orders/board', { accessToken });
 }
 
+// B9: the kitchen moves the items of a round that are in `from` (what its card shows) to `to`.
+// 409 TAB_ROUND_ALREADY_MOVED when another screen (or a cancellation) got there first.
+export function advanceKitchenRound(
+  accessToken: string,
+  roundId: string,
+  from: KitchenRoundStatus,
+  to: 'PREPARING' | 'READY' | 'SERVED',
+): Promise<unknown> {
+  return apiFetch(`/kitchen/tab-rounds/${roundId}/status`, { method: 'PATCH', body: { from, to }, accessToken });
+}
+
 export function getOrderDetail(accessToken: string, id: string): Promise<AdminOrderDetail> {
   return apiFetch<AdminOrderDetail>(`/orders/${id}`, { accessToken });
 }
 
+// A cancellation needs a reason (B5); the API refuses CANCELLED without one.
 export function updateOrderStatus(
   accessToken: string,
   id: string,
   status: OrderStatus,
+  reason?: string,
 ): Promise<AdminOrderDetail> {
   return apiFetch<AdminOrderDetail>(`/orders/${id}/status`, {
     method: 'PATCH',
-    body: { status },
+    body: reason === undefined ? { status } : { status, reason },
     accessToken,
   });
 }

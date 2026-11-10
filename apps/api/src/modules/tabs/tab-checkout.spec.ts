@@ -2,27 +2,37 @@ import { buildPricedItemsFromTab, classifyExistingCheckout } from './tab-checkou
 import { computeTabTotals } from './tab-calculations';
 
 describe('buildPricedItemsFromTab', () => {
-  it('prices every line from the TabItem snapshot, one OrderItem per TabItem', () => {
+  it('prices every line from the TabItem snapshot, one OrderItem per TabItem, naming the tab item it bills', () => {
     const items = [
-      { productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCentsSnapshot: 2990, quantity: 2 },
-      { productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCentsSnapshot: 2990, quantity: 1 },
-      { productId: 'p2', productNameSnapshot: 'Suco', unitPriceCentsSnapshot: 850, quantity: 1 },
+      { id: 't1', productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCentsSnapshot: 2990, quantity: 2, cancelledQuantity: 0 },
+      { id: 't2', productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCentsSnapshot: 2990, quantity: 1, cancelledQuantity: 0 },
+      { id: 't3', productId: 'p2', productNameSnapshot: 'Suco', unitPriceCentsSnapshot: 850, quantity: 1, cancelledQuantity: 0 },
     ];
     expect(buildPricedItemsFromTab(items)).toEqual([
-      { productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCents: 2990, quantity: 2 },
-      { productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCents: 2990, quantity: 1 },
-      { productId: 'p2', productNameSnapshot: 'Suco', unitPriceCents: 850, quantity: 1 },
+      { productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCents: 2990, quantity: 2, tabItemId: 't1' },
+      { productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCents: 2990, quantity: 1, tabItemId: 't2' },
+      { productId: 'p2', productNameSnapshot: 'Suco', unitPriceCents: 850, quantity: 1, tabItemId: 't3' },
+    ]);
+  });
+
+  it('B9: bills only the units still due and leaves out lines with every unit cancelled', () => {
+    const items = [
+      { id: 't1', productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCentsSnapshot: 2500, quantity: 3, cancelledQuantity: 1 },
+      { id: 't2', productId: 'p2', productNameSnapshot: 'Batata', unitPriceCentsSnapshot: 1200, quantity: 2, cancelledQuantity: 2 },
+    ];
+    expect(buildPricedItemsFromTab(items)).toEqual([
+      { productId: 'p1', productNameSnapshot: 'X-Burger', unitPriceCents: 2500, quantity: 2, tabItemId: 't1' },
     ]);
   });
 
   it('keeps the sale total equal to the tab total', () => {
     const items = [
-      { productId: 'p1', productNameSnapshot: 'A', unitPriceCentsSnapshot: 1250, quantity: 3 },
-      { productId: 'p2', productNameSnapshot: 'B', unitPriceCentsSnapshot: 725, quantity: 2 },
+      { id: 't1', productId: 'p1', productNameSnapshot: 'A', unitPriceCentsSnapshot: 1250, quantity: 3, cancelledQuantity: 0 },
+      { id: 't2', productId: 'p2', productNameSnapshot: 'B', unitPriceCentsSnapshot: 725, quantity: 2, cancelledQuantity: 1 },
     ];
     const saleTotal = buildPricedItemsFromTab(items).reduce((s, i) => s + i.unitPriceCents * i.quantity, 0);
     expect(saleTotal).toBe(computeTabTotals(items).totalCents);
-    expect(saleTotal).toBe(5200);
+    expect(saleTotal).toBe(4475);
   });
 });
 

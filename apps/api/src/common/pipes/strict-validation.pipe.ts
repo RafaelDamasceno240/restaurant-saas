@@ -1,6 +1,7 @@
 import { ArgumentMetadata, Injectable, ValidationPipe } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ALLOW_EXTRA_FIELDS_KEY } from '../decorators/allow-extra-fields.decorator';
+import { validationException } from '../validation/validation-messages';
 
 // Global pipe. A plain `app.useGlobalPipes(new ValidationPipe(...))` plus a
 // route-level `@UsePipes()` override doesn't work here: Nest runs pipes as a
@@ -16,6 +17,8 @@ export class StrictValidationPipe extends ValidationPipe {
       forbidNonWhitelisted: true,
       transform: true,
       errorHttpStatusCode: 400,
+      // B8: Portuguese, one sentence per problem, never class-validator's English.
+      exceptionFactory: validationException,
     });
   }
 
@@ -32,6 +35,7 @@ export class StrictValidationPipe extends ValidationPipe {
       forbidNonWhitelisted: false,
       transform: true,
       errorHttpStatusCode: 400,
+      exceptionFactory: validationException,
     });
     return lenient.transform(value, metadata);
   }

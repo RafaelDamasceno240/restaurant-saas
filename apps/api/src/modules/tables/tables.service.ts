@@ -13,7 +13,7 @@ const withOpenTab = {
     take: 1,
     select: {
       id: true,
-      items: { select: { unitPriceCentsSnapshot: true, quantity: true } },
+      items: { select: { unitPriceCentsSnapshot: true, quantity: true, cancelledQuantity: true } },
     },
   },
 } satisfies Prisma.DiningTableInclude;
@@ -193,11 +193,12 @@ export class TablesService {
     // back would be circular. Same trade-off as web's lib/money.ts vs.
     // api's money.util.ts — a two-line calculation duplicated once rather
     // than a cross-module/app dependency for it.
+    // B9: cancelled units are neither charged nor counted.
     const openTabTotalCents = openTab
-      ? openTab.items.reduce((sum, item) => sum + item.unitPriceCentsSnapshot * item.quantity, 0)
+      ? openTab.items.reduce((sum, item) => sum + item.unitPriceCentsSnapshot * (item.quantity - item.cancelledQuantity), 0)
       : null;
     const openTabItemCount = openTab
-      ? openTab.items.reduce((sum, item) => sum + item.quantity, 0)
+      ? openTab.items.reduce((sum, item) => sum + item.quantity - item.cancelledQuantity, 0)
       : null;
     return {
       id: table.id,

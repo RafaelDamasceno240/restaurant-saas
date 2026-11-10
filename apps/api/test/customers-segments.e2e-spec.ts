@@ -7,6 +7,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -84,7 +85,7 @@ describe('Customers segmentation and rankings (e2e)', () => {
   }
 
   const cancel = (ctx: Ctx, orderId: string) =>
-    patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: 'CANCELLED' }).expect(200);
+    patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody('CANCELLED')).expect(200);
 
   const list = async (token: string, query = '') => (await get(token, `/v1/customers${query}`).expect(200)).body as {
     data: Row[];

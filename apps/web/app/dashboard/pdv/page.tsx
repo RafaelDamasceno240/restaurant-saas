@@ -20,6 +20,8 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { categoriesApi, productsApi } from '@/lib/cardapio-api';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
+import { formatCentsAsBRL } from '@/lib/money';
+import { MAX_UNITS_HINT, atUnitLimit } from '@/lib/cart-logic';
 import { createPosOrder, previewPosCoupon } from '@/lib/pos-api';
 import { CouponPreview } from '@/lib/coupons-api';
 import { couponApplyMessage, couponPreviewKey, totalAfterCouponCents } from '@/lib/coupons-logic';
@@ -47,9 +49,7 @@ import { CreditTermsField } from '@/components/receivables/CreditTermsField';
 import { defaultTerms, localDateOnly, receivableErrorMessage, TermsDraft, toCreditTerms } from '@/lib/receivables-logic';
 import clsx from 'clsx';
 
-function formatBRL(cents: number): string {
-  return `R$ ${(cents / 100).toFixed(2).replace('.', ',')}`;
-}
+const formatBRL = formatCentsAsBRL;
 
 // ON_ACCOUNT (fiado) is offered only to who may sell on account (receivables.sell), and needs a
 // customer of the registry with a credit limit; the API enforces both.
@@ -389,8 +389,10 @@ export default function PdvPage() {
                     <button
                       type="button"
                       onClick={() => setCart((prev) => incrementItem(prev, item.productId))}
+                      disabled={atUnitLimit(item.quantity)}
+                      title={atUnitLimit(item.quantity) ? MAX_UNITS_HINT : undefined}
                       aria-label={`Aumentar ${item.name}`}
-                      className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
+                      className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 touch:h-11 touch:w-11"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
@@ -407,6 +409,7 @@ export default function PdvPage() {
                     </Button>
                   </div>
                 </div>
+                {atUnitLimit(item.quantity) && <p className="mt-1 text-xs text-subtle">{MAX_UNITS_HINT}</p>}
               </li>
             ))}
           </ul>
@@ -686,7 +689,9 @@ export default function PdvPage() {
                     key={product.id}
                     type="button"
                     onClick={() => addProduct(product)}
-                    className="group relative flex flex-col overflow-hidden rounded-card border border-line bg-surface text-left transition-all hover:border-line-strong hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.98]"
+                    disabled={atUnitLimit(inCart)}
+                    title={atUnitLimit(inCart) ? MAX_UNITS_HINT : undefined}
+                    className="group relative flex flex-col overflow-hidden rounded-card border border-line bg-surface text-left transition-all hover:border-line-strong hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <span className="relative flex aspect-[4/3] w-full items-center justify-center bg-surface-2">
                       {product.imageUrl ? (

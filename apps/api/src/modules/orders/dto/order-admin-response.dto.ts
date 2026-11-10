@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DeliveryStatus, FulfillmentType, OrderSource, OrderStatus, PaymentMethod } from '@prisma/client';
+import { DeliveryStatus, FulfillmentType, OrderSource, OrderStatus, PaymentMethod, TabItemStatus } from '@prisma/client';
 import {
   OrderAddressResponseDto,
   OrderItemResponseDto,
@@ -62,12 +62,40 @@ export class OrderListResponseDto {
   @ApiProperty() meta!: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
+// B9: an item of a table round still in the kitchen's hands. `quantity` is what is still to be
+// made (cancelled units left out).
+export class KitchenRoundItemDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() quantity!: number;
+  @ApiPropertyOptional({ nullable: true }) notes!: string | null;
+  @ApiProperty({ enum: ['SENT', 'PREPARING', 'READY'] }) status!: TabItemStatus;
+}
+
+// B9: one round sent from a table ("Mesa 4 · rodada 2"), with only its items still in production.
+// Its status is the least advanced of them: the card sits in that column and its action moves
+// exactly those items.
+export class KitchenTableRoundDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() tabId!: string;
+  @ApiProperty() roundNumber!: number;
+  @ApiProperty() tableNumber!: number;
+  @ApiPropertyOptional({ nullable: true }) tableName!: string | null;
+  @ApiProperty() sentAt!: Date;
+  @ApiProperty({ enum: ['SENT', 'PREPARING', 'READY'] }) status!: TabItemStatus;
+  @ApiProperty({ type: [KitchenRoundItemDto] }) items!: KitchenRoundItemDto[];
+}
+
 // One column of the kitchen board: the newest orders in that status (capped) and how many
-// there are in all, so the screen can say when it is not showing everything.
+// there are in all, so the screen can say when it is not showing everything. B9: plus the table
+// rounds in the same stage (SENT rounds sit in the PENDING column - "Novo" - since there is
+// nothing to accept: their stock was taken when they were sent; CONFIRMED has none).
 export class OrdersBoardColumnDto {
   @ApiProperty({ enum: OrderStatus }) status!: OrderStatus;
   @ApiProperty({ type: [OrderListItemDto] }) data!: OrderListItemDto[];
   @ApiProperty() total!: number;
+  @ApiProperty({ type: [KitchenTableRoundDto] }) tableRounds!: KitchenTableRoundDto[];
+  @ApiProperty() tableRoundsTotal!: number;
 }
 
 export class OrdersBoardResponseDto {

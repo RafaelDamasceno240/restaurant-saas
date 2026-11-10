@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   UnauthorizedException,
@@ -14,7 +13,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AppConfig } from '../../config/configuration';
 import { AuditService } from '../audit/audit.service';
 import { isTenantBlocked } from '../../common/util/tenant-status.util';
-import { RegisterDto } from './dto/register.dto';
+import { findAccountIdByLoginEmail } from '../../common/util/login-email.util';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { durationToMs, hashToken } from './token.util';
@@ -72,92 +71,15 @@ export class AuthService {
     private readonly revocations: SessionRevocationService,
   ) {}
 
-  async register(dto: RegisterDto, meta: RequestMeta): Promise<AuthResult> {
-    const [existingTenant, existingUser] = await Promise.all([
-      this.prisma.tenant.findFirst({
-        where: { OR: [{ slug: dto.slug }, { document: dto.document }] },
-      }),
-      this.prisma.user.findUnique({ where: { email: dto.email } }),
-    ]);
-
-    if (existingTenant) {
-      throw new ConflictException({
-        code: 'TENANT_ALREADY_EXISTS',
-        message: 'Já existe um restaurante com este slug ou documento.',
-      });
-    }
-    if (existingUser) {
-      throw new ConflictException({
-        code: 'EMAIL_ALREADY_EXISTS',
-        message: 'Já existe uma conta com este e-mail.',
-      });
-    }
-
-    const passwordHash = await argon2.hash(dto.password);
-
-    // Tenant + Branch + User + OWNER role assignment + UserBranch must all
-    // succeed together or not at all.
-    const { user, tenantId } = await this.prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({
-        data: {
-          name: dto.tenantName,
-          legalName: dto.legalName,
-          document: dto.document,
-          slug: dto.slug,
-          status: 'TRIAL',
-        },
-      });
-
-      const branch = await tx.branch.create({
-        data: {
-          tenantId: tenant.id,
-          name: dto.branchName,
-          code: 'MATRIZ',
-        },
-      });
-
-      const createdUser = await tx.user.create({
-        data: {
-          tenantId: tenant.id,
-          name: dto.userName,
-          email: dto.email,
-          passwordHash,
-          status: 'ACTIVE',
-        },
-      });
-
-      const ownerRole = await tx.role.findUniqueOrThrow({ where: { name: 'OWNER' } });
-
-      await tx.userRole.create({
-        data: { userId: createdUser.id, roleId: ownerRole.id, tenantId: tenant.id },
-      });
-
-      await tx.userBranch.create({
-        data: { userId: createdUser.id, branchId: branch.id },
-      });
-
-      return { user: createdUser, tenantId: tenant.id };
-    });
-
-    await this.audit.record({
-      tenantId,
-      userId: user.id,
-      action: 'TENANT_REGISTERED',
-      entity: 'Tenant',
-      entityId: tenantId,
-      afterData: { slug: dto.slug, ownerEmail: dto.email },
-      ip: meta.ip,
-      userAgent: meta.userAgent,
-    });
-
-    return this.issueTokensFor(user, meta);
-  }
-
   async login(dto: LoginDto, meta: RequestMeta): Promise<AuthResult> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-      include: { tenant: { select: { status: true } } },
-    });
+    // The e-mail is matched without case (login-email.util.ts).
+    const userId = await findAccountIdByLoginEmail(this.prisma, dto.email);
+    const user = userId
+      ? await this.prisma.user.findUnique({
+          where: { id: userId },
+          include: { tenant: { select: { status: true } } },
+        })
+      : null;
 
     // Same error for "no such user" and "wrong password" to avoid
     // user-enumeration.
@@ -378,6 +300,7 @@ export class AuthService {
       include: {
         tenant: true,
         userRoles: { include: { role: true } },
+        platformAdmin: { select: { id: true } },
       },
     });
     return {
@@ -388,11 +311,14 @@ export class AuthService {
       email: user.email,
       status: user.status,
       roles: user.userRoles.map((ur) => ur.role.name),
+      // Only lets the web show or hide the way to /super-admin. What protects /platform is
+      // PlatformAdminGuard, which reads platform_admins again on every request.
+      isPlatformAdmin: user.platformAdmin !== null,
     };
   }
 
-  // `sessionId` is passed only by refresh(), to keep the session it is renewing; login and
-  // register start a new one.
+  // `sessionId` is passed only by refresh(), to keep the session it is renewing; login starts a
+  // new one.
   private async issueTokensFor(
     user: User,
     meta: RequestMeta,

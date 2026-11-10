@@ -10,6 +10,8 @@ import {
   registerTenantE2E,
   removeAuditFailure,
   uniqueSuffix,
+  statusBody,
+  roundBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -74,13 +76,13 @@ describe('Receivables x orders (e2e)', () => {
   async function openTab(ctx: Ctx, quantity = 1, number = 1) {
     const table = (await post(ctx.accessToken, '/v1/tables', { branchId: ctx.branchId, number }).expect(201)).body;
     const tab = (await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id }).expect(201)).body;
-    await post(ctx.accessToken, `/v1/tabs/${tab.id}/items`, { productId: ctx.product.id, quantity }).expect(201);
+    await post(ctx.accessToken, `/v1/tabs/${tab.id}/rounds`, roundBody([{ productId: ctx.product.id, quantity }])).expect(201);
     return tab as { id: string };
   }
   const checkoutAs = (token: string, tabId: string, extra: Json = {}) =>
     post(token, `/v1/tabs/${tabId}/checkout`, { paymentMethod: 'ON_ACCOUNT', idempotencyKey: key(), ...extra });
 
-  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: next });
+  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(next));
   async function complete(ctx: Ctx, orderId: string) {
     for (const next of ['CONFIRMED', 'PREPARING', 'READY', 'COMPLETED']) await status(ctx, orderId, next).expect(200);
   }

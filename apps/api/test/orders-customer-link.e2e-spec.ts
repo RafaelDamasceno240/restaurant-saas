@@ -10,6 +10,8 @@ import {
   registerTenantE2E,
   removeAuditFailure,
   uniqueSuffix,
+  statusBody,
+  roundBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -199,7 +201,7 @@ describe('Orders x customer link (e2e)', () => {
         paymentMethod: 'PIX',
         customerId: a.id,
       }).expect(201);
-      await patch(ctx.accessToken, `/v1/orders/${pdv.body.id}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${pdv.body.id}/status`, statusBody('CANCELLED')).expect(200);
       const moved = await link(ctx.accessToken, pdv.body.id, b.id).expect(200);
       expect(moved.body).toMatchObject({ customerId: b.id, status: 'CANCELLED' });
     });
@@ -337,7 +339,7 @@ describe('Orders x customer link (e2e)', () => {
       const tab = (
         await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id, ...(customerName ? { customerName } : {}) }).expect(201)
       ).body as { id: string };
-      await post(ctx.accessToken, `/v1/tabs/${tab.id}/items`, { productId: ctx.product.id, quantity: 2 }).expect(201);
+      await post(ctx.accessToken, `/v1/tabs/${tab.id}/rounds`, roundBody([{ productId: ctx.product.id, quantity: 2 }])).expect(201);
       return tab;
     }
     const checkout = (token: string, tabId: string, extra: Json = {}) =>

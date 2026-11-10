@@ -1,13 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 import { IsEmail, IsString, Matches, MinLength } from 'class-validator';
+import { toLoginEmail } from '../../../common/util/login-email.util';
 
-export class RegisterDto {
-  @ApiProperty({ example: 'Do\u2019c\u00ea Hamburgueria' })
+// What it takes to create a restaurant (TenantProvisioningService). It used to be the body of
+// the public POST /auth/register, removed on 2026-10-28; the rules are the same.
+export class ProvisionTenantDto {
+  @ApiProperty({ example: 'Do’cê Hamburgueria' })
   @IsString()
   @MinLength(2)
   tenantName!: string;
 
-  @ApiProperty({ example: 'Do\u2019c\u00ea Alimentos LTDA' })
+  @ApiProperty({ example: 'Do’cê Alimentos LTDA' })
   @IsString()
   @MinLength(2)
   legalName!: string;
@@ -35,6 +39,7 @@ export class RegisterDto {
   userName!: string;
 
   @ApiProperty({ example: 'maria@example.com' })
+  @Transform(toLoginEmail)
   @IsEmail()
   email!: string;
 

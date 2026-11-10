@@ -18,6 +18,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { FulfillmentType, PaymentMethod } from '@prisma/client';
 import { AllowExtraFields } from '../../../common/decorators/allow-extra-fields.decorator';
+import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
 
 // What a guest can pay with. ON_ACCOUNT (fiado) is never one of them.
 const PUBLIC_PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'PIX', 'CARD'];
@@ -25,9 +26,13 @@ const PUBLIC_PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'PIX', 'CARD'];
 export class OrderItemInputDto {
   @ApiProperty() @IsUUID() productId!: string;
 
-  // Quantity cap is a deliberate abuse guard (public, unauthenticated
-  // endpoint) — not a business rule about basket size.
-  @ApiProperty({ example: 2 }) @IsInt() @Min(1) @Max(50) quantity!: number;
+  // Quantity cap: an abuse guard on this public endpoint and, since B7, the same per-product
+  // limit as the PDV and the tab (OrderCreationService also adds up repeated lines).
+  @ApiProperty({ example: 2, maximum: MAX_UNITS_PER_PRODUCT })
+  @IsInt()
+  @Min(1)
+  @Max(MAX_UNITS_PER_PRODUCT, { message: MAX_UNITS_MESSAGE })
+  quantity!: number;
 }
 
 export class CustomerInputDto {

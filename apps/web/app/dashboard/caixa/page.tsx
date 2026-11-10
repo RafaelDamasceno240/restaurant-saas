@@ -93,6 +93,13 @@ export default function CaixaPage() {
       if (action === 'CLOSE') return closeSession(accessToken as string, session.id, cents);
       if (cents <= 0) throw new Error('O valor deve ser maior que zero.');
       if (action === 'WITHDRAWAL' && reason.trim().length < 3) throw new Error('Informe o motivo da sangria.');
+      // B4: the API refuses it anyway (and is the one that counts, with the drawer locked); this
+      // only saves a round trip when the screen already knows.
+      if (action === 'WITHDRAWAL' && cents > Math.max(0, session.expectedBalanceCents ?? 0)) {
+        throw new Error(
+          `A sangria não pode ser maior que o dinheiro no caixa. Disponível agora: ${formatCents(Math.max(0, session.expectedBalanceCents ?? 0))}.`,
+        );
+      }
       return addMovement(accessToken as string, session.id, {
         type: action as 'SUPPLY' | 'WITHDRAWAL',
         amountCents: cents,
@@ -271,6 +278,12 @@ export default function CaixaPage() {
             <Card className="animate-pop-in">
               <form onSubmit={submit(panel)} className="space-y-3 p-5">
                 <h2 className="text-sm font-semibold text-foreground">{PANEL_TITLE[panel]}</h2>
+                {panel === 'WITHDRAWAL' && (
+                  <Alert tone="info">
+                    Disponível no caixa: <strong>{formatCents(Math.max(0, session.expectedBalanceCents ?? 0))}</strong>. A
+                    sangria não pode passar desse valor.
+                  </Alert>
+                )}
                 {panel === 'CLOSE' && (
                   <Alert tone="info">
                     Saldo esperado: <strong>{formatCents(session.expectedBalanceCents)}</strong>. Conte o dinheiro da

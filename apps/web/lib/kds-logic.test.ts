@@ -1,7 +1,11 @@
-import type { AdminOrderListItem, OrdersBoard } from './orders-api';
+import type { AdminOrderListItem, KitchenTableRound, OrdersBoard } from './orders-api';
 import {
   boardColumn,
+  columnCards,
   columnCountLabel,
+  newCardIds,
+  ROUND_ACTION,
+  roundTitle,
   KDS_COLUMN_LABEL,
   KDS_POLL_INTERVAL_MS,
   KDS_STATUSES,
@@ -29,14 +33,14 @@ describe('kds-logic', () => {
 
   describe('boardColumn', () => {
     it('gives each column its own orders and total', () => {
-      expect(boardColumn(board, 'PENDING')).toEqual({ orders: [order('p1'), order('p2')], total: 2 });
+      expect(boardColumn(board, 'PENDING')).toEqual({ orders: [order('p1'), order('p2')], total: 2, rounds: [], roundsTotal: 0 });
       expect(boardColumn(board, 'PREPARING').orders.map((o) => o.id)).toEqual(['r1']);
-      expect(boardColumn(board, 'CONFIRMED')).toEqual({ orders: [], total: 0 });
+      expect(boardColumn(board, 'CONFIRMED')).toEqual({ orders: [], total: 0, rounds: [], roundsTotal: 0 });
     });
 
     it('treats a board that has not arrived, or a missing column, as empty', () => {
-      expect(boardColumn(undefined, 'PENDING')).toEqual({ orders: [], total: 0 });
-      expect(boardColumn({ columnLimit: 50, columns: [] }, 'READY')).toEqual({ orders: [], total: 0 });
+      expect(boardColumn(undefined, 'PENDING')).toEqual({ orders: [], total: 0, rounds: [], roundsTotal: 0 });
+      expect(boardColumn({ columnLimit: 50, columns: [] }, 'READY')).toEqual({ orders: [], total: 0, rounds: [], roundsTotal: 0 });
     });
   });
 
@@ -45,6 +49,57 @@ describe('kds-logic', () => {
       expect(columnCountLabel(boardColumn(board, 'PENDING'))).toBe('2');
       expect(columnCountLabel(boardColumn(board, 'CONFIRMED'))).toBe('0');
       expect(columnCountLabel(boardColumn(board, 'READY'))).toBe('2 de 120');
+    });
+  });
+
+  describe('table rounds (B9)', () => {
+    const round = (id: string, sentAt: string, extra: Partial<KitchenTableRound> = {}): KitchenTableRound => ({
+      id,
+      tabId: 't',
+      roundNumber: 1,
+      tableNumber: 4,
+      tableName: null,
+      sentAt,
+      status: 'SENT',
+      items: [],
+      ...extra,
+    });
+    const withRounds: OrdersBoard = {
+      columnLimit: 50,
+      columns: [
+        {
+          status: 'PENDING',
+          total: 1,
+          data: [{ ...order('p1'), createdAt: '2026-10-24T12:05:00.000Z' }],
+          tableRounds: [round('r2', '2026-10-24T12:10:00.000Z'), round('r1', '2026-10-24T12:00:00.000Z')],
+          tableRoundsTotal: 2,
+        },
+      ],
+    };
+
+    it('shows orders and rounds of a column together, newest first, and counts both', () => {
+      const column = boardColumn(withRounds, 'PENDING');
+      expect(columnCards(column).map((c) => (c.kind === 'order' ? c.order.id : c.round.id))).toEqual(['r2', 'p1', 'r1']);
+      expect(columnCountLabel(column)).toBe('3');
+      expect(columnCountLabel({ ...column, roundsTotal: 60 })).toBe('3 de 61');
+    });
+
+    it('rings for a new round as for a new order', () => {
+      const before = new Set(newCardIds({ ...withRounds, columns: [{ ...withRounds.columns[0], tableRounds: [round('r1', 'x')] }] }));
+      expect(newPendingOrderArrived(before, newCardIds(withRounds))).toBe(true);
+      expect(newPendingOrderArrived(new Set(newCardIds(withRounds)), newCardIds(withRounds))).toBe(false);
+    });
+
+    it('has no "Aceitar": a new round starts being prepared, then is ready, then delivered', () => {
+      expect(ROUND_ACTION.SENT).toEqual({ label: 'Iniciar preparo', to: 'PREPARING' });
+      expect(ROUND_ACTION.PREPARING.to).toBe('READY');
+      expect(ROUND_ACTION.READY.to).toBe('SERVED');
+      expect(Object.values(ROUND_ACTION).map((a) => a.label)).not.toContain('Aceitar');
+    });
+
+    it('names the table and the round', () => {
+      expect(roundTitle({ tableNumber: 4, tableName: null, roundNumber: 2 })).toBe('Mesa 4 · rodada 2');
+      expect(roundTitle({ tableNumber: 7, tableName: 'Varanda', roundNumber: 1 })).toBe('Mesa 7 (Varanda) · rodada 1');
     });
   });
 

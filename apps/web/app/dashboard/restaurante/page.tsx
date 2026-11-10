@@ -1,39 +1,41 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { RestaurantProfileFormDialog } from '@/components/restaurante/RestaurantProfileFormDialog';
 import { RestaurantProfileView } from '@/components/restaurante/RestaurantProfileView';
 import { ErrorState, LoadingState } from '@/components/ds';
 import { useAuth } from '@/lib/auth-context';
 import { demoRestaurantProfile } from '@/lib/demo/restaurant-profile';
 import { formatBRL } from '@/lib/format';
-import {
-  getCurrentTenant,
-  mergeTenantIntoProfile,
-  ProfileMetric,
-  RestaurantProfile,
-} from '@/lib/restaurant-profile';
+import { getRestaurantProfile, ProfileMetric, RestaurantProfile } from '@/lib/restaurant-profile';
+import { toProfileView } from '@/lib/restaurant-profile-logic';
 import { useDashboardStats } from '@/lib/use-dashboard-stats';
 
+// Same roles the API grants restaurant.update to; the API checks it again on every save.
+const EDITOR_ROLES = ['OWNER', 'ADMIN'];
+
 export default function RestaurantePage() {
-  const { accessToken } = useAuth();
-  const tenant = useQuery({
-    queryKey: ['tenant-current'],
-    queryFn: () => getCurrentTenant(accessToken as string),
+  const { accessToken, user } = useAuth();
+  const [editing, setEditing] = useState(false);
+  const data = useQuery({
+    queryKey: ['restaurant-profile'],
+    queryFn: () => getRestaurantProfile(accessToken as string),
     enabled: !!accessToken,
   });
   const { stats, isLoading: statsLoading } = useDashboardStats();
+  const canEdit = !!user?.roles.some((role) => EDITOR_ROLES.includes(role));
 
   const profile = useMemo<RestaurantProfile | null>(() => {
-    if (!tenant.data) return null;
-    const merged = mergeTenantIntoProfile(demoRestaurantProfile, tenant.data);
+    if (!data.data) return null;
+    // The demonstration profile only lends the operation cards and the metric labels.
+    const view = toProfileView(data.data, demoRestaurantProfile);
     const withValue = (key: string, value: string | null): ProfileMetric => ({
-      ...(merged.metrics.find((m) => m.key === key) as ProfileMetric),
+      ...(view.metrics.find((m) => m.key === key) as ProfileMetric),
       value,
     });
     return {
-      ...merged,
-      channels: merged.channels.map((c) => (c.key === 'menu' ? { ...c, value: `/menu/${merged.slug}` } : c)),
+      ...view,
       metrics: [
         withValue('orders', stats ? String(stats.ordersToday) : null),
         withValue('sales', stats ? formatBRL(stats.salesToday) : null),
@@ -41,15 +43,34 @@ export default function RestaurantePage() {
         withValue('products', null),
         withValue('customers', null),
       ],
-      status: null,
-      demo: { profile: true, address: true, hours: true, channels: true, metrics: false },
     };
-  }, [tenant.data, stats]);
+  }, [data.data, stats]);
 
-  if (tenant.isLoading) return <LoadingState label="Carregando perfil..." />;
-  if (tenant.isError || !profile) {
-    return <ErrorState message="Não foi possível carregar o perfil do restaurante." onRetry={() => tenant.refetch()} />;
+  if (data.isLoading) return <LoadingState label="Carregando perfil..." />;
+  if (data.isError || !profile || !data.data) {
+    return (
+      <ErrorState
+        message="Não foi possível carregar o perfil do restaurante."
+        onRetry={() => data.refetch()}
+      />
+    );
   }
 
-  return <RestaurantProfileView profile={profile} editable={false} metricsLoading={statsLoading} computeStatus />;
+  return (
+    <>
+      <RestaurantProfileView
+        profile={profile}
+        editable={false}
+        metricsLoading={statsLoading}
+        onEdit={canEdit ? () => setEditing(true) : undefined}
+      />
+      {canEdit && (
+        <RestaurantProfileFormDialog
+          open={editing}
+          profile={data.data}
+          onClose={() => setEditing(false)}
+        />
+      )}
+    </>
+  );
 }

@@ -14,14 +14,18 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "test:deploy": "node --test deploy/migrate.test.js",
+    "test:deploy": "node --test deploy/migrate.test.js deploy/backup.test.js",
     "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
     "prepare": "husky",
     "db:migrate": "pnpm --filter api prisma:migrate",
     "db:seed": "pnpm --filter api prisma:seed",
     "db:generate": "pnpm --filter api prisma:generate",
     "db:constraints": "pnpm --filter api prisma:constraints",
-    "db:tabs-constraints": "pnpm --filter api prisma:tabs-constraints"
+    "db:tabs-constraints": "pnpm --filter api prisma:tabs-constraints",
+    "tenant:provision": "pnpm --filter api tenant:provision",
+    "platform-admin:grant": "pnpm --filter api platform-admin:grant",
+    "platform-admin:revoke": "pnpm --filter api platform-admin:revoke",
+    "user:reset-password": "pnpm --filter api user:reset-password"
   },
   "devDependencies": {
     "husky": "^9.1.6",

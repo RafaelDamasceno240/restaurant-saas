@@ -1,14 +1,14 @@
 import { isPublicArea, isSessionRefusal } from './session-area';
 
 describe('isPublicArea', () => {
-  it('treats the landing page, the public menu and the demo as session-free', () => {
-    for (const path of ['/', '/menu/doce', '/menu/doce/carrinho', '/menu/doce/pedido/123', '/demo', '/demo/pdv']) {
+  it('treats the landing page, the public menu, the demo and the old sign-up notice as session-free', () => {
+    for (const path of ['/', '/menu/doce', '/menu/doce/carrinho', '/menu/doce/pedido/123', '/demo', '/demo/pdv', '/register']) {
       expect(isPublicArea(path)).toBe(true);
     }
   });
 
-  it('keeps the session on the dashboard and on the sign-in pages', () => {
-    for (const path of ['/dashboard', '/dashboard/pdv', '/login', '/register']) {
+  it('keeps the session on the dashboard and on the sign-in page', () => {
+    for (const path of ['/dashboard', '/dashboard/pdv', '/login']) {
       expect(isPublicArea(path)).toBe(false);
     }
   });

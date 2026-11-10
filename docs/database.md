@@ -63,7 +63,7 @@ continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 
 ## Modelos adicionados depois da Fase 01
 
-Existem no schema atual (17 migrations em `prisma/migrations`, da `20260928001733_initial_mvp_schema` à `20261010230000_cash_sale_refund`):
+Existem no schema atual (18 migrations em `prisma/migrations`, da `20260928001733_initial_mvp_schema` à `20261017150000_restaurant_profile`):
 
 - **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
 - **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
@@ -81,6 +81,8 @@ Existem no schema atual (17 migrations em `prisma/migrations`, da `2026092800173
 - **Cashback:** `CashbackProgram` (`cashback_programs`), `CashbackAccount` (`cashback_accounts`, `customerId` único, `balanceCents`, `lastActivityAt`) e `CashbackEntry` (`cashback_entries`, o ledger em centavos: `type` EARN/USE/ADJUSTMENT/REVERSAL/EXPIRATION, `amountCents` com sinal, `balanceAfterCents`, origem e `idempotencyKey`); `orders.cashbackUsedCents`. Migration `20261005003323_cashback`. Em SQL: tabela append-only por trigger, CHECKs de saldo, sinal, origem e motivo, índices únicos parciais de um `EARN` e um `USE` por pedido, e o `CHECK orders_total_formula` recriado (`total = subtotal - discount - cashbackUsed + deliveryFee`) com `orders_cashback_range`. Ver `docs/CASHBACK.md`.
 
 - **Fiado / contas a receber:** `CreditAccount` (`credit_accounts`, `customerId` único, `creditLimitCents`, `balanceCents` = dívida em aberto), `Receivable` (`receivables`: cliente, unidade, `orderId` único e opcional, `totalCents`, `paidCents`, `status` OPEN/PAID/CANCELLED), `ReceivableInstallment` (`receivable_installments`: `number`, `dueDate` do tipo `DATE`, `amountCents`, `paidCents`), `ReceivableEntry` (`receivable_entries`, o ledger: `type` CHARGE/PAYMENT/REVERSAL, `amountCents` com sinal, `balanceAfterCents`, forma de pagamento, `cashMovementId`, `reversedEntryId`, `idempotencyKey`) e `ReceivablePaymentAllocation` (`receivable_payment_allocations`: quanto de cada pagamento abateu cada parcela). `PaymentMethod` ganhou `ON_ACCOUNT`; `CashMovementType` ganhou `RECEIVABLE_PAYMENT` e `RECEIVABLE_REFUND`; `tenants.timezone` (`NOT NULL DEFAULT 'America/Sao_Paulo'`). Migration `20261005005645_receivables`. Em SQL: ledger e alocações append-only por trigger, CHECKs de limite e dívida não negativos, `paidCents` entre 0 e o valor, status coerente com o que foi pago, sinal por tipo, forma de pagamento obrigatória e real em pagamentos (`IS NOT NULL AND IN (...)`, porque `NULL IN (...)` passaria no CHECK), origem e motivo no estorno. Ver `docs/RECEIVABLES.md`.
+
+- **Perfil do restaurante:** `tenants.description` e `tenants.instagram` (sem "@"); `branches.whatsapp` (só dígitos, como `phone`) e `branches.openingHours` (`JSONB`, nulo = não informado). Telefone, e-mail e endereço da unidade já existiam e passam a ser editáveis. Migration `20261017150000_restaurant_profile` (aditiva: quatro colunas nulas, nenhuma linha alterada). O formato dos horários é validado pela API, não pelo banco (`modules/tenants/opening-hours.ts`): lista de `{ weekday 0-6, opens, closes }`, sem sobreposição; um valor fora da regra é lido como "não informado". Ver `docs/RESTAURANT_PROFILE.md`.
 
 Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`; pontos são `Int`.
 
@@ -101,5 +103,6 @@ de compra, contas a pagar, inscrições de push e tabelas de resumo para relató
 
 `prisma/seed.ts` cria **apenas** os 8 `Role`s do enum, o catálogo de
 `Permission`s e o vínculo `RolePermission` de cada papel. Nenhum tenant,
-usuário ou dado de negócio fictício é criado pelo seed — cadastros reais
-acontecem via `POST /auth/register`.
+usuário ou dado de negócio fictício é criado pelo seed. Não há cadastro público
+(desde 2026-10-28): restaurantes são criados pelo comando `tenant:provision` (docs/PROVISIONING.md), que usa `TenantProvisioningService`, sem rota HTTP
+(ver docs/authentication.md, "Sem cadastro público").

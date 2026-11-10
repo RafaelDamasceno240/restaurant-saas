@@ -8,6 +8,8 @@ import {
   registerTenantE2E,
   removeAuditFailure,
   uniqueSuffix,
+  statusBody,
+  roundBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -77,7 +79,7 @@ describe('Financial chain of an order (e2e)', () => {
       customerId: ctx.customer.id,
       ...extra,
     });
-  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: next });
+  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(next));
 
   const stock = async (ctx: Ctx) =>
     Number((await prisma().inventoryBalance.findFirstOrThrow({ where: { branchId: ctx.branchId, inventoryItemId: ctx.ingredient.id } })).quantity);
@@ -261,16 +263,16 @@ describe('Financial chain of an order (e2e)', () => {
         await status(ctx, sale.body.id, 'CONFIRMED').expect(200);
         toCancel.push(sale.body.id);
       }
-      // Six table bills of the same customer: closing each takes ingredients AND credits
-      // cashback (half of them also spend some).
+      // Six table bills of the same customer: closing each credits cashback (half of them also
+      // spend some). B9: their ingredients were taken when each round went to the kitchen.
       const tabs: string[] = [];
       for (let i = 0; i < 6; i++) {
         const table = (await post(ctx.accessToken, '/v1/tables', { branchId: ctx.branchId, number: i + 1 }).expect(201)).body;
         const tab = (await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id }).expect(201)).body;
-        await post(ctx.accessToken, `/v1/tabs/${tab.id}/items`, { productId: ctx.burger.id, quantity: 1 }).expect(201);
+        await post(ctx.accessToken, `/v1/tabs/${tab.id}/rounds`, roundBody([{ productId: ctx.burger.id, quantity: 1 }])).expect(201);
         tabs.push(tab.id);
       }
-      expect(await stock(ctx)).toBe(994);
+      expect(await stock(ctx)).toBe(988);
 
       const results = await Promise.all([
         ...toCancel.map((id) => status(ctx, id, 'CANCELLED')),
@@ -285,7 +287,8 @@ describe('Financial chain of an order (e2e)', () => {
       ]);
       expect(results.map((res) => res.status)).toEqual(Array(12).fill(200));
 
-      // 6 cancelled sales returned their ingredient; 6 table bills took one each.
+      // 6 cancelled sales returned their ingredient; the 6 table bills took nothing more (their
+      // rounds already had).
       expect(await stock(ctx)).toBe(994);
       // 50000 - 6x500 used, +6x500 refunded, -3x300 used at the tables, + 10% of what each table paid:
       // 3 x floor(3700 x 10%) + 3 x floor(4000 x 10%) = 1110 + 1200.

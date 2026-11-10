@@ -57,6 +57,27 @@ describe('SessionRevocationService', () => {
     expect(redis.mget).toHaveBeenLastCalledWith('auth:revoked:user:u1');
   });
 
+  it('a suspended restaurant: every token of its accounts issued up to the cutoff dies, other tenants keep theirs', async () => {
+    const { service, redis } = build();
+    await service.revokeTenant('t1', 5000);
+    expect(
+      await service.isRevoked({ userId: 'u1', tenantId: 't1', sessionId: 's1', issuedAtMs: 5000 }),
+    ).toBe(true);
+    expect(await service.isRevoked({ userId: 'u2', tenantId: 't1', issuedAtMs: 10 })).toBe(true);
+    // A login after the reactivation is issued after the cutoff.
+    expect(
+      await service.isRevoked({ userId: 'u1', tenantId: 't1', sessionId: 's2', issuedAtMs: 5001 }),
+    ).toBe(false);
+    expect(
+      await service.isRevoked({ userId: 'u3', tenantId: 't2', sessionId: 's3', issuedAtMs: 10 }),
+    ).toBe(false);
+    expect(redis.mget).toHaveBeenLastCalledWith(
+      'auth:revoked:user:u3',
+      'auth:revoked:tenant:t2',
+      'auth:revoked:session:s3',
+    );
+  });
+
   it('keeps each mark for the access token lifetime plus a margin', async () => {
     const { service, redis } = build('15m');
     await service.revokeSession('s1');

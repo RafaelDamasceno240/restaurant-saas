@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getOrder } from '@/lib/checkout-api';
 import { ApiError } from '@/lib/api-client';
+import { formatCentsAsBRL, toCents } from '@/lib/money';
 
 interface PageProps {
   params: { slug: string; orderId: string };
@@ -30,7 +31,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 function formatBRL(value: number): string {
-  return `R$ ${value.toFixed(2).replace('.', ',')}`;
+  return formatCentsAsBRL(toCents(value));
 }
 
 // Server Component, same pattern as the public menu page: fetch happens on

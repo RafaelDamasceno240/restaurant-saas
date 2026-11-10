@@ -1,0 +1,42 @@
+# Demonstration over the internet, at no cost: a Cloudflare Quick Tunnel in front of the web of
+# deploy/compose.yml. No account, no login, no domain; the address (https://<random>.trycloudflare.com)
+# changes every time the tunnel starts and stops working when it stops. Use it only for a scheduled
+# demonstration, then close it: registering a restaurant is public, and while the tunnel is up anyone
+# with the address can reach the login and the registration page. See deploy/README.md, "Demonstração
+# pelo celular", or simply:
+#
+#   node deploy/demo.js start     # starts the stack + tunnel and prints the address
+#   node deploy/demo.js stop      # closes the tunnel and puts the API back to TRUST_PROXY_HOPS=1
+#
+# What this file changes, and only while it is used together with compose.yml:
+#   - a `tunnel` service (cloudflared, version pinned by digest) that forwards to http://web:3000 and
+#     NOTHING else. It sits on its own network with the web only: it cannot reach the API,
+#     PostgreSQL or Redis, and it publishes no port on this machine;
+#   - TRUST_PROXY_HOPS=2 on the API: browser -> Cloudflare -> cloudflared -> web -> API. Cloudflare
+#     writes the browser's address into X-Forwarded-For and the web appends cloudflared's, so the
+#     API must count two entries from the right (measured on 2026-10-16, deploy/README.md).
+# Nothing about sessions, cookies, CORS or permissions changes: the browser talks to one HTTPS
+# origin (the tunnel address) and reaches the API through the web's /api, as in any deployment.
+services:
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
+    restart: "no"
+    # The image's entrypoint is `cloudflared --no-autoupdate`; it runs as a non-root user.
+    command: ["tunnel", "--url", "http://web:3000"]
+    networks:
+      - edge
+    depends_on:
+      web:
+        condition: service_healthy
+
+  web:
+    networks:
+      - default
+      - edge
+
+  api:
+    environment:
+      TRUST_PROXY_HOPS: "2"
+
+networks:
+  edge:

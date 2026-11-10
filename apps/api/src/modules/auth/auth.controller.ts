@@ -18,7 +18,6 @@ import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { AuthService, AuthResult, RequestMeta } from './auth.service';
-import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 
@@ -48,20 +47,9 @@ export class AuthController {
     private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
-  @Public()
-  @Throttle({ default: { limit: authRateLimit, ttl: 60_000 } })
-  @Post('register')
-  @ApiOperation({ summary: 'Cria Tenant + Branch + User(OWNER) e autentica' })
-  async register(
-    @Body() dto: RegisterDto,
-    @Req() req: Request,
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    const result = await this.authService.register(dto, this.meta(req));
-    this.setRefreshCookie(res, result);
-    return this.toResponseBody(result);
-  }
-
+  // No sign-up here, on purpose: the service is sold, not self-service, so nobody creates a
+  // restaurant anonymously (POST /auth/register was removed on 2026-10-28 and answers 404 like
+  // any unknown route). Restaurants come from TenantProvisioningService, which has no route.
   @Public()
   @Throttle({ default: { limit: authRateLimit, ttl: 60_000 } })
   @Post('login')

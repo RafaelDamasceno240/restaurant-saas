@@ -26,8 +26,30 @@ export interface PublicMenuDelivery {
   minOrder: number;
 }
 
+// What the restaurant published in its profile. Phones as digits, Instagram without "@";
+// openingHours null = never informed (and then openNow is null too).
+export interface PublicRestaurant {
+  name: string;
+  slug: string;
+  description: string | null;
+  phone: string | null;
+  whatsapp: string | null;
+  instagram: string | null;
+  address: {
+    street: string | null;
+    number: string | null;
+    complement: string | null;
+    neighborhood: string | null;
+    city: string | null;
+    state: string | null;
+    zipCode: string | null;
+  } | null;
+  openingHours: { weekday: number; opens: string; closes: string }[] | null;
+  openNow: boolean | null;
+}
+
 export interface PublicMenuResponse {
-  restaurant: { name: string; slug: string };
+  restaurant: PublicRestaurant;
   delivery: PublicMenuDelivery;
   categories: PublicMenuCategory[];
 }

@@ -1,6 +1,11 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, uniqueSuffix, uniqueDocument } from './test-app.util';
+import {
+  createTestApp,
+  provisionAndSignInE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 describe('Menu (categories + products) (e2e)', () => {
   let app: INestApplication;
@@ -28,7 +33,7 @@ describe('Menu (categories + products) (e2e)', () => {
       email: `owner-${suffix}@example.com`,
       password: 'Sup3rSecret!',
     };
-    const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const res = await provisionAndSignInE2E(app, payload);
     return { accessToken: res.body.accessToken as string };
   }
 
@@ -201,5 +206,36 @@ describe('Menu (categories + products) (e2e)', () => {
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ categoryId: category.id, name: '', price: -5 })
       .expect(400);
+  });
+
+  // B6 (piloto 2026-10-23): R$ 0,00 was accepted and shown on the public menu for free.
+  it('refuses a price below R$ 0,01 on create and on edit, and accepts exactly R$ 0,01', async () => {
+    const { accessToken } = await registerTenant();
+    const category = await createCategory(accessToken);
+    const auth = { Authorization: `Bearer ${accessToken}` };
+
+    for (const price of [0, -0.01, 0.001, 0.009]) {
+      const res = await request(server)
+        .post('/v1/products')
+        .set(auth)
+        .send({ categoryId: category.id, name: `Grátis ${price}`, price })
+        .expect(400);
+      expect(JSON.stringify(res.body.message)).toContain('R$ 0,01');
+    }
+
+    const cent = await request(server)
+      .post('/v1/products')
+      .set(auth)
+      .send({ categoryId: category.id, name: 'Bala', price: 0.01 })
+      .expect(201);
+    expect(cent.body.price).toBe(0.01);
+
+    await request(server).patch(`/v1/products/${cent.body.id}`).set(auth).send({ price: 0 }).expect(400);
+    const after = await request(server).get(`/v1/products/${cent.body.id}`).set(auth).expect(200);
+    expect(after.body.price).toBe(0.01);
+
+    const list = await request(server).get('/v1/products').set(auth).expect(200);
+    const products = Array.isArray(list.body) ? list.body : list.body.data;
+    expect(products.some((p: { price: number }) => p.price < 0.01)).toBe(false);
   });
 });

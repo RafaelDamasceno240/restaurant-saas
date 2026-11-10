@@ -7,6 +7,7 @@ import {
   injectAuditFailure,
   registerTenantE2E,
   removeAuditFailure,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -57,7 +58,7 @@ describe('Cash sale refund on cancellation (e2e)', () => {
         paymentMethod,
       }).expect(201)
     ).body as { id: string; orderNumber: string };
-  const cancel = (ctx: Ctx, orderId: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: 'CANCELLED' });
+  const cancel = (ctx: Ctx, orderId: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody('CANCELLED'));
   const orderStatus = async (orderId: string) => (await prisma().order.findUniqueOrThrow({ where: { id: orderId } })).status;
   const refundsOf = (orderId: string) => prisma().cashMovement.findMany({ where: { refundedOrderId: orderId } });
 

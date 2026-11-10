@@ -387,3 +387,46 @@ describe('refresh across tabs', () => {
     expect(order).toEqual(['lock:restaurant-saas:auth-refresh', 'refresh', 'unlock']);
   });
 });
+
+describe('error messages a screen can show (B8)', () => {
+  it('keeps the Portuguese message and the code the API sent', async () => {
+    const { apiFetch } = await load();
+    handler = () => json(409, { code: 'PRODUCT_OUT_OF_STOCK', message: 'Desculpe, não temos "Milkshake" disponível.' });
+    await expect(apiFetch('/public/orders', { method: 'POST', body: {} })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'PRODUCT_OUT_OF_STOCK',
+      message: 'Desculpe, não temos "Milkshake" disponível.',
+    });
+  });
+
+  it('never passes on English, technical or missing messages', async () => {
+    const { apiFetch } = await load();
+    handler = () => json(400, { statusCode: 400, message: ['customer.name must be longer than or equal to 2 characters'], error: 'Bad Request' });
+    await expect(apiFetch('/public/orders', { method: 'POST', body: {} })).rejects.toMatchObject({
+      statusCode: 400,
+      code: 'UNKNOWN_ERROR',
+      message: 'Os dados enviados não são válidos. Confira e tente novamente.',
+    });
+    handler = () => json(502, {});
+    await expect(apiFetch('/orders')).rejects.toMatchObject({ message: 'O servidor não conseguiu concluir agora. Tente novamente em instantes.' });
+    handler = () => json(429, { message: 'ThrottlerException: Too Many Requests' });
+    await expect(apiFetch('/orders')).rejects.toMatchObject({ message: expect.stringMatching(/^Muitas tentativas/) });
+  });
+
+  it('a request that got no answer is an ApiError with status 0, not "Failed to fetch"', async () => {
+    const { apiFetch, ApiError, NETWORK_ERROR_MESSAGE } = await load();
+    handler = () => {
+      throw new TypeError('Failed to fetch');
+    };
+    const failed = apiFetch('/orders');
+    await expect(failed).rejects.toBeInstanceOf(ApiError);
+    await expect(failed).rejects.toMatchObject({ statusCode: 0, code: 'NETWORK_ERROR', message: NETWORK_ERROR_MESSAGE });
+  });
+
+  it('friendlyErrorMessage joins a list of messages into one sentence', async () => {
+    const { friendlyErrorMessage } = await load();
+    expect(friendlyErrorMessage(400, ['Telefone em formato inválido.', 'CEP em formato inválido.'])).toBe(
+      'Telefone em formato inválido. CEP em formato inválido.',
+    );
+  });
+});

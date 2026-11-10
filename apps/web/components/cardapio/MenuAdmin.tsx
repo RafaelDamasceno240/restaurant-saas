@@ -6,6 +6,8 @@ import { BookOpen, Copy, ImageIcon, Pause, Pencil, Play, Plus, Trash2 } from 'lu
 import { useAuth, ApiError } from '@/lib/auth-context';
 import { categoriesApi, Category, productsApi, Product } from '@/lib/cardapio-api';
 import { formatBRL } from '@/lib/format';
+import { productPriceProblem } from '@/lib/money';
+import { hasPermission } from '@/lib/permissions';
 import { Alert, EmptyState, ErrorState, LoadingState } from '@/components/ds/States';
 import { Badge } from '@/components/ds/Badge';
 import { Button } from '@/components/ds/Button';
@@ -32,7 +34,16 @@ function messageOf(err: unknown, fallback: string): string {
 // calls the previous panels used — only the layout and interaction changed
 // (dialogs instead of inline forms / window.confirm).
 export function MenuAdmin({ onCategoryCount }: { onCategoryCount?: (n: number) => void }) {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
+  // B12: a cashier, a waiter or a viewer reads the menu (products.read) without the buttons that
+  // change it; deleting stays with OWNER/ADMIN (products.delete, categories.delete), like the API.
+  const roles = user?.roles;
+  const canCreateCategory = hasPermission(roles, 'categories.create');
+  const canUpdateCategory = hasPermission(roles, 'categories.update');
+  const canDeleteCategory = hasPermission(roles, 'categories.delete');
+  const canCreateProduct = hasPermission(roles, 'products.create');
+  const canUpdateProduct = hasPermission(roles, 'products.update');
+  const canDeleteProduct = hasPermission(roles, 'products.delete');
   const queryClient = useQueryClient();
   const toast = useToast();
 
@@ -232,7 +243,9 @@ export function MenuAdmin({ onCategoryCount }: { onCategoryCount?: (n: number) =
 
   function submitProduct(event: FormEvent) {
     event.preventDefault();
-    setFormError(null);
+    const priceProblem = productPriceProblem(productForm.price);
+    setFormError(priceProblem);
+    if (priceProblem) return;
     saveProduct.mutate();
   }
 
@@ -266,9 +279,11 @@ export function MenuAdmin({ onCategoryCount }: { onCategoryCount?: (n: number) =
             ))}
           </Select>
         </div>
-        <Button className="ml-auto" icon={<Plus className="h-4 w-4" />} onClick={openCreateCategory}>
-          Nova categoria
-        </Button>
+        {canCreateCategory && (
+          <Button className="ml-auto" icon={<Plus className="h-4 w-4" />} onClick={openCreateCategory}>
+            Nova categoria
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -285,11 +300,17 @@ export function MenuAdmin({ onCategoryCount }: { onCategoryCount?: (n: number) =
         <EmptyState
           icon={<BookOpen />}
           title="Seu cardápio está vazio"
-          description="Comece criando uma categoria (ex.: Burgers, Bebidas) e depois adicione os produtos."
+          description={
+            canCreateCategory
+              ? 'Comece criando uma categoria (ex.: Burgers, Bebidas) e depois adicione os produtos.'
+              : 'O responsável pelo restaurante ainda não cadastrou o cardápio.'
+          }
           action={
-            <Button icon={<Plus className="h-4 w-4" />} onClick={openCreateCategory}>
-              Nova categoria
-            </Button>
+            canCreateCategory ? (
+              <Button icon={<Plus className="h-4 w-4" />} onClick={openCreateCategory}>
+                Nova categoria
+              </Button>
+            ) : undefined
           }
         />
       ) : sections.length === 0 ? (
@@ -308,41 +329,49 @@ export function MenuAdmin({ onCategoryCount }: { onCategoryCount?: (n: number) =
                 </span>
               </div>
               <div className="flex items-center gap-1">
-                <Tooltip label={category.active ? 'Pausar categoria' : 'Ativar categoria'}>
+                {canUpdateCategory && (
+                  <Tooltip label={category.active ? 'Pausar categoria' : 'Ativar categoria'}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={category.active ? 'Pausar categoria' : 'Ativar categoria'}
+                      onClick={() => toggleCategory.mutate(category)}
+                      disabled={toggleCategory.isPending}
+                    >
+                      {category.active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    </Button>
+                  </Tooltip>
+                )}
+                {canUpdateCategory && (
+                  <Tooltip label="Editar categoria">
+                    <Button variant="ghost" size="icon-sm" aria-label="Editar categoria" onClick={() => openEditCategory(category)}>
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </Tooltip>
+                )}
+                {canDeleteCategory && (
+                  <Tooltip label="Excluir categoria">
+                    <Button
+                      variant="danger-ghost"
+                      size="icon-sm"
+                      aria-label="Excluir categoria"
+                      onClick={() => setDeleteTarget({ kind: 'category', category })}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </Tooltip>
+                )}
+                {canCreateProduct && (
                   <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={category.active ? 'Pausar categoria' : 'Ativar categoria'}
-                    onClick={() => toggleCategory.mutate(category)}
-                    disabled={toggleCategory.isPending}
+                    variant="outline"
+                    size="sm"
+                    className="ml-2"
+                    icon={<Plus className="h-3.5 w-3.5" />}
+                    onClick={() => openCreateProduct(category.id)}
                   >
-                    {category.active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    Adicionar produto
                   </Button>
-                </Tooltip>
-                <Tooltip label="Editar categoria">
-                  <Button variant="ghost" size="icon-sm" aria-label="Editar categoria" onClick={() => openEditCategory(category)}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                </Tooltip>
-                <Tooltip label="Excluir categoria">
-                  <Button
-                    variant="danger-ghost"
-                    size="icon-sm"
-                    aria-label="Excluir categoria"
-                    onClick={() => setDeleteTarget({ kind: 'category', category })}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </Tooltip>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="ml-2"
-                  icon={<Plus className="h-3.5 w-3.5" />}
-                  onClick={() => openCreateProduct(category.id)}
-                >
-                  Adicionar produto
-                </Button>
+                )}
               </div>
             </div>
 
@@ -394,43 +423,51 @@ export function MenuAdmin({ onCategoryCount }: { onCategoryCount?: (n: number) =
                         <Td className="whitespace-nowrap font-semibold text-accent">{formatBRL(product.price)}</Td>
                         <Td>
                           <div className="flex items-center justify-end gap-0.5">
-                            <Tooltip label={product.active ? 'Pausar' : 'Disponibilizar'}>
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={product.active ? 'Pausar produto' : 'Disponibilizar produto'}
-                                onClick={() => toggleProduct.mutate(product)}
-                                disabled={toggleProduct.isPending}
-                              >
-                                {product.active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                              </Button>
-                            </Tooltip>
-                            <Tooltip label="Editar">
-                              <Button variant="ghost" size="icon-sm" aria-label="Editar produto" onClick={() => openEditProduct(product)}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            </Tooltip>
-                            <Tooltip label="Duplicar">
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label="Duplicar produto"
-                                onClick={() => duplicateProduct.mutate(product)}
-                                disabled={duplicateProduct.isPending}
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                            </Tooltip>
-                            <Tooltip label="Excluir">
-                              <Button
-                                variant="danger-ghost"
-                                size="icon-sm"
-                                aria-label="Excluir produto"
-                                onClick={() => setDeleteTarget({ kind: 'product', product })}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </Tooltip>
+                            {canUpdateProduct && (
+                              <Tooltip label={product.active ? 'Pausar' : 'Disponibilizar'}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={product.active ? 'Pausar produto' : 'Disponibilizar produto'}
+                                  onClick={() => toggleProduct.mutate(product)}
+                                  disabled={toggleProduct.isPending}
+                                >
+                                  {product.active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                                </Button>
+                              </Tooltip>
+                            )}
+                            {canUpdateProduct && (
+                              <Tooltip label="Editar">
+                                <Button variant="ghost" size="icon-sm" aria-label="Editar produto" onClick={() => openEditProduct(product)}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                              </Tooltip>
+                            )}
+                            {canCreateProduct && (
+                              <Tooltip label="Duplicar">
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label="Duplicar produto"
+                                  onClick={() => duplicateProduct.mutate(product)}
+                                  disabled={duplicateProduct.isPending}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                              </Tooltip>
+                            )}
+                            {canDeleteProduct && (
+                              <Tooltip label="Excluir">
+                                <Button
+                                  variant="danger-ghost"
+                                  size="icon-sm"
+                                  aria-label="Excluir produto"
+                                  onClick={() => setDeleteTarget({ kind: 'product', product })}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </Tooltip>
+                            )}
                           </div>
                         </Td>
                       </Tr>
@@ -536,7 +573,7 @@ export function MenuAdmin({ onCategoryCount }: { onCategoryCount?: (n: number) =
               <Input
                 type="number"
                 step="0.01"
-                min={0}
+                min={0.01}
                 required
                 value={productForm.price}
                 onChange={(e) => setProductForm({ ...productForm, price: e.target.value })}

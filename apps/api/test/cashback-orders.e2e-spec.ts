@@ -8,6 +8,8 @@ import {
   registerTenantE2E,
   removeAuditFailure,
   uniqueSuffix,
+  statusBody,
+  roundBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -61,7 +63,7 @@ describe('Cashback x orders (e2e)', () => {
       ...extra,
     });
 
-  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: next });
+  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(next));
   async function complete(ctx: Ctx, orderId: string) {
     for (const next of ['CONFIRMED', 'PREPARING', 'READY', 'COMPLETED']) await status(ctx, orderId, next).expect(200);
   }
@@ -282,7 +284,7 @@ describe('Cashback x orders (e2e)', () => {
       await credit(ctx, c.id, 2_000);
       const table = (await post(ctx.accessToken, '/v1/tables', { branchId: ctx.branchId, number: 1 }).expect(201)).body;
       const tab = (await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id }).expect(201)).body;
-      await post(ctx.accessToken, `/v1/tabs/${tab.id}/items`, { productId: ctx.product.id, quantity: 2 }).expect(201); // 8000
+      await post(ctx.accessToken, `/v1/tabs/${tab.id}/rounds`, roundBody([{ productId: ctx.product.id, quantity: 2 }])).expect(201); // 8000
 
       await post(ctx.accessToken, `/v1/tabs/${tab.id}/checkout`, { paymentMethod: 'PIX', idempotencyKey: key(), customerId: c.id, cashbackToUseCents: 2_000 }).expect(200);
       const sale = await prisma().order.findUniqueOrThrow({ where: { tabId: tab.id } });
@@ -299,7 +301,7 @@ describe('Cashback x orders (e2e)', () => {
       const ctx = await setup();
       const table = (await post(ctx.accessToken, '/v1/tables', { branchId: ctx.branchId, number: 1 }).expect(201)).body;
       const tab = (await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id }).expect(201)).body;
-      await post(ctx.accessToken, `/v1/tabs/${tab.id}/items`, { productId: ctx.product.id, quantity: 1 }).expect(201);
+      await post(ctx.accessToken, `/v1/tabs/${tab.id}/rounds`, roundBody([{ productId: ctx.product.id, quantity: 1 }])).expect(201);
       const refused = await post(ctx.accessToken, `/v1/tabs/${tab.id}/checkout`, { paymentMethod: 'PIX', idempotencyKey: key(), cashbackToUseCents: 500 }).expect(400);
       expect(refused.body.code).toBe('CASHBACK_CUSTOMER_REQUIRED');
       expect((await prisma().tab.findUniqueOrThrow({ where: { id: tab.id } })).status).toBe('OPEN');

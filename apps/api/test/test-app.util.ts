@@ -7,10 +7,15 @@ import { INestApplication, VersioningType } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { ProvisionTenantDto } from '../src/modules/tenants/dto/provision-tenant.dto';
+import { TenantProvisioningService } from '../src/modules/tenants/tenant-provisioning.service';
 
 // Boots a real Nest application against DATABASE_URL/REDIS_URL from the
 // environment. Intended for a disposable test database — see
 // docs/architecture.md "Testes" for how to point this at one.
+// The app of the running spec, for helpers that only get the HTTP server (registerTenantE2E).
+let currentApp: INestApplication | null = null;
+
 export async function createTestApp(): Promise<INestApplication> {
   // Every spec registers and signs in far more often than a person would. The value is SET, not
   // defaulted: AppModule is imported at the top of this file and its ConfigModule has already
@@ -26,6 +31,7 @@ export async function createTestApp(): Promise<INestApplication> {
   // APP_PIPE) — adding another ValidationPipe here would stack another
   // global pipe in front of it and defeat @AllowExtraFields().
   await app.init();
+  currentApp = app;
   return app;
 }
 
@@ -43,7 +49,7 @@ export function uniqueSuffix(): string {
 }
 
 // Deterministic-shaped, always-14-digit numeric string — Tenant.document is
-// unique, so every register() call in a test needs a fresh one. See
+// unique, so every restaurant a test provisions needs a fresh one. See
 // uniqueSuffix() above for why this can't be a simple counter.
 export function uniqueDocument(): string {
   return String(randomInt(0, 100_000_000_000_000)).padStart(14, '0');
@@ -57,9 +63,12 @@ export function uniqueDocument(): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type HttpServer = any;
 
-export async function registerTenantE2E(server: HttpServer) {
+// There is no public sign-up (removed 2026-10-28), so the suites create their restaurants the way
+// the system does: TenantProvisioningService, called on the app under test. It is reached through
+// the Nest container of the spec, never over HTTP, so nothing here exists in a running API.
+export function tenantPayloadE2E(): ProvisionTenantDto {
   const suffix = uniqueSuffix();
-  const payload = {
+  return {
     tenantName: `Restaurante ${suffix}`,
     legalName: `Restaurante LTDA ${suffix}`,
     document: uniqueDocument(),
@@ -69,18 +78,51 @@ export async function registerTenantE2E(server: HttpServer) {
     email: `owner-${suffix}@example.com`,
     password: 'Sup3rSecret!',
   };
-  const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
-  const accessToken = res.body.accessToken as string;
-  const branches = await request(server)
-    .get('/v1/branches/accessible')
-    .set('Authorization', `Bearer ${accessToken}`)
+}
+
+export function provisionTenantE2E(app: INestApplication, payload: ProvisionTenantDto = tenantPayloadE2E()) {
+  return app.get(TenantProvisioningService).provision(payload);
+}
+
+// Provisions the restaurant and signs its owner in for real (POST /auth/login). Returns the login
+// response: `body.accessToken`, `body.user` and the refresh cookie in `set-cookie`, as the old
+// sign-up response had. `forwardedFor` goes on the login request (trust-proxy.e2e-spec.ts).
+export async function provisionAndSignInE2E(
+  app: INestApplication,
+  payload: ProvisionTenantDto = tenantPayloadE2E(),
+  { forwardedFor }: { forwardedFor?: string } = {},
+): Promise<request.Response> {
+  await provisionTenantE2E(app, payload);
+  const login = request(app.getHttpServer()).post('/v1/auth/login');
+  if (forwardedFor) login.set('X-Forwarded-For', forwardedFor);
+  return login.send({ email: payload.email, password: payload.password }).expect(200);
+}
+
+// B11: a new restaurant starts with delivery OFF. The suites here test orders, not onboarding, so
+// by default the tenant gets delivery turned on (fee 0, no minimum) straight in the database, with
+// no request and no audit entry that a suite could count. `{ delivery: false }` keeps the
+// provisioning default (restaurant-onboarding.e2e-spec.ts checks it). The name is older than the
+// end of the public sign-up; it provisions through the service like everything else here.
+export async function registerTenantE2E(server: HttpServer, { delivery = true }: { delivery?: boolean } = {}) {
+  if (!currentApp) throw new Error('createTestApp() must run before registerTenantE2E()');
+  const payload = tenantPayloadE2E();
+  const { tenantId, branchId } = await provisionTenantE2E(currentApp, payload);
+  const login = await request(server)
+    .post('/v1/auth/login')
+    .send({ email: payload.email, password: payload.password })
     .expect(200);
+  if (delivery) await enableDeliveryE2E(branchId);
   return {
-    accessToken,
+    accessToken: login.body.accessToken as string,
     slug: payload.slug,
-    tenantId: res.body.user.tenantId as string,
-    branchId: branches.body[0].id as string,
+    tenantId,
+    branchId,
   };
+}
+
+export async function enableDeliveryE2E(branchId: string) {
+  if (!currentApp) throw new Error('createTestApp() must run before enableDeliveryE2E()');
+  await getPrisma(currentApp).branch.update({ where: { id: branchId }, data: { deliveryEnabled: true } });
 }
 
 export async function createActiveProductE2E(
@@ -164,4 +206,17 @@ export async function removeAuditFailure(app: INestApplication, name: string) {
   const prisma = getPrisma(app);
   await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${name} ON audit_logs`);
   await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${name}()`);
+}
+
+// Body of PATCH /orders/:id/status. Since B5 (piloto 2026-10-23) a cancellation must say why, so
+// specs that cancel only to exercise something else send a fixed reason through here.
+export const E2E_CANCEL_REASON = 'Cancelado pelo teste e2e';
+export function statusBody(status: string): { status: string; reason?: string } {
+  return status === 'CANCELLED' ? { status, reason: E2E_CANCEL_REASON } : { status };
+}
+
+// B9: items reach a tab only in rounds sent to the kitchen (POST /v1/tabs/:id/rounds). Body of one
+// round with a fresh idempotency key, for specs that only need items on the tab.
+export function roundBody(items: { productId: string; quantity: number; notes?: string }[]) {
+  return { idempotencyKey: `round-${uniqueSuffix()}`, items };
 }

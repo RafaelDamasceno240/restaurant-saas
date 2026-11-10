@@ -8,6 +8,8 @@ import {
   registerTenantE2E,
   removeAuditFailure,
   uniqueSuffix,
+  statusBody,
+  roundBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -61,7 +63,7 @@ describe('Loyalty x orders (e2e)', () => {
       }).expect(201)
     ).body as { id: string; orderNumber: string };
 
-  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: next });
+  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(next));
   async function toReady(ctx: Ctx, orderId: string) {
     for (const next of ['CONFIRMED', 'PREPARING', 'READY']) await status(ctx, orderId, next).expect(200);
   }
@@ -159,7 +161,7 @@ describe('Loyalty x orders (e2e)', () => {
       const c = await newCustomer(ctx);
       const table = (await post(ctx.accessToken, '/v1/tables', { branchId: ctx.branchId, number: 1 }).expect(201)).body;
       const tab = (await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id }).expect(201)).body;
-      await post(ctx.accessToken, `/v1/tabs/${tab.id}/items`, { productId: ctx.product.id, quantity: 3 }).expect(201); // 7770
+      await post(ctx.accessToken, `/v1/tabs/${tab.id}/rounds`, roundBody([{ productId: ctx.product.id, quantity: 3 }])).expect(201); // 7770
       await post(ctx.accessToken, `/v1/tabs/${tab.id}/checkout`, { paymentMethod: 'PIX', idempotencyKey: key(), customerId: c.id }).expect(200);
 
       const sale = await prisma().order.findUniqueOrThrow({ where: { tabId: tab.id } });

@@ -8,7 +8,7 @@ import { buildContentSecurityPolicy, createNonce } from './lib/csp';
 //    to be rendered per request for that (app/layout.tsx reads the nonce, which opts every
 //    route out of static prerendering).
 //
-// 2. Coarse, edge-runtime-safe guard for /dashboard: only checks whether a refresh_token
+// 2. Coarse, edge-runtime-safe guard for /dashboard and /super-admin: only checks whether a refresh_token
 //    cookie is present. It deliberately does NOT verify the token's signature/expiry — that
 //    requires calling the API, which happens client-side in AuthProvider on mount. This
 //    two-layer approach (fast edge check + real client-side check) avoids a network round
@@ -23,8 +23,10 @@ import { buildContentSecurityPolicy, createNonce } from './lib/csp';
 //    See docs/authentication.md "Escopo do cookie de refresh".
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const isDashboard = pathname === '/dashboard' || pathname.startsWith('/dashboard/');
-  if (isDashboard && !request.cookies.has('refresh_token')) {
+  const isSignedInArea = ['/dashboard', '/super-admin'].some(
+    (area) => pathname === area || pathname.startsWith(`${area}/`),
+  );
+  if (isSignedInArea && !request.cookies.has('refresh_token')) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 

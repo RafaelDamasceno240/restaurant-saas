@@ -6,6 +6,7 @@ import { BranchAccessService } from '../branches/branch-access.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { Tx } from '../inventory/stock-ledger.service';
 import { OrderEffectsService } from '../order-effects/order-effects.service';
+import { CashRegisterService } from '../cash/cash-register.service';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import {
   courierNotEligible,
@@ -63,6 +64,9 @@ type DeliveryRow = Prisma.DeliveryGetPayload<{ include: typeof listInclude }>;
 interface LockedOrder {
   status: OrderStatus;
   orderNumber: string;
+  branchId: string;
+  paymentMethod: string;
+  totalCents: number;
 }
 
 interface LockedDelivery {
@@ -108,6 +112,7 @@ export class DeliveryService {
     private readonly audit: AuditService,
     private readonly branchAccess: BranchAccessService,
     private readonly effects: OrderEffectsService,
+    private readonly cashRegister: CashRegisterService,
   ) {}
 
   async list(user: AuthenticatedRequestUser, query: ListDeliveriesQueryDto) {
@@ -413,8 +418,9 @@ export class DeliveryService {
   }
 
   // The operational moves: the delivery row and its order move together, in ONE
-  // transaction. Lock order is always ORDER first, then DELIVERY (the same order
-  // OrdersService uses when it cancels), so the two can never deadlock. The state is
+  // transaction. Lock order is always ORDER first, then (only to conclude an order paid in
+  // cash, B3) the CASH SESSION, then DELIVERY - the same order OrdersService uses when it
+  // cancels - so the two can never deadlock. The state is
   // re-read AFTER the locks: a duplicate or concurrent request finds the target state
   // already reached and answers as a replay (200, idempotentReplay=true, nothing written);
   // an impossible move is a 409. Idempotency is by STATE, not by attempt: a stale
@@ -425,6 +431,19 @@ export class DeliveryService {
 
     const replay = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.tenantId, scoped.orderId);
+      // B3: delivering an order paid in cash is when the courier receives the money: it enters
+      // the drawer now (an open session is required, as for any cash in or out). Asked only when
+      // this request can really deliver it; a repeat finds the SALE already written.
+      const cashSaleSessionId =
+        step === 'complete' && order.status === rule.orderFrom
+          ? await this.cashRegister.lockSessionForCashOnConclusion(tx, {
+              tenantId: user.tenantId,
+              branchId: order.branchId,
+              orderId: scoped.orderId,
+              paymentMethod: order.paymentMethod,
+              totalCents: order.totalCents,
+            })
+          : null;
       const current = await this.lockDelivery(tx, user.tenantId, id);
 
       // PENDING is also the initial state: only a delivery that already had an attempt
@@ -465,6 +484,24 @@ export class DeliveryService {
             actorUserId: user.userId,
           });
         }
+      }
+      // B3: ...and the cash the courier received enters the drawer, linked to the order.
+      if (cashSaleSessionId) {
+        const sale = await this.cashRegister.recordSale(tx, {
+          sessionId: cashSaleSessionId,
+          tenantId: user.tenantId,
+          orderId: scoped.orderId,
+          amountCents: order.totalCents,
+          userId: user.userId,
+        });
+        await this.audit.recordTx(tx, {
+          tenantId: user.tenantId,
+          userId: user.userId,
+          action: 'CASH_MOVEMENT_CREATED',
+          entity: 'CashMovement',
+          entityId: sale.id,
+          afterData: { type: 'SALE', orderId: scoped.orderId, sessionId: cashSaleSessionId, amountCents: order.totalCents, reason: 'ORDER_DELIVERED' },
+        });
       }
 
       await this.audit.recordTx(tx, {
@@ -531,7 +568,8 @@ export class DeliveryService {
 
   private async lockOrder(tx: Tx, tenantId: string, orderId: string): Promise<LockedOrder> {
     const rows = await tx.$queryRaw<LockedOrder[]>`
-      SELECT "status", "orderNumber" FROM "orders" WHERE "id" = ${orderId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      SELECT "status", "orderNumber", "branchId", "paymentMethod", "totalCents"
+      FROM "orders" WHERE "id" = ${orderId} AND "tenantId" = ${tenantId} FOR UPDATE`;
     if (rows.length === 0) throw deliveryNotFound();
     return rows[0];
   }

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
+import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -208,7 +209,11 @@ export class ListCouponsQueryDto {
 
 export class PreviewItemDto {
   @ApiProperty() @IsUUID() productId!: string;
-  @ApiProperty({ example: 2 }) @IsInt() @Min(1) @Max(50) quantity!: number;
+  @ApiProperty({ example: 2, maximum: MAX_UNITS_PER_PRODUCT })
+  @IsInt()
+  @Min(1)
+  @Max(MAX_UNITS_PER_PRODUCT, { message: MAX_UNITS_MESSAGE })
+  quantity!: number;
 }
 
 // Body of the PDV preview. Prices are NEVER part of it: the server prices the items.

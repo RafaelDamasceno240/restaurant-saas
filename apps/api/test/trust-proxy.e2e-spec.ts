@@ -6,7 +6,13 @@ import { hashToken } from '../src/modules/auth/token.util';
 // The frontend's own function (plain JS, no build): the tests below feed the API exactly what
 // the web server sends, so they hold the two sides to the same contract.
 import { appendForwardedFor } from '../../web/server/forwarded-for';
-import { createTestApp, getPrisma, uniqueDocument, uniqueSuffix } from './test-app.util';
+import {
+  createTestApp,
+  getPrisma,
+  provisionAndSignInE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 // The client address feeds the rate limiter, the audit log and
 // refresh_tokens.ip. Behind a reverse proxy it has to come from
@@ -42,13 +48,9 @@ describe('Client address behind a reverse proxy (e2e)', () => {
     };
   }
 
-  // Registers through the given X-Forwarded-For and returns the address the API recorded.
+  // Signs in through the given X-Forwarded-For and returns the address the API recorded.
   async function recordedIp(app: INestApplication, forwardedFor: string): Promise<string | null> {
-    const res = await request(app.getHttpServer())
-      .post('/v1/auth/register')
-      .set('X-Forwarded-For', forwardedFor)
-      .send(registerPayload())
-      .expect(201);
+    const res = await provisionAndSignInE2E(app, registerPayload(), { forwardedFor });
     const token = (res.headers['set-cookie'] as unknown as string[])[0].split(';')[0].split('=')[1];
     const stored = await getPrisma(app).refreshToken.findUniqueOrThrow({ where: { tokenHash: hashToken(token) } });
     return stored.ip;
@@ -76,11 +78,18 @@ describe('Client address behind a reverse proxy (e2e)', () => {
     });
 
     it('does not let a caller escape the login rate limit by inventing addresses', async () => {
-      process.env.AUTH_RATE_LIMIT_PER_MINUTE = '3';
-      await failedLogin(app, '198.51.100.1').expect(401);
-      await failedLogin(app, '198.51.100.2').expect(401);
-      await failedLogin(app, '198.51.100.3').expect(401);
-      await failedLogin(app, '198.51.100.4').expect(429);
+      // Its own app, so its own (in-memory) counters: without a trusted proxy every request here
+      // comes from the same socket, and the sign-in of the test above already counted for it.
+      const fresh = await appWithHops(0);
+      try {
+        process.env.AUTH_RATE_LIMIT_PER_MINUTE = '3';
+        await failedLogin(fresh, '198.51.100.1').expect(401);
+        await failedLogin(fresh, '198.51.100.2').expect(401);
+        await failedLogin(fresh, '198.51.100.3').expect(401);
+        await failedLogin(fresh, '198.51.100.4').expect(429);
+      } finally {
+        await fresh.close();
+      }
     });
   });
 

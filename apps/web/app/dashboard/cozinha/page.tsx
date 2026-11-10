@@ -1,22 +1,27 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Bell, BellOff } from 'lucide-react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth-context';
-import { getOrdersBoard, updateOrderStatus, OrderStatus } from '@/lib/orders-api';
+import { ApiError } from '@/lib/api-client';
+import { advanceKitchenRound, getOrdersBoard, KitchenTableRound, updateOrderStatus, OrderStatus } from '@/lib/orders-api';
 import {
   boardColumn,
+  columnCards,
   columnCountLabel,
   KDS_COLUMN_LABEL,
   KDS_POLL_INTERVAL_MS,
   KDS_STATUSES,
   KdsStatus,
+  newCardIds,
   newPendingOrderArrived,
+  ROUND_ACTION,
 } from '@/lib/kds-logic';
 import { useOrderSound } from '@/lib/use-order-sound';
 import { KdsOrderCard } from '@/components/kds/KdsOrderCard';
+import { KdsTableRoundCard } from '@/components/kds/KdsTableRoundCard';
 import { Button } from '@/components/ds/Button';
 import { ErrorState, LoadingState } from '@/components/ds/States';
 
@@ -49,22 +54,45 @@ export default function KitchenDisplayPage() {
   // New-order chime: compares this fetch's PENDING ids against the
   // previous one. The first successful load only primes the "known" set —
   // it never beeps for orders that were already sitting there when the
-  // screen was opened, only for ones that arrive afterwards.
+  // screen was opened, only for ones that arrive afterwards. B9: a new table
+  // round rings too.
   useEffect(() => {
     if (!board.data) return;
-    const currentIds = boardColumn(board.data, 'PENDING').orders.map((o) => o.id);
+    const currentIds = newCardIds(board.data);
     if (newPendingOrderArrived(knownPendingIds.current, currentIds)) {
       sound.play();
     }
     knownPendingIds.current = new Set(currentIds);
   }, [board.data, sound]);
 
+  // A refused move (no stock to confirm, no open drawer to conclude an order paid in cash...)
+  // used to leave the card as it was with no word: the reason given by the API is shown.
+  const [advanceError, setAdvanceError] = useState<string | null>(null);
   const advanceMutation = useMutation({
     mutationFn: (vars: { id: string; nextStatus: OrderStatus }) =>
       updateOrderStatus(accessToken as string, vars.id, vars.nextStatus),
+    onMutate: () => setAdvanceError(null),
+    onError: (error) =>
+      setAdvanceError(error instanceof ApiError ? error.message : 'Não foi possível atualizar o pedido. Tente novamente.'),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['kds-board'] });
       queryClient.invalidateQueries({ queryKey: ['orders'] }); // fatia 05 admin list, if open elsewhere
+    },
+  });
+
+  // B9: a table round moves the items its card shows to the next stage. Refusals (another screen
+  // got there first...) are shown like the orders' ones, and the board is read again.
+  const roundMutation = useMutation({
+    mutationFn: (round: KitchenTableRound) =>
+      advanceKitchenRound(accessToken as string, round.id, round.status, ROUND_ACTION[round.status].to),
+    onMutate: () => setAdvanceError(null),
+    onError: (error) => {
+      setAdvanceError(error instanceof ApiError ? error.message : 'Não foi possível atualizar a rodada. Tente novamente.');
+      queryClient.invalidateQueries({ queryKey: ['kds-board'] });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['kds-board'] });
+      queryClient.invalidateQueries({ queryKey: ['tab'] }); // the waiter's tab screen, if open here
     },
   });
 
@@ -91,12 +119,21 @@ export default function KitchenDisplayPage() {
         </Button>
       </div>
 
+      {advanceError && (
+        <div role="alert" className="flex shrink-0 items-start justify-between gap-3 border-b border-danger/40 bg-danger/10 px-4 py-2.5 text-sm text-danger">
+          <span>{advanceError}</span>
+          <button type="button" className="shrink-0 font-medium underline" onClick={() => setAdvanceError(null)}>
+            Fechar
+          </button>
+        </div>
+      )}
+
       {/* Phone: one column, each status as tall as its orders, the whole board scrolls (rows sized
           to their content). From `sm` up: a fixed board where each column scrolls by itself. */}
       <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-1 gap-3 overflow-y-auto p-3 sm:auto-rows-auto sm:grid-cols-2 sm:overflow-hidden xl:grid-cols-4">
         {KDS_STATUSES.map((status) => {
           const column = boardColumn(board.data, status);
-          const orders = column.orders;
+          const cards = columnCards(column);
           return (
             <section
               key={status}
@@ -115,19 +152,26 @@ export default function KitchenDisplayPage() {
                   <LoadingState className="py-6" />
                 ) : board.isError && !board.data ? (
                   <ErrorState message="Erro ao carregar." onRetry={() => board.refetch()} className="py-5" />
-                ) : orders.length === 0 ? (
+                ) : cards.length === 0 ? (
                   <p className="px-2 py-6 text-center text-sm text-subtle">Nenhum pedido.</p>
                 ) : (
-                  orders.map((order) => (
-                    <KdsOrderCard
-                      key={order.id}
-                      order={order}
-                      isAdvancing={
-                        advanceMutation.isPending && advanceMutation.variables?.id === order.id
-                      }
-                      onAdvance={(nextStatus) => advanceMutation.mutate({ id: order.id, nextStatus })}
-                    />
-                  ))
+                  cards.map((card) =>
+                    card.kind === 'order' ? (
+                      <KdsOrderCard
+                        key={card.order.id}
+                        order={card.order}
+                        isAdvancing={advanceMutation.isPending && advanceMutation.variables?.id === card.order.id}
+                        onAdvance={(nextStatus) => advanceMutation.mutate({ id: card.order.id, nextStatus })}
+                      />
+                    ) : (
+                      <KdsTableRoundCard
+                        key={`round-${card.round.id}`}
+                        round={card.round}
+                        isAdvancing={roundMutation.isPending && roundMutation.variables?.id === card.round.id}
+                        onAdvance={() => roundMutation.mutate(card.round)}
+                      />
+                    ),
+                  )
                 )}
               </div>
             </section>

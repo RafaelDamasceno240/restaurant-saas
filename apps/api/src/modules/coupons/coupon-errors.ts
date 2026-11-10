@@ -58,9 +58,17 @@ export function couponRejected(
 
 // The public checkout is anonymous: telling "no such code" from "expired" from "used up" would
 // let anyone enumerate a restaurant's codes. Every coupon refusal looks the same there.
+//
+// B10 (piloto 2026-10-23): a coupon limited per customer (BEMVINDO10) never applies online, because
+// the guest is not identified in a way the limit could trust: the phone typed at the checkout is
+// not verified, so going by it would let anyone take the coupon again with another number, or
+// spend someone else's. Such a coupon is used at the counter (PDV), with the registered customer.
+// The guest is told so in the same message for every refusal: saying it only for those coupons
+// would tell that the code exists.
 export const PUBLIC_COUPON_INVALID = {
   code: 'COUPON_INVALID',
-  message: 'Cupom inválido ou não aplicável a este pedido.',
+  message:
+    'Cupom inválido ou não aplicável a este pedido. Cupons limitados por cliente valem só no balcão, com o cadastro do cliente.',
 };
 
 export function isCouponError(error: unknown): error is HttpException {

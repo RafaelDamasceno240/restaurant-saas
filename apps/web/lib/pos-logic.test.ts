@@ -90,3 +90,14 @@ describe('pos-logic: filterPosProducts', () => {
     expect(result).toEqual([]);
   });
 });
+
+describe('PDV: 50 units of one product at most (B7)', () => {
+  it('tapping the product or "+" stops at 50', () => {
+    let items = addToCart([], burger);
+    for (let i = 0; i < 60; i++) items = addToCart(items, burger);
+    expect(items[0].quantity).toBe(50);
+    expect(incrementItem(items, burger.productId)[0].quantity).toBe(50);
+    expect(decrementItem(items, burger.productId)[0].quantity).toBe(49);
+    expect(addToCart(items, fries).map((i) => i.quantity)).toEqual([50, 1]);
+  });
+});

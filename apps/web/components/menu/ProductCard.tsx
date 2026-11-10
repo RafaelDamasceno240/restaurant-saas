@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { PublicMenuProduct } from '@/lib/public-menu-api';
 import { useCart } from '@/lib/cart-context';
 import { toCents, formatCentsAsBRL } from '@/lib/money';
+import { MAX_UNITS_HINT, atUnitLimit } from '@/lib/cart-logic';
 
 interface Props {
   product: PublicMenuProduct;
@@ -11,10 +12,13 @@ interface Props {
 }
 
 export function ProductCard({ product, restaurant }: Props) {
-  const { addItem } = useCart();
+  const { addItem, items } = useCart();
   const [justAdded, setJustAdded] = useState(false);
+  // B7: 50 units of this product already in the cart, so "Adicionar" stops.
+  const full = atUnitLimit(items.find((i) => i.productId === product.id)?.quantity ?? 0);
 
   function handleAdd() {
+    if (full) return;
     addItem(
       {
         productId: product.id,
@@ -61,14 +65,18 @@ export function ProductCard({ product, restaurant }: Props) {
           <button
             type="button"
             onClick={handleAdd}
+            disabled={full}
+            title={full ? MAX_UNITS_HINT : undefined}
             aria-label={`Adicionar ${product.name} ao carrinho`}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition touch:min-h-11 touch:px-4 touch:text-sm ${
-              justAdded
-                ? 'bg-success text-background'
-                : 'bg-primary text-primary-foreground hover:bg-primary-hover'
+              full
+                ? 'cursor-not-allowed bg-surface-hover text-muted-foreground'
+                : justAdded
+                  ? 'bg-success text-background'
+                  : 'bg-primary text-primary-foreground hover:bg-primary-hover'
             }`}
           >
-            {justAdded ? 'Adicionado ✓' : 'Adicionar'}
+            {full ? 'Limite: 50' : justAdded ? 'Adicionado ✓' : 'Adicionar'}
           </button>
         </div>
       </div>

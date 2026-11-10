@@ -3,6 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { fromCents } from '../../common/util/money.util';
 import { isTenantBlocked } from '../../common/util/tenant-status.util';
 import { BranchAccessService } from '../branches/branch-access.service';
+import { isOpenAt, readOpeningHours } from '../tenants/opening-hours';
 import { PublicMenuResponseDto } from './dto/public-menu-response.dto';
 
 @Injectable()
@@ -26,6 +27,9 @@ export class PublicMenuService {
         name: true,
         slug: true,
         status: true,
+        timezone: true,
+        description: true,
+        instagram: true,
         categories: {
           where: { active: true },
           orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
@@ -77,11 +81,41 @@ export class PublicMenuService {
     const branchId = await this.branchAccess.getDefaultBranchId(tenant.id);
     const branch = await this.prisma.branch.findUniqueOrThrow({
       where: { id: branchId },
-      select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+      select: {
+        deliveryEnabled: true,
+        deliveryFeeCents: true,
+        deliveryMinOrderCents: true,
+        phone: true,
+        whatsapp: true,
+        address: true,
+        number: true,
+        complement: true,
+        neighborhood: true,
+        city: true,
+        state: true,
+        zipCode: true,
+        openingHours: true,
+      },
     });
 
+    // What the restaurant chose to publish in its profile (same branch as above). The e-mail,
+    // the legal name and the document stay internal.
+    const { address: street, number, complement, neighborhood, city, state, zipCode } = branch;
+    const address = { street, number, complement, neighborhood, city, state, zipCode };
+    const openingHours = readOpeningHours(branch.openingHours);
+
     return {
-      restaurant: { name: tenant.name, slug: tenant.slug },
+      restaurant: {
+        name: tenant.name,
+        slug: tenant.slug,
+        description: tenant.description,
+        phone: branch.phone,
+        whatsapp: branch.whatsapp,
+        instagram: tenant.instagram,
+        address: Object.values(address).some((value) => value !== null) ? address : null,
+        openingHours,
+        openNow: isOpenAt(openingHours, new Date(), tenant.timezone),
+      },
       delivery: {
         enabled: branch.deliveryEnabled,
         fee: fromCents(branch.deliveryFeeCents),

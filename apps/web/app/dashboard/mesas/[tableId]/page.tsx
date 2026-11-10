@@ -7,27 +7,47 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { tablesApi } from '@/lib/tables-api';
-import { Tab, tabsApi } from '@/lib/tabs-api';
+import { Tab, TabItem, tabsApi } from '@/lib/tabs-api';
 import { StaffPaymentMethod } from '@/lib/checkout-api';
 import { checkoutBlockReason, TAB_PAYMENT_OPTIONS, tabPaymentOptions } from '@/lib/tab-checkout-logic';
 import { categoriesApi, productsApi } from '@/lib/cardapio-api';
 import { filterPosProducts } from '@/lib/pos-logic';
 import { formatCentsAsBRL } from '@/lib/money';
+import { MAX_UNITS_HINT, atUnitLimit } from '@/lib/cart-logic';
+import {
+  addToDraft,
+  cancelNeedsManager,
+  canServe,
+  draftTotalCents,
+  draftUnits,
+  itemsNotDelivered,
+  loadDraft,
+  RoundDraft,
+  saveDraft,
+  setDraftNotes,
+  setDraftQuantity,
+  TAB_ITEM_STATUS_LABEL,
+  tabUnitsOfProduct,
+  toRoundItems,
+  unsentLabel,
+} from '@/lib/tab-round-logic';
+import { hasPermission } from '@/lib/permissions';
 import { Button } from '@/components/ds/Button';
 import { Input } from '@/components/ds/Input';
 import { Page } from '@/components/ds/PageHeader';
 import { Alert, LoadingState } from '@/components/ds/States';
-import { ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChefHat, Send } from 'lucide-react';
+import { TabItemCancelDialog } from '@/components/tabs/TabItemCancelDialog';
 import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
 import { CashbackUseField } from '@/components/cashback/CashbackUseField';
 import { parseCashbackToUse, validateCashbackToUse } from '@/lib/cashback-logic';
 import { CreditTermsField } from '@/components/receivables/CreditTermsField';
 import { defaultTerms, localDateOnly, receivableErrorMessage, TermsDraft, toCreditTerms } from '@/lib/receivables-logic';
 
-// A comanda's items are never local state: every add/change/remove hits the
-// API immediately and re-renders from whatever it echoes back — the same
-// "backend is the only source of the total" rule as checkout/PDV, just
-// applied per-action instead of once at the end of a sale.
+// B9: the waiter builds a ROUND here (a draft on this device: add, remove, change quantities and
+// notes freely) and sends it whole with "Enviar para a cozinha". Sent items come from the API
+// only — the same "backend is the only source of the total" rule as checkout/PDV — and are never
+// edited: more units = a new round, fewer = a cancellation (with a reason).
 export default function MesaDetailPage() {
   const params = useParams<{ tableId: string }>();
   const tableId = params.tableId;
@@ -40,8 +60,6 @@ export default function MesaDetailPage() {
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
-  const [notesDraft, setNotesDraft] = useState('');
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<StaffPaymentMethod | null>(null);
   // Fiado: how the debt will be paid back, and why the picked customer cannot take this bill
@@ -55,6 +73,13 @@ export default function MesaDetailPage() {
   const [cashbackInput, setCashbackInput] = useState('');
   const [cashbackMaxCents, setCashbackMaxCents] = useState(0);
   const canLinkCustomer = (user?.roles ?? []).some((role) => ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER'].includes(role));
+  // B12: a CASHIER sees tables and tabs (tables.read, tabs.read), but opening, changing and closing
+  // a tab belong to the waiter and management: the controls are hidden or off instead of ending in 403.
+  const canOpenTab = hasPermission(user?.roles, 'tabs.create');
+  const canEditTab = hasPermission(user?.roles, 'tabs.update');
+  const canCloseTab = hasPermission(user?.roles, 'tabs.close');
+  // B9: once the kitchen has an item (or it was delivered), cancelling it is for orders.cancel.
+  const canCancelStarted = hasPermission(user?.roles, 'orders.cancel');
   const [sale, setSale] = useState<Tab | null>(null);
   // One key per checkout attempt, reused on every retry of that attempt: if
   // a response is lost and the user presses again, the backend returns the
@@ -82,7 +107,8 @@ export default function MesaDetailPage() {
     queryKey: ['tab', table?.openTabId],
     queryFn: () => tabsApi.get(accessToken as string, table!.openTabId as string),
     enabled: !!accessToken && !!table?.openTabId,
-    refetchInterval: 15_000,
+    // B9: often enough for the waiter to see the kitchen's "Pronto" without asking.
+    refetchInterval: 10_000,
   });
   const tab = tabQuery.data;
 
@@ -126,57 +152,99 @@ export default function MesaDetailPage() {
     }
   }
 
-  async function handleAddProduct(productId: string) {
-    if (!accessToken || !tab) return;
+  // B9: the round being built lives on this device (and its storage) until it is sent.
+  const [draft, setDraft] = useState<RoundDraft>([]);
+  const [draftTabId, setDraftTabId] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
+  // One key per send attempt, reused on retries of that same draft (a lost response then returns
+  // the round already made instead of sending it twice). Any change to the draft drops it.
+  const sendKeyRef = useRef<string | null>(null);
+  const sendingRef = useRef(false);
+  const [cancelTarget, setCancelTarget] = useState<TabItem | null>(null);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [servingId, setServingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (tab?.id && tab.id !== draftTabId) {
+      setDraft(loadDraft(tab.id));
+      setDraftTabId(tab.id);
+    }
+  }, [tab?.id, draftTabId]);
+
+  function updateDraft(next: RoundDraft) {
+    sendKeyRef.current = null;
+    setDraft(next);
+    if (draftTabId) saveDraft(draftTabId, next);
+  }
+
+  function handleAddProduct(product: { id: string; name: string; price: number }) {
+    if (!tab) return;
     setError(null);
+    updateDraft(addToDraft(draft, { id: product.id, name: product.name, priceCents: Math.round(product.price * 100) }));
+  }
+
+  async function handleSendRound() {
+    if (!accessToken || !tab || draft.length === 0 || sendingRef.current) return;
+    sendingRef.current = true;
+    setIsSending(true);
+    setError(null);
+    sendKeyRef.current ??= crypto.randomUUID();
     try {
-      await tabsApi.addItem(accessToken, tab.id, { productId, quantity: 1 });
+      await tabsApi.sendRound(accessToken, tab.id, { idempotencyKey: sendKeyRef.current, items: toRoundItems(draft) });
+      updateDraft([]);
       await invalidateAfterChange();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Não foi possível adicionar o produto.');
+      setError(err instanceof ApiError ? err.message : 'Não foi possível enviar para a cozinha. Tente novamente.');
+    } finally {
+      sendingRef.current = false;
+      setIsSending(false);
     }
   }
 
-  async function handleChangeQuantity(itemId: string, quantity: number) {
+  async function handleServe(itemId: string) {
     if (!accessToken || !tab) return;
     setError(null);
+    setServingId(itemId);
     try {
-      if (quantity <= 0) {
-        await tabsApi.removeItem(accessToken, tab.id, itemId);
-      } else {
-        await tabsApi.updateItem(accessToken, tab.id, itemId, { quantity });
-      }
+      await tabsApi.serveItem(accessToken, tab.id, itemId);
       await invalidateAfterChange();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Não foi possível atualizar o item.');
+      setError(err instanceof ApiError ? err.message : 'Não foi possível marcar como entregue.');
+      await invalidateAfterChange();
+    } finally {
+      setServingId(null);
     }
   }
 
-  function startEditingNotes(itemId: string, currentNotes: string | null) {
-    setEditingNotesId(itemId);
-    setNotesDraft(currentNotes ?? '');
-  }
-
-  async function handleSaveNotes(itemId: string) {
-    if (!accessToken || !tab) return;
-    setError(null);
+  async function handleCancelItem(input: { quantity: number; reason: string; returnToStock?: boolean }): Promise<boolean> {
+    if (!accessToken || !tab || !cancelTarget) return false;
+    setCancelError(null);
     try {
-      await tabsApi.updateItem(accessToken, tab.id, itemId, { notes: notesDraft.trim() });
-      setEditingNotesId(null);
+      await tabsApi.cancelItem(accessToken, tab.id, cancelTarget.id, input);
       await invalidateAfterChange();
+      return true;
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Não foi possível salvar a observação.');
+      setCancelError(err instanceof ApiError ? err.message : 'Não foi possível cancelar o item.');
+      await invalidateAfterChange();
+      return false;
     }
   }
 
-  async function handleRemoveItem(itemId: string) {
-    if (!accessToken || !tab) return;
+  async function handleCloseEmpty() {
+    if (!accessToken || !tab || submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
     setError(null);
     try {
-      await tabsApi.removeItem(accessToken, tab.id, itemId);
+      await tabsApi.closeEmpty(accessToken, tab.id);
+      updateDraft([]);
       await invalidateAfterChange();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Não foi possível remover o item.');
+      setError(err instanceof ApiError ? err.message : 'Não foi possível liberar a mesa.');
+      await invalidateAfterChange();
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
     }
   }
 
@@ -305,7 +373,11 @@ export default function MesaDetailPage() {
 
       {error && <Alert>{error}</Alert>}
 
-      {table.status === 'AVAILABLE' ? (
+      {table.status === 'AVAILABLE' && !canOpenTab ? (
+        <p className="mx-auto max-w-md rounded-card border border-line bg-surface p-5 text-center text-sm text-muted-foreground">
+          Mesa disponível. O seu perfil acompanha as comandas, mas não abre comandas.
+        </p>
+      ) : table.status === 'AVAILABLE' ? (
         <form onSubmit={handleOpenTab} className="mx-auto max-w-md space-y-3 rounded-card border border-line bg-surface p-5">
           <p className="text-sm font-semibold text-foreground">Mesa disponível — abrir comanda</p>
           <Input
@@ -320,132 +392,203 @@ export default function MesaDetailPage() {
       ) : !tab || tabQuery.isLoading ? (
         <LoadingState label="Carregando comanda..." />
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
+        <div className={`grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px] ${draft.length > 0 ? 'pb-20 lg:pb-0' : ''}`}>
           {/* Catalog */}
-          <section className="flex min-h-0 flex-col gap-3">
-            <Input placeholder="Buscar produto..." value={search} onChange={(e) => setSearch(e.target.value)} />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setCategoryId(null)}
-                className={`rounded-full px-3 py-1.5 text-sm font-medium touch:py-2.5 ${
-                  categoryId === null ? 'bg-primary text-primary-foreground' : 'bg-surface-hover text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Todas
-              </button>
-              {(categoriesQuery.data ?? []).map((category) => (
+          {canEditTab && (
+            <section className="flex min-h-0 flex-col gap-3">
+              <Input placeholder="Buscar produto..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              <div className="flex flex-wrap gap-2">
                 <button
-                  key={category.id}
                   type="button"
-                  onClick={() => setCategoryId(category.id)}
+                  onClick={() => setCategoryId(null)}
                   className={`rounded-full px-3 py-1.5 text-sm font-medium touch:py-2.5 ${
-                    categoryId === category.id ? 'bg-primary text-primary-foreground' : 'bg-surface-hover text-muted-foreground hover:text-foreground'
+                    categoryId === null ? 'bg-primary text-primary-foreground' : 'bg-surface-hover text-muted-foreground hover:text-foreground'
                   }`}
                 >
-                  {category.name}
+                  Todas
                 </button>
-              ))}
-            </div>
-
-            {productsQuery.isLoading ? (
-              <p className="text-sm text-muted-foreground">Carregando produtos...</p>
-            ) : visibleProducts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Nenhum produto encontrado.</p>
-            ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                {visibleProducts.map((product) => (
+                {(categoriesQuery.data ?? []).map((category) => (
                   <button
-                    key={product.id}
+                    key={category.id}
                     type="button"
-                    onClick={() => handleAddProduct(product.id)}
-                    className="flex flex-col items-start gap-1 rounded-card border border-line bg-surface p-3 text-left hover:border-accent hover:bg-surface-hover"
+                    onClick={() => setCategoryId(category.id)}
+                    className={`rounded-full px-3 py-1.5 text-sm font-medium touch:py-2.5 ${
+                      categoryId === category.id ? 'bg-primary text-primary-foreground' : 'bg-surface-hover text-muted-foreground hover:text-foreground'
+                    }`}
                   >
-                    <span className="font-medium">{product.name}</span>
-                    <span className="text-sm font-bold">{formatCentsAsBRL(Math.round(product.price * 100))}</span>
+                    {category.name}
                   </button>
                 ))}
               </div>
-            )}
-          </section>
+
+              {productsQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Carregando produtos...</p>
+              ) : visibleProducts.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhum produto encontrado.</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {visibleProducts.map((product) => {
+                    // B7: 50 active units of this product on the tab and in the draft (the API refuses more).
+                    const full = atUnitLimit(tabUnitsOfProduct(tab.items, draft, product.id));
+                    return (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => handleAddProduct(product)}
+                        disabled={full}
+                        title={full ? MAX_UNITS_HINT : undefined}
+                        className="flex flex-col items-start gap-1 rounded-card border border-line bg-surface p-3 text-left hover:border-accent hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <span className="font-medium">{product.name}</span>
+                        <span className="text-sm font-bold">{formatCentsAsBRL(Math.round(product.price * 100))}</span>
+                        {full && <span className="text-xs text-muted-foreground">{MAX_UNITS_HINT}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Current tab */}
           <section className="flex min-h-0 flex-col gap-3 rounded-card border border-line bg-surface p-4">
             <h2 className="text-lg font-bold text-foreground">Comanda {tab.customerName ? `— ${tab.customerName}` : ''}</h2>
 
+            {/* B9: the round being built, only on this device until it is sent. */}
+            {draft.length > 0 && (
+              <div className="space-y-2 rounded-ctl border border-warning/50 bg-warning/10 p-3">
+                <p role="status" className="flex items-center gap-2 text-sm font-semibold text-warning">
+                  <ChefHat className="h-4 w-4 shrink-0" aria-hidden />
+                  {unsentLabel(draftUnits(draft))}
+                </p>
+                <ul className="space-y-2">
+                  {draft.map((line) => (
+                    <li key={line.key} className="rounded-ctl border border-line bg-surface p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-foreground">{line.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => updateDraft(setDraftQuantity(draft, line.key, 0))}
+                          disabled={isSending}
+                          className="inline-flex items-center text-xs text-danger underline touch:min-h-10 touch:px-2"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={line.notes}
+                        onChange={(e) => updateDraft(setDraftNotes(draft, line.key, e.target.value))}
+                        placeholder="Observação (ex.: sem cebola)"
+                        aria-label={`Observação de ${line.name}`}
+                        maxLength={300}
+                        disabled={isSending}
+                        className="mt-1.5 w-full rounded-lg border border-line-strong bg-surface-2 px-2 py-1.5 text-sm text-foreground outline-none focus:border-accent"
+                      />
+                      <div className="mt-1.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => updateDraft(setDraftQuantity(draft, line.key, line.quantity - 1))}
+                            disabled={isSending}
+                            aria-label={`Diminuir ${line.name}`}
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95 disabled:opacity-40 touch:h-11 touch:w-11"
+                          >
+                            −
+                          </button>
+                          <span className="w-6 text-center text-sm font-medium">{line.quantity}</span>
+                          <button
+                            type="button"
+                            onClick={() => updateDraft(setDraftQuantity(draft, line.key, line.quantity + 1))}
+                            disabled={isSending || atUnitLimit(tabUnitsOfProduct(tab.items, draft, line.productId))}
+                            title={atUnitLimit(tabUnitsOfProduct(tab.items, draft, line.productId)) ? MAX_UNITS_HINT : undefined}
+                            aria-label={`Aumentar ${line.name}`}
+                            className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95 disabled:opacity-40 touch:h-11 touch:w-11"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <span className="text-sm font-semibold">{formatCentsAsBRL(line.unitPriceCents * line.quantity)}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <Button size="lg" fullWidth loading={isSending} onClick={handleSendRound} icon={<Send className="h-4 w-4" />}>
+                  {isSending ? 'Enviando...' : 'Enviar para a cozinha'}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => updateDraft([])}
+                  disabled={isSending}
+                  className="block w-full text-center text-xs text-muted-foreground underline touch:min-h-10"
+                >
+                  Descartar rascunho
+                </button>
+              </div>
+            )}
+
             {tab.items.length === 0 ? (
-              <p className="flex-1 text-sm text-subtle">Nenhum item adicionado.</p>
+              <p className="flex-1 text-sm text-subtle">
+                {canEditTab ? 'Nada enviado ainda. Toque nos produtos para montar a rodada.' : 'Nenhum item enviado.'}
+              </p>
             ) : (
-              <ul className="flex-1 space-y-2 overflow-y-auto">
-                {tab.items.map((item) => (
-                  <li key={item.id} className="rounded-ctl border border-line bg-surface-2 p-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-foreground">{item.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveItem(item.id)}
-                        className="inline-flex items-center text-xs text-danger underline touch:min-h-10 touch:px-2"
-                      >
-                        Remover
-                      </button>
-                    </div>
-                    {editingNotesId === item.id ? (
-                      <div className="mt-1 flex items-center gap-1">
-                        <input
-                          autoFocus
-                          type="text"
-                          value={notesDraft}
-                          onChange={(e) => setNotesDraft(e.target.value)}
-                          placeholder="Observação (ex.: sem cebola)"
-                          maxLength={300}
-                          className="flex-1 rounded-lg border border-line-strong bg-surface-2 px-2 py-1 text-xs text-foreground outline-none focus:border-accent"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleSaveNotes(item.id)}
-                          className="text-xs font-medium text-accent underline"
+              <ul className="flex-1 space-y-2 overflow-y-auto" aria-label="Itens enviados">
+                {tab.items.map((item) => {
+                  const cancelled = item.status === 'CANCELLED';
+                  const mayCancel = canEditTab && !cancelled && (!cancelNeedsManager(item.status) || canCancelStarted);
+                  return (
+                    <li key={item.id} className={`rounded-ctl border border-line bg-surface-2 p-2.5 ${cancelled ? 'opacity-60' : ''}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className={`text-sm font-medium text-foreground ${cancelled ? 'line-through' : ''}`}>
+                            <span className="mr-1 font-bold">{cancelled ? item.quantity : item.activeQuantity}×</span>
+                            {item.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {item.roundNumber ? `Rodada ${item.roundNumber}` : 'Lançado antes das rodadas'}
+                            {item.cancelledQuantity > 0 && !cancelled ? ` · ${item.cancelledQuantity} cancelado(s)` : ''}
+                          </p>
+                          {item.notes && <p className="mt-0.5 text-xs text-warning">{item.notes}</p>}
+                        </div>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            item.status === 'READY'
+                              ? 'bg-success/15 text-success'
+                              : item.status === 'PREPARING'
+                                ? 'bg-primary/20 text-brand-muted'
+                                : item.status === 'SENT'
+                                  ? 'bg-accent/20 text-foreground'
+                                  : 'bg-surface-hover text-muted-foreground'
+                          }`}
                         >
-                          Salvar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingNotesId(null)}
-                          className="text-xs text-muted-foreground underline"
-                        >
-                          Cancelar
-                        </button>
+                          {TAB_ITEM_STATUS_LABEL[item.status]}
+                        </span>
                       </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => startEditingNotes(item.id, item.notes)}
-                        className="mt-0.5 block text-left text-xs text-muted-foreground underline decoration-dotted touch:min-h-10 touch:py-2"
-                      >
-                        {item.notes || 'Adicionar observação'}
-                      </button>
-                    )}
-                    <div className="mt-1 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleChangeQuantity(item.id, item.quantity - 1)}
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
-                        >
-                          −
-                        </button>
-                        <span className="w-5 text-center text-sm font-medium">{item.quantity}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleChangeQuantity(item.id, item.quantity + 1)}
-                          className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-sm font-bold text-foreground hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
-                        >
-                          +
-                        </button>
+                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          {canEditTab && canServe(item.status) && (
+                            <Button size="sm" variant="secondary" loading={servingId === item.id} onClick={() => handleServe(item.id)}>
+                              Entregue
+                            </Button>
+                          )}
+                          {mayCancel && tab.status === 'OPEN' && (
+                            <Button
+                              size="sm"
+                              variant="danger-ghost"
+                              onClick={() => {
+                                setCancelError(null);
+                                setCancelTarget(item);
+                              }}
+                            >
+                              Cancelar
+                            </Button>
+                          )}
+                        </div>
+                        <span className="text-sm font-semibold">{formatCentsAsBRL(item.subtotalCents)}</span>
                       </div>
-                      <span className="text-sm font-semibold">{formatCentsAsBRL(item.subtotalCents)}</span>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
 
@@ -453,11 +596,33 @@ export default function MesaDetailPage() {
               <span>Total ({tab.itemCount})</span>
               <span>{formatCentsAsBRL(tab.totalCents)}</span>
             </div>
+            {draft.length > 0 && (
+              <p className="-mt-2 text-right text-xs text-muted-foreground">
+                + {formatCentsAsBRL(draftTotalCents(draft))} no rascunho (ainda não enviado)
+              </p>
+            )}
+            {itemsNotDelivered(tab.items) > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {itemsNotDelivered(tab.items) === 1
+                  ? '1 item ainda não foi entregue na mesa.'
+                  : `${itemsNotDelivered(tab.items)} itens ainda não foram entregues na mesa.`}
+              </p>
+            )}
 
-            {!checkoutOpen ? (
-              <Button size="lg" fullWidth disabled={tab.items.length === 0} onClick={openCheckout}>
-                Fechar conta
+            {!canCloseTab ? null : tab.itemCount === 0 && draft.length === 0 ? (
+              // Nothing to charge (opened by mistake, or everything cancelled): free the table.
+              <Button size="lg" variant="outline" fullWidth loading={isSubmitting} onClick={handleCloseEmpty}>
+                Liberar mesa (sem cobrança)
               </Button>
+            ) : !checkoutOpen ? (
+              <>
+                <Button size="lg" fullWidth disabled={tab.itemCount === 0 || draft.length > 0} onClick={openCheckout}>
+                  Fechar conta
+                </Button>
+                {draft.length > 0 && (
+                  <p className="text-xs text-warning">Envie ou descarte o rascunho antes de fechar a conta.</p>
+                )}
+              </>
             ) : (
               <CheckoutPanel
                 itemCount={tab.itemCount}
@@ -516,8 +681,23 @@ export default function MesaDetailPage() {
               />
             )}
           </section>
+          {/* Phone: the catalog is long and the draft sits below it, so the send stays in reach. */}
+          {draft.length > 0 && (
+            <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t border-line bg-surface px-4 py-3 shadow-lg lg:hidden">
+              <span className="flex-1 text-sm font-semibold text-warning">{unsentLabel(draftUnits(draft))}</span>
+              <Button loading={isSending} onClick={handleSendRound} icon={<Send className="h-4 w-4" />}>
+                {isSending ? 'Enviando...' : 'Enviar para a cozinha'}
+              </Button>
+            </div>
+          )}
         </div>
       )}
+      <TabItemCancelDialog
+        item={cancelTarget}
+        error={cancelError}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={handleCancelItem}
+      />
     </Page>
   );
 }

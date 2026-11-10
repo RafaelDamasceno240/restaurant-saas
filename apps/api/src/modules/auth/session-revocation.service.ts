@@ -8,6 +8,7 @@ import { durationToMs } from './token.util';
 // What an access token says about itself, as far as revocation is concerned.
 export interface AccessTokenIdentity {
   userId: string;
+  tenantId?: string;
   // Absent on tokens issued before sessions carried an id; those can only be revoked per user.
   sessionId?: string;
   issuedAtMs: number;
@@ -18,12 +19,16 @@ const TTL_MARGIN_SECONDS = 60;
 
 const sessionKey = (sessionId: string) => `auth:revoked:session:${sessionId}`;
 const userKey = (userId: string) => `auth:revoked:user:${userId}`;
+const tenantKey = (tenantId: string) => `auth:revoked:tenant:${tenantId}`;
 
 // Access tokens are stateless JWTs, so ending a session in the database (the refresh token)
 // would still leave its access token valid until it expires. This denylist closes that window:
 //   - revokeSession(): logout. Kills the access tokens of ONE session (same `sid`).
 //   - revokeUser():    refresh-token reuse detected. Kills every access token of the user issued
 //                      up to that instant; tokens from a later login are not affected.
+//   - revokeTenant():  the platform suspended the restaurant. Same cut-off, for every account of
+//                      the tenant at once; login and refresh are refused anyway while it stays
+//                      suspended (isTenantBlocked), so this only ends the tokens already out.
 // A mark only needs to live as long as the longest-lived access token it can match, so Redis
 // expires it by itself and the set never grows.
 //
@@ -51,12 +56,25 @@ export class SessionRevocationService {
     await this.write(userKey(userId), String(at));
   }
 
+  async revokeTenant(tenantId: string, at: number = Date.now()): Promise<void> {
+    await this.write(tenantKey(tenantId), String(at));
+  }
+
   async isRevoked(token: AccessTokenIdentity): Promise<boolean> {
     try {
-      const keys = [userKey(token.userId), ...(token.sessionId ? [sessionKey(token.sessionId)] : [])];
-      const [userCutoff, sessionMark] = await this.redis.mget(...keys);
-      if (sessionMark) return true;
-      return userCutoff !== null && token.issuedAtMs <= Number(userCutoff);
+      const keys = [
+        userKey(token.userId),
+        ...(token.tenantId ? [tenantKey(token.tenantId)] : []),
+        ...(token.sessionId ? [sessionKey(token.sessionId)] : []),
+      ];
+      const values = await this.redis.mget(...keys);
+      const read = (key: string) => values[keys.indexOf(key)] ?? null;
+      if (token.sessionId && read(sessionKey(token.sessionId))) return true;
+      const cutoffs = [
+        read(userKey(token.userId)),
+        token.tenantId ? read(tenantKey(token.tenantId)) : null,
+      ];
+      return cutoffs.some((cutoff) => cutoff !== null && token.issuedAtMs <= Number(cutoff));
     } catch (error) {
       this.logger.error(`Session denylist unavailable, accepting the token: ${(error as Error).message}`);
       return false;

@@ -15,6 +15,9 @@ pronto para produção**, e nada aqui foi executado em uma hospedagem.
 | `deploy/compose.yml` | Sobe os quatro serviços, com o job de migrations antes da API |
 | `deploy/verify-images.js` | Constrói as imagens sem alvo e confere o que saiu: comando de início, usuário, conteúdo |
 | `deploy/.env.example` | Variáveis do Compose, com valores de exemplo |
+| `deploy/backup.js` | Backup do banco desta pilha para fora do repositório, e a prova de que ele restaura |
+| `deploy/compose.tunnel.yml` | Acrescenta um Cloudflare Quick Tunnel na frente do web, para demonstração pelo celular |
+| `deploy/demo.js` | Abre e fecha o túnel da demonstração |
 | `.dockerignore` (raiz) | O que não entra no contexto de build (dependências, builds e `.env` locais) |
 
 ## Versões fixadas
@@ -45,7 +48,10 @@ job `migrate` termina com sucesso → API saudável → web.
 - API: http://localhost:4000 (só para verificação e só nesta máquina; o navegador fala apenas com o
   web, em `/api`)
 
-O primeiro restaurante é criado em http://localhost:3000/register.
+Não há cadastro público: `/register` só avisa que novos acessos são liberados pela equipe. O
+restaurante é criado pelo comando administrativo, dentro do container da API:
+`docker compose -f deploy/compose.yml exec api node dist/src/cli/provision-tenant.js` (pergunta os
+dados, mostra o banco alvo e só cria depois de `CRIAR`). Ver docs/PROVISIONING.md.
 
 ## Verificar
 
@@ -73,8 +79,42 @@ docker compose -f deploy/compose.yml logs --tail 100 api
 
 ```bash
 docker compose -f deploy/compose.yml down        # para e remove os containers; os dados ficam
-docker compose -f deploy/compose.yml down -v     # APAGA também o banco desta pilha
+docker compose -f deploy/compose.yml down -v     # APAGA também o banco desta pilha (e o Redis)
 ```
+
+Os dados ficam em dois volumes: `pgdata` (o banco) e `redisdata` (as sessões encerradas por logout).
+O Redis precisa do volume: sem ele, depois de `down` + `up` o token de uma sessão que fez logout volta
+a ser aceito até expirar (até 15 minutos). Medido em 2026-10-16 antes e depois da correção.
+
+## Backup e restauração
+
+```bash
+node deploy/backup.js backup                       # grava em ../restaurant-saas-backups/homolog/
+node deploy/backup.js verify <arquivo.dump>        # restaura em um banco descartável e compara
+```
+
+- `backup`: `pg_dump` (formato custom) do banco desta pilha, feito em um único snapshot, então o
+  arquivo é consistente mesmo com o sistema em uso. Grava `<banco>_<data>_<hora>.dump` e um
+  `.sha256` ao lado, **fora do repositório** (ele recusa uma pasta dentro do repositório). Confere
+  que o arquivo não está vazio e que a cópia é idêntica à que o `pg_dump` escreveu. `--out <pasta>`
+  escolhe outra pasta.
+- `verify`: sobe um PostgreSQL 16 **descartável** (container próprio, sem rede, sem porta, apagado
+  no fim), restaura o arquivo nele e compara com o banco desta pilha, que só é lido: migrations
+  aplicadas, schema (`pg_dump --schema-only`), lista de tabelas, contagem de linhas e conteúdo de
+  cada tabela (md5 das linhas, nenhum valor impresso). Sai com 0 só se tudo for igual. Se o sistema
+  foi usado depois do backup, as diferenças aparecem, e isso é esperado.
+- Nenhum dos dois restaura nada nesta pilha nem toca o banco de desenvolvimento.
+
+Resultado em 2026-10-16: backup de 192 KB; restauração em 1,6 s; migrations, schema (1.263 linhas),
+48 tabelas e as 377 linhas iguais. O mesmo arquivo, comparado depois de o sistema ser usado, acusou
+as 11 tabelas alteradas e saiu com 1.
+
+**Restaurar de verdade** (perda do banco desta pilha) **não foi executado**: parar API e web, criar
+um banco vazio e aplicar `pg_restore --no-owner` nele, conferir com `verify`, e só então apontar a
+pilha para ele. Faça o `verify` antes, para saber que o arquivo serve.
+
+Guarde uma cópia dos arquivos em um segundo lugar (pendrive, outro disco): esta pasta fica no mesmo
+disco que o banco.
 
 ## Uma imagem por função
 
@@ -211,6 +251,61 @@ Não existe migration de volta: o Prisma só anda para a frente. Desfazer uma mi
 é restaurar um backup. Em banco que já tenha pedidos: backup conferido por restauração e o preflight
 somente leitura descrito no relatório de validação, **antes** do job.
 
+## Demonstração pelo celular (Cloudflare Quick Tunnel, custo zero)
+
+Publica **só o web** desta pilha em um endereço HTTPS temporário (`https://<aleatório>.trycloudflare.com`),
+sem conta, login ou domínio. O endereço muda a cada início e deixa de funcionar quando o túnel fecha.
+Serve para demonstração marcada, com esta máquina ligada; não é hospedagem.
+
+```bash
+node deploy/backup.js backup     # antes de cada demonstração
+node deploy/demo.js start        # sobe a pilha + túnel e mostra o endereço quando ele já responde
+node deploy/demo.js status       # o túnel está no ar? em qual endereço?
+node deploy/demo.js stop         # fecha o túnel; a pilha continua rodando localmente
+```
+
+Equivalente sem o script: `docker compose -f deploy/compose.yml -f deploy/compose.tunnel.yml up -d --wait`
+e o endereço em `docker compose -f deploy/compose.yml -f deploy/compose.tunnel.yml logs tunnel`.
+
+O que `deploy/compose.tunnel.yml` muda, só enquanto é usado:
+
+- serviço `tunnel` (cloudflared 2026.9.3, fixado pelo digest, usuário não root) que encaminha para
+  `http://web:3000` e nada mais. Fica em uma rede própria só com o web: **não alcança API, PostgreSQL
+  nem Redis** e não publica porta nesta máquina;
+- `TRUST_PROXY_HOPS=2` na API (navegador → Cloudflare → cloudflared → web → API). O `stop` recria a
+  API com o valor de `deploy/.env` (1).
+
+Nada muda em autenticação, permissões, isolamento entre restaurantes, cookies ou CORS: o navegador
+fala com uma origem HTTPS só (o endereço do túnel) e chega à API pelo `/api` do web.
+
+Medido em 2026-10-16 (dois túneis, abertos por cerca de 3 e 1 minuto e fechados):
+
+- 55 verificações funcionais pelo endereço público (cadastro, login, cookie `Secure`/`HttpOnly`/
+  `SameSite=Lax` sem `Domain`, refresh com rotação, cardápio público, pedido público, quadro da
+  cozinha, PDV, isolamento entre restaurantes, logout) e 10 em navegador real com tela de celular
+  (login pelo formulário, painel, pedidos, recarga mantendo a sessão, cozinha, cardápio): todas
+  passaram.
+- Endereço do cliente: as sessões abertas pelo túnel gravaram o IP público real desta máquina, também
+  com `X-Forwarded-For` forjado (uma e duas entradas). `TRUST_PROXY_HOPS=2` está certo para este
+  caminho.
+- Pelo endereço público: `/api/health/*` e `/api/docs` respondem 404; rotas internas sem sessão, 401;
+  `/_next/image` recusa endereço externo (400); HSTS, CSP com nonce e `X-Frame-Options: DENY`
+  presentes. Depois do `stop`, o endereço antigo responde 530.
+
+Cuidados:
+
+- **Abra o endereço só depois que o `start` disser "ready".** Consultado antes de existir, o nome
+  ficou marcado como inexistente no DNS do provedor desta máquina por mais de 3 minutos (medido). O
+  `start` só consulta DNS público (1.1.1.1, 8.8.8.8) até o endereço responder. Se o celular disser que
+  o site não existe, use os dados móveis em vez do Wi-Fi, ou espere alguns minutos.
+- **Digite `https://`.** O túnel também responde em `http://`, e por `http` o navegador não guarda o
+  cookie de sessão (`Secure`): o login não se mantém.
+- **Feche ao terminar.** Enquanto o túnel está no ar, qualquer pessoa com o endereço chega à página de
+  login e ao cadastro de restaurante, que é público.
+- Os dados ficam nesta pilha (volume `pgdata`). Use o banco de homologação, nunca o de desenvolvimento.
+- Com o túnel no ar, quem abrir `http://localhost:3000` **nesta máquina** consegue escolher o próprio
+  endereço de cliente (`TRUST_PROXY_HOPS=2` sem o Cloudflare na frente). Só afeta esta máquina.
+
 ## Testes E2E em Linux
 
 ```bash
@@ -341,13 +436,15 @@ tentativa. Antes da correção, com `TRUST_PROXY_HOPS=1`, o endereço forjado er
 - **Cookie de sessão exige HTTPS fora de `localhost`.** Com `NODE_ENV=production` o cookie sai com
   `Secure`. Em `http://localhost:3000` funciona (validado no Chrome); em `http://<IP-da-rede>:3000`,
   aberto de um celular, o navegador não guarda o cookie e o login não se mantém (comportamento padrão
-  dos navegadores; não testado aqui). Teste em aparelhos pede um endereço com HTTPS.
+  dos navegadores; não testado aqui). Teste em aparelhos pede um endereço com HTTPS: o túnel da seção
+  "Demonstração pelo celular" fornece um.
 - **Uma instância da API.** O limite de requisições é em memória.
 - **A saúde da API não enxerga o schema.** `/health/ready` só confere se PostgreSQL e Redis
   respondem. Uma API iniciada contra um banco sem migrations fica "saudável" e responde `500` nas
   requisições (medido em 2026-10-11). O que garante a ordem é a implantação: o job de banco antes
   da API. Fazer a saúde conferir a versão do schema é uma decisão ainda não tomada.
-- **Sem backup.** O volume `pgdata` é o único lugar em que os dados desta pilha existem.
+- **Backup manual.** Existe `deploy/backup.js` (seção "Backup e restauração"), mas nada o executa
+  sozinho, e os arquivos ficam no mesmo disco que o banco até alguém copiá-los para outro lugar.
 - **`BIND_ADDRESS`**: mudar de `127.0.0.1` publica o web na rede. A API continua só em `127.0.0.1`,
   e PostgreSQL e Redis continuam sem porta publicada.
 - **Tamanho das imagens**: API 531 MB, web 949 MB, job de banco 1,02 GB (traz todas as dependências

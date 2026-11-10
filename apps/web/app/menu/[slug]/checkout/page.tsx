@@ -25,6 +25,9 @@ interface PageProps {
   params: { slug: string };
 }
 
+const CLOSED_MESSAGE =
+  'O restaurante está fechado agora e não está recebendo pedidos. Confira o horário de funcionamento no cardápio.';
+
 const emptyAddress = {
   street: '',
   number: '',
@@ -50,6 +53,12 @@ export default function CheckoutPage({ params }: PageProps) {
   const [notes, setNotes] = useState('');
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // The error is printed at the end of the form, right above the fixed bottom bar: on a phone it
+  // would stay out of sight (B2: "sem estoque" must be seen), so it is brought into view.
+  const errorRef = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [error]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Coupon: only the CODE is sent with the order. The preview is a read-only convenience valid for
   // the exact basket it was asked for; the order itself is re-validated and recalculated by the
@@ -62,6 +71,9 @@ export default function CheckoutPage({ params }: PageProps) {
   // Delivery terms are informational here; the server is the source of truth and
   // recomputes the fee / enforces the minimum on order creation.
   const [terms, setTerms] = useState<PublicMenuDelivery | null>(null);
+  // Same "Aberto agora" the menu shows. Only a convenience: the API refuses the order by itself
+  // (RESTAURANT_CLOSED) whatever this screen believes, and then this turns on too.
+  const [closedNow, setClosedNow] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -69,6 +81,7 @@ export default function CheckoutPage({ params }: PageProps) {
       .then((menu) => {
         // `?? null`: an older API without the field must not break the checkout.
         if (active) setTerms(menu.delivery ?? null);
+        if (active) setClosedNow(menu.restaurant?.openNow === false);
       })
       .catch(() => {
         if (active) setTerms(null);
@@ -145,6 +158,10 @@ export default function CheckoutPage({ params }: PageProps) {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (closedNow) {
+      setError(CLOSED_MESSAGE);
+      return;
+    }
 
     // Frontend validation only smooths the experience — it never replaces
     // the backend's own validation (see apps/api/.../create-order.dto.ts).
@@ -191,6 +208,10 @@ export default function CheckoutPage({ params }: PageProps) {
       router.push(`/menu/${params.slug}/pedido/${order.id}`);
     } catch (err) {
       if (err instanceof ApiError) orderKeyRef.current = null;
+      if (err instanceof ApiError && err.code === 'RESTAURANT_CLOSED') {
+        setClosedNow(true);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
       setError(
         err instanceof ApiError
           ? err.message
@@ -202,7 +223,7 @@ export default function CheckoutPage({ params }: PageProps) {
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-2xl space-y-6 bg-background px-4 pb-24 pt-6">
+    <main className="mx-auto min-h-screen max-w-2xl space-y-6 bg-background px-4 pb-36 pt-6">
       <div>
         <Link href={`/menu/${params.slug}/carrinho`} className="text-sm text-muted-foreground underline">
           ← Voltar ao carrinho
@@ -211,6 +232,12 @@ export default function CheckoutPage({ params }: PageProps) {
           Checkout{belongsToThisRestaurant && restaurantName ? ` · ${restaurantName}` : ''}
         </h1>
       </div>
+
+      {closedNow && (
+        <p role="status" className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
+          {CLOSED_MESSAGE}
+        </p>
+      )}
 
       <section className="rounded-xl border border-line bg-surface p-4">
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Resumo do pedido</h2>
@@ -447,7 +474,11 @@ export default function CheckoutPage({ params }: PageProps) {
           />
         </section>
 
-        {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+        {error && !(closedNow && error === CLOSED_MESSAGE) && (
+          <p ref={errorRef} role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
+            {error}
+          </p>
+        )}
 
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface p-4">
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
@@ -455,8 +486,8 @@ export default function CheckoutPage({ params }: PageProps) {
               <p className="text-xs text-muted-foreground">Total</p>
               <p className="text-lg font-semibold">{formatCentsAsBRL(displayTotalCents)}</p>
             </div>
-            <Button type="submit" className="w-auto px-6" disabled={isSubmitting}>
-              {isSubmitting ? 'Enviando...' : 'Confirmar pedido'}
+            <Button type="submit" className="w-auto px-6" disabled={isSubmitting || closedNow}>
+              {isSubmitting ? 'Enviando...' : closedNow ? 'Restaurante fechado' : 'Confirmar pedido'}
             </Button>
           </div>
         </div>

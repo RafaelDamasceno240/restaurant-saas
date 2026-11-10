@@ -44,7 +44,7 @@ export class OrdersController {
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
   ) {
-    return this.ordersService.updateStatus(user.tenantId, id, dto.status, user);
+    return this.ordersService.updateStatus(user.tenantId, id, dto.status, user, dto.reason);
   }
 
   @Get(':id/customer-suggestions')

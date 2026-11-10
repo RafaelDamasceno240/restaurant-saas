@@ -5,7 +5,7 @@
 #   docker compose -f deploy/compose.yml up -d --build
 #
 # This stack is closed on itself:
-#   - its own project name, network and volume: it shares nothing with the development
+#   - its own project name, network and volumes: it shares nothing with the development
 #     docker-compose.yml at the repository root (whose Postgres holds the DEV database);
 #   - DATABASE_URL and REDIS_URL are built here from the service names, never read from the
 #     environment: the stack cannot be pointed at an existing or external database by accident;
@@ -33,10 +33,15 @@ services:
       timeout: 5s
       retries: 20
 
-  # Only holds the session denylist (short-lived keys), so it keeps no volume.
+  # Only holds the session denylist (logged-out sessions, keys that expire with the access
+  # token). It still needs a volume: without one, `down` + `up` creates an empty Redis and the
+  # access token of a session that logged out is accepted again until it expires (measured on
+  # 2026-10-16). The image saves to /data on a normal stop.
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
@@ -136,3 +141,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

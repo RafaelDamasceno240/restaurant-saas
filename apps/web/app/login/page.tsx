@@ -2,7 +2,6 @@
 
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useAuth, ApiError } from '@/lib/auth-context';
@@ -41,6 +40,9 @@ export default function LoginPage() {
           <Input
             id="email"
             type="email"
+            inputMode="email"
+            autoCapitalize="none"
+            autoComplete="username"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -66,13 +68,6 @@ export default function LoginPage() {
         <Button type="submit" disabled={isSubmitting}>
           {isSubmitting ? 'Entrando...' : 'Entrar'}
         </Button>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Não tem uma conta?{' '}
-          <Link href="/register" className="font-medium text-foreground underline">
-            Criar restaurante
-          </Link>
-        </p>
       </form>
     </main>
   );

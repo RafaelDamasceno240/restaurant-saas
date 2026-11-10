@@ -3,7 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import { hashToken } from '../src/modules/auth/token.util';
-import { createTestApp, getPrisma, registerTenantE2E, uniqueDocument, uniqueSuffix } from './test-app.util';
+import {
+  createTestApp,
+  getPrisma,
+  provisionAndSignInE2E,
+  registerTenantE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 // An access token is a stateless JWT: ending the session in the database is not enough to stop
 // it. These cover the denylist that does (logout, stolen refresh token) and what a login is
@@ -41,7 +48,7 @@ describe('Auth revocation and login disclosure (e2e)', () => {
       email: `owner-${suffix}@example.com`,
       password: 'Sup3rSecret!',
     };
-    const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const res = await provisionAndSignInE2E(app, payload);
     return {
       payload,
       cookie: cookieOf(res),

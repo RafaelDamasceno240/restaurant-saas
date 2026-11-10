@@ -1,14 +1,15 @@
 'use client';
 
 import { ReactNode, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { ActiveBranchProvider } from '@/lib/use-active-branch';
 import { ToastProvider } from '@/components/ds/Toast';
 import { ErrorState, LoadingState } from '@/components/ds/States';
 import { AppShell } from '@/components/shell/AppShell';
 import { DashboardChips } from '@/components/shell/DashboardChips';
-import { DASHBOARD_NAV, filterNav } from '@/components/shell/nav';
+import { canSee, dashboardNav, routeAccess } from '@/components/shell/nav';
+import { NoAccess } from '@/components/shell/NoAccess';
 import { ChangeOwnPasswordDialog } from '@/components/users/PasswordDialogs';
 
 const ROLE_LABEL: Record<string, string> = {
@@ -26,6 +27,7 @@ const ROLE_LABEL: Record<string, string> = {
 // here (middleware.ts only checks cookie presence); pages no longer repeat it.
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const { user, isLoading, logout, sessionUnavailable, retrySession } = useAuth();
   const [changingPassword, setChangingPassword] = useState(false);
 
@@ -45,7 +47,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('online', retry);
   }, [sessionUnavailable, retrySession]);
 
-  const groups = useMemo(() => filterNav(DASHBOARD_NAV, user?.roles ?? null), [user]);
+  const groups = useMemo(() => dashboardNav(user?.roles ?? null, user?.isPlatformAdmin === true), [user]);
+  // B12: the screen opened by its address obeys the same roles as its menu entry.
+  const screen = routeAccess(pathname);
+  const allowed = !screen || canSee(screen, user?.roles ?? null);
 
   if (!isLoading && !user && sessionUnavailable) {
     return (
@@ -86,7 +91,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           }}
           topbarChips={<DashboardChips />}
         >
-          {children}
+          {allowed ? children : <NoAccess screen={screen?.label ?? 'esta tela'} />}
         </AppShell>
         {/* The API ended every session of the account with the change: sign out here too. */}
         <ChangeOwnPasswordDialog

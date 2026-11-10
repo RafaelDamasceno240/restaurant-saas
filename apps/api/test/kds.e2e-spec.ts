@@ -2,7 +2,14 @@ import { INestApplication } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { RoleName } from '@prisma/client';
 import request from 'supertest';
-import { createTestApp, getPrisma, uniqueSuffix, uniqueDocument } from './test-app.util';
+import {
+  createTestApp,
+  getPrisma,
+  provisionAndSignInE2E,
+  statusBody,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 // This slice (KDS) reuses GET /v1/orders and PATCH /v1/orders/:id/status
 // verbatim — no new endpoints. Tenant isolation and invalid-transition
@@ -40,7 +47,7 @@ describe('KDS (kitchen role access) (e2e)', () => {
       email: `owner-${suffix}@example.com`,
       password: 'Sup3rSecret!',
     };
-    const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const res = await provisionAndSignInE2E(app, payload);
     return {
       accessToken: res.body.accessToken as string,
       slug,
@@ -115,11 +122,20 @@ describe('KDS (kitchen role access) (e2e)', () => {
     expect(found.items).toEqual([expect.objectContaining({ name: 'X-Burger', quantity: 2 })]);
     expect(found.notes).toBe('Sem cebola');
 
+    // The order is paid in cash (placeOrder): since B3 (piloto 2026-10-23) concluding it puts the
+    // money in the drawer, so a drawer must be open in the branch.
+    const branches = await request(server).get('/v1/branches/accessible').set('Authorization', `Bearer ${accessToken}`).expect(200);
+    await request(server)
+      .post('/v1/cash/sessions')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({ branchId: branches.body[0].id, openingBalanceCents: 0 })
+      .expect(201);
+
     for (const status of ['CONFIRMED', 'PREPARING', 'READY', 'COMPLETED']) {
       const res = await request(server)
         .patch(`/v1/orders/${order.id}/status`)
         .set('Authorization', `Bearer ${kitchenToken}`)
-        .send({ status })
+        .send(statusBody(status))
         .expect(200);
       expect(res.body.status).toBe(status);
     }
@@ -134,7 +150,7 @@ describe('KDS (kitchen role access) (e2e)', () => {
     await request(server)
       .patch(`/v1/orders/${order.id}/status`)
       .set('Authorization', `Bearer ${kitchenToken}`)
-      .send({ status: 'CANCELLED' })
+      .send(statusBody('CANCELLED'))
       .expect(403);
   });
 });

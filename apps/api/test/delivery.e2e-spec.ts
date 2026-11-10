@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -74,7 +75,7 @@ describe('Delivery (e2e)', () => {
   async function advance(ctx: Ctx, orderId: string, to: 'CONFIRMED' | 'PREPARING' | 'READY') {
     const flow = ['CONFIRMED', 'PREPARING', 'READY'];
     for (const status of flow.slice(0, flow.indexOf(to) + 1)) {
-      await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(status)).expect(200);
     }
   }
 
@@ -288,7 +289,7 @@ describe('Delivery (e2e)', () => {
       const blocked = await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: 'COMPLETED' }).expect(409);
       expect(blocked.body.code).toBe('DELIVERY_FLOW_REQUIRED');
       for (const status of ['OUT_FOR_DELIVERY', 'DELIVERED']) {
-        const res = await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status }).expect(409);
+        const res = await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(status)).expect(409);
         expect(res.body.code).toBe('INVALID_STATUS_TRANSITION');
       }
       expect((await getPrisma(app).order.findUniqueOrThrow({ where: { id: orderId } })).status).toBe('READY');
@@ -302,7 +303,7 @@ describe('Delivery (e2e)', () => {
       const ctx = await setup();
       const order = (await publicOrder(ctx).expect(201)).body;
       const delivery = await deliveryOf(order.id);
-      await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, statusBody('CANCELLED')).expect(200);
 
       const after = await deliveryOf(order.id);
       expect(after.status).toBe('CANCELLED');
@@ -506,7 +507,7 @@ describe('Delivery (e2e)', () => {
       const ctx = await setup();
       const order = (await publicOrder(ctx).expect(201)).body;
       await failAudit(ctx.tenantId, 'DELIVERY_CANCELLED');
-      await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, { status: 'CANCELLED' }).expect(500);
+      await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, statusBody('CANCELLED')).expect(500);
       const prisma = getPrisma(app);
       expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe('PENDING');
       expect((await deliveryOf(order.id)).status).toBe('PENDING');

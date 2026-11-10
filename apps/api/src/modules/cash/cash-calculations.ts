@@ -48,6 +48,13 @@ export function computeExpectedBalanceCents(openingBalanceCents: number, totals:
   );
 }
 
+// B4 (piloto 2026-10-23): a sangria takes out money that must be in the drawer. Up to the
+// expected balance is allowed (emptying the drawer is a legitimate move); a cent more is not.
+// A drawer whose expected balance is already zero or negative accepts no sangria at all.
+export function withdrawalExceedsBalance(amountCents: number, expectedBalanceCents: number): boolean {
+  return amountCents > Math.max(0, expectedBalanceCents);
+}
+
 // difference = counted - expected (positive = sobra, negative = falta)
 export function computeDifferenceCents(countedCents: number, expectedCents: number): number {
   return countedCents - expectedCents;

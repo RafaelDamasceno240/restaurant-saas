@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCart } from '@/lib/cart-context';
 import { formatCentsAsBRL } from '@/lib/money';
+import { MAX_UNITS_HINT, atUnitLimit } from '@/lib/cart-logic';
 
 interface PageProps {
   params: { slug: string };
@@ -110,8 +111,10 @@ export default function CartPage({ params }: PageProps) {
                       <button
                         type="button"
                         onClick={() => increment(item.productId)}
+                        disabled={atUnitLimit(item.quantity)}
+                        title={atUnitLimit(item.quantity) ? MAX_UNITS_HINT : undefined}
                         aria-label={`Aumentar quantidade de ${item.name}`}
-                        className="h-7 w-7 rounded-full border border-line-strong text-sm font-medium"
+                        className="h-7 w-7 rounded-full border border-line-strong text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         +
                       </button>
@@ -120,6 +123,9 @@ export default function CartPage({ params }: PageProps) {
                       {formatCentsAsBRL(item.priceCents * item.quantity)}
                     </span>
                   </div>
+                  {atUnitLimit(item.quantity) && (
+                    <p className="mt-1 text-xs text-muted-foreground">{MAX_UNITS_HINT}</p>
+                  )}
                 </div>
               </li>
             ))}

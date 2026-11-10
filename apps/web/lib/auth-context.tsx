@@ -29,17 +29,9 @@ export interface AuthUser {
   name: string;
   email: string;
   roles: string[];
-}
-
-interface RegisterInput {
-  tenantName: string;
-  legalName: string;
-  document: string;
-  slug: string;
-  branchName: string;
-  userName: string;
-  email: string;
-  password: string;
+  // Shows the way to /super-admin. Only a hint for the screens: /platform on the API checks it
+  // again on every request.
+  isPlatformAdmin?: boolean;
 }
 
 interface AuthContextValue {
@@ -52,8 +44,8 @@ interface AuthContextValue {
   sessionUnavailable: boolean;
   retrySession: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -86,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // belongs to. Without an explicit clear, switching accounts in the same
   // tab (logout -> login as a different tenant) could briefly render the
   // previous tenant's cached data before the new fetch resolves. Clearing
-  // on every identity change (login/register/logout) is the simplest safe
+  // on every identity change (login/logout) is the simplest safe
   // fix — cheaper and more robust than trying to scope every query key by
   // tenantId by hand.
   const queryClient = useQueryClient();
@@ -170,20 +162,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [fetchMe, queryClient],
   );
 
-  const register = useCallback(
-    async (input: RegisterInput) => {
-      const res = await apiFetch<AuthResponse>('/auth/register', {
-        method: 'POST',
-        body: input,
-      });
-      queryClient.clear();
-      startSession(res.accessToken);
-      setAccessToken(res.accessToken);
-      await fetchMe(res.accessToken);
-    },
-    [fetchMe, queryClient],
-  );
-
   // The API identifies the session to end by the refresh cookie alone, so no
   // access token is sent: signing out has to work after it expired too.
   const logout = useCallback(async () => {
@@ -199,8 +177,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
   }, [queryClient]);
 
+  // Reads /auth/me again after something it carries changed (the restaurant name). Same
+  // session, same token: nothing is cleared.
+  const refreshUser = useCallback(async () => {
+    if (accessToken) await fetchMe(accessToken);
+  }, [accessToken, fetchMe]);
+
   return (
-    <AuthContext.Provider value={{ user, accessToken, isLoading, sessionUnavailable, retrySession, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        accessToken,
+        isLoading,
+        sessionUnavailable,
+        retrySession,
+        login,
+        logout,
+        refreshUser,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,11 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, uniqueSuffix, uniqueDocument } from './test-app.util';
+import {
+  createTestApp,
+  provisionAndSignInE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 describe('Public menu (e2e)', () => {
   let app: INestApplication;
@@ -29,7 +34,7 @@ describe('Public menu (e2e)', () => {
       email: `owner-${suffix}@example.com`,
       password: 'Sup3rSecret!',
     };
-    const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const res = await provisionAndSignInE2E(app, payload);
     return { accessToken: res.body.accessToken as string, slug, tenantName: payload.tenantName };
   }
 
@@ -67,7 +72,18 @@ describe('Public menu (e2e)', () => {
 
     const res = await request(server).get(`/v1/public/menu/${slug}`).expect(200);
 
-    expect(res.body.restaurant).toEqual({ name: tenantName, slug });
+    // A restaurant that never filled in its profile publishes nothing beyond its name.
+    expect(res.body.restaurant).toEqual({
+      name: tenantName,
+      slug,
+      description: null,
+      phone: null,
+      whatsapp: null,
+      instagram: null,
+      address: null,
+      openingHours: null,
+      openNow: null,
+    });
     expect(res.body.categories).toHaveLength(1);
     const [returnedCategory] = res.body.categories;
     expect(returnedCategory.name).toBe('Hambúrgueres');

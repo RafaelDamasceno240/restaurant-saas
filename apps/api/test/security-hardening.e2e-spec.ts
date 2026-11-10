@@ -6,6 +6,7 @@ import {
   createStaffAndLoginE2E,
   createTestApp,
   getPrisma,
+  provisionAndSignInE2E,
   registerTenantE2E,
   uniqueDocument,
   uniqueSuffix,
@@ -202,7 +203,7 @@ describe('Security hardening (e2e)', () => {
         email: `owner-${suffix}@example.com`,
         password: 'Sup3rSecret!',
       };
-      const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+      const res = await provisionAndSignInE2E(app, payload);
       const cookie = (res.headers['set-cookie'] as unknown as string[])[0].split(';')[0];
       return { payload, cookie, tenantId: res.body.user.tenantId as string };
     }
@@ -241,19 +242,16 @@ describe('Security hardening (e2e)', () => {
   describe('refresh token rotation', () => {
     async function registerWithCookie() {
       const suffix = uniqueSuffix();
-      const res = await request(server)
-        .post('/v1/auth/register')
-        .send({
-          tenantName: `Restaurante ${suffix}`,
-          legalName: `Restaurante LTDA ${suffix}`,
-          document: uniqueDocument(),
-          slug: `tenant-${suffix}`,
-          branchName: 'Matriz',
-          userName: `Owner ${suffix}`,
-          email: `owner-${suffix}@example.com`,
-          password: 'Sup3rSecret!',
-        })
-        .expect(201);
+      const res = await provisionAndSignInE2E(app, {
+        tenantName: `Restaurante ${suffix}`,
+        legalName: `Restaurante LTDA ${suffix}`,
+        document: uniqueDocument(),
+        slug: `tenant-${suffix}`,
+        branchName: 'Matriz',
+        userName: `Owner ${suffix}`,
+        email: `owner-${suffix}@example.com`,
+        password: 'Sup3rSecret!',
+      });
       return (res.headers['set-cookie'] as unknown as string[])[0].split(';')[0];
     }
 

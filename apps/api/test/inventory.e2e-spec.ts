@@ -7,6 +7,8 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
+  roundBody,
 } from './test-app.util';
 import { InventoryService } from '../src/modules/inventory/inventory.service';
 
@@ -33,7 +35,7 @@ describe('Inventory (e2e)', () => {
   const putRecipe = (token: string, productId: string, items: Json[]) =>
     request(server).put(`/v1/inventory/recipes/${productId}`).set(auth(token)).send({ items });
   const setStatus = (token: string, orderId: string, status: string) =>
-    request(server).patch(`/v1/orders/${orderId}/status`).set(auth(token)).send({ status });
+    request(server).patch(`/v1/orders/${orderId}/status`).set(auth(token)).send(statusBody(status));
 
   const isoDay = (offsetDays: number) => new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
 
@@ -317,14 +319,17 @@ describe('Inventory (e2e)', () => {
       expect(await getPrisma(app).stockMovement.count({ where: { inventoryItemId: bread.id, type: 'EXIT' } })).toBe(1);
     });
 
-    it('balance 5: two sales consuming 4 and 3 confirmed at the same time — exactly one is confirmed', async () => {
+    it('two PENDING sales of 4 and 1 confirmed at the same time after the stock dropped to 4 — exactly one is confirmed', async () => {
       const { accessToken, branchId } = await registerTenantE2E(server);
       const bread = await item(accessToken, 'Pão', 'UNIT');
       const sandwich = await createActiveProductE2E(server, accessToken, 'Sanduíche', 12);
       await putRecipe(accessToken, sandwich.id, [{ inventoryItemId: bread.id, quantity: 1 }]).expect(200);
       await entry(accessToken, branchId, bread.id, 5);
+      // Both are taken (4 + 1 = 5 fits). B2: a sale the stock could not cover would already be
+      // refused when taken, so the stock drops AFTER the orders exist (a loss written by hand).
       const orderA = await sellPending(accessToken, branchId, sandwich.id, 4);
-      const orderB = await sellPending(accessToken, branchId, sandwich.id, 3);
+      const orderB = await sellPending(accessToken, branchId, sandwich.id, 1);
+      await exit(accessToken, branchId, bread.id, 1).expect(201);
 
       const [a, b] = await Promise.all([
         setStatus(accessToken, orderA.id, 'CONFIRMED'),
@@ -334,7 +339,7 @@ describe('Inventory (e2e)', () => {
       const rejected = a.status === 409 ? orderA : orderB;
       expect((a.status === 409 ? a : b).body.code).toBe('INSUFFICIENT_STOCK');
       expect((await get(accessToken, `/v1/orders/${rejected.id}`).expect(200)).body.status).toBe('PENDING');
-      expect([1, 2]).toContain((await balanceOf(accessToken, branchId, bread.id)).quantity);
+      expect([0, 3]).toContain((await balanceOf(accessToken, branchId, bread.id)).quantity);
     });
 
     it('many concurrent first entries never lose an update', async () => {
@@ -425,10 +430,12 @@ describe('Inventory (e2e)', () => {
 
     it('blocks the confirmation and keeps the order PENDING when stock is insufficient', async () => {
       const { accessToken, branchId, burger, bread } = await burgerSetup();
-      const order = await sellPending(accessToken, branchId, burger.id, 11);
+      // Taken with exactly the 10 breads there are; one is lost before the kitchen confirms.
+      const order = await sellPending(accessToken, branchId, burger.id, 10);
+      await exit(accessToken, branchId, bread.id, 1).expect(201);
       expect((await setStatus(accessToken, order.id, 'CONFIRMED').expect(409)).body.code).toBe('INSUFFICIENT_STOCK');
       expect((await get(accessToken, `/v1/orders/${order.id}`).expect(200)).body.status).toBe('PENDING');
-      expect((await balanceOf(accessToken, branchId, bread.id)).quantity).toBe(10);
+      expect((await balanceOf(accessToken, branchId, bread.id)).quantity).toBe(9);
     });
 
     it('cancelling after consumption writes REVERSAL movements and keeps history; cancelling PENDING writes none', async () => {
@@ -453,11 +460,12 @@ describe('Inventory (e2e)', () => {
       expect(await prisma.stockMovement.count({ where: { referenceId: pending.id } })).toBe(0);
     });
 
-    it('table checkout (order born COMPLETED) consumes stock in the same transaction', async () => {
+    it('B9: a table round consumes stock when sent to the kitchen, and the checkout consumes nothing more', async () => {
       const { accessToken, branchId, burger, meat } = await burgerSetup();
       const table = (await request(server).post('/v1/tables').set(auth(accessToken)).send({ branchId, number: 7 }).expect(201)).body;
       const tab = (await request(server).post('/v1/tabs').set(auth(accessToken)).send({ branchId, tableId: table.id }).expect(201)).body;
-      await request(server).post(`/v1/tabs/${tab.id}/items`).set(auth(accessToken)).send({ productId: burger.id, quantity: 3 }).expect(201);
+      await request(server).post(`/v1/tabs/${tab.id}/rounds`).set(auth(accessToken)).send(roundBody([{ productId: burger.id, quantity: 3 }])).expect(201);
+      expect((await balanceOf(accessToken, branchId, meat.id)).quantity).toBe(1.55);
       await request(server)
         .post(`/v1/tabs/${tab.id}/checkout`)
         .set(auth(accessToken))

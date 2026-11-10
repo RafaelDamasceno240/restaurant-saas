@@ -29,7 +29,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Comandas | IMPLEMENTADO | `tabs`/`tab-checkout` e2e; checkout idempotente |
 | Estoque | IMPLEMENTADO | `inventory.e2e-spec` |
 | Compras e fornecedores | IMPLEMENTADO | `purchases.e2e-spec` (29 casos); ver seção "Compras de estoque" |
-| Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
+| Perfil do restaurante | IMPLEMENTADO (2026-10-17) | `restaurant-profile` e2e; nome, razão social, descrição, contato, endereço e horários editáveis por OWNER/ADMIN e exibidos no cardápio público com "aberto agora" no fuso do restaurante. Sem logo própria, feriados nem bloqueio de pedido fora do horário. Ver `docs/RESTAURANT_PROFILE.md` |
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
 | Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `ON_ACCOUNT` (fiado) abre uma conta a receber em vez de um pagamento; `provider` só `INTERNAL`; sem gateway |
 | Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
@@ -2658,3 +2658,12 @@ Meta em vigor: colocar o núcleo operacional em uso em um restaurante real até 
   - o e-mail de login diferencia maiúsculas de minúsculas; o dono que esquecer a senha não tem recuperação; o caixa não cancela pedidos; só existe uma unidade por restaurante sem intervenção no banco.
 - **Não validado:** hospedagem real, HTTPS, aparelho físico, Node 20, carga, uso por uma pessoa.
 - **Fora do escopo, não iniciado:** impressão, NFC-e, WhatsApp, IA, gateway de pagamento, cobrança SaaS.
+
+## Perfil do restaurante editável (2026-10-17)
+
+Detalhes e evidências em `RELATORIO_VALIDACAO_COMPRAS.txt`, seção 45, e em `docs/RESTAURANT_PROFILE.md`.
+
+- **Entrega:** `GET/PATCH /v1/tenants/current/profile` (`restaurant.read` / `restaurant.update`, permissão que já existia sem uso). O cardápio público passa a mostrar descrição, endereço, telefone, WhatsApp, Instagram, horários e "Aberto/Fechado agora", calculado no fuso do restaurante. A tela `/dashboard/restaurante` deixou de mostrar endereço e horários demonstrativos e ganhou um formulário que salva.
+- **Migration:** `20261017150000_restaurant_profile` (a 18ª; quatro colunas nulas). Validada em banco vazio e numa cópia de um banco de testes com 17 migrations e 16.048 restaurantes: dados iguais antes e depois, `migrate diff` sem diferença. **Não aplicada no DEV** (continua com 16) nem na homologação (17).
+- **Testes:** API unit 32 suítes / 315 testes; web unit 26 suítes / 319 testes; E2E da API 47 suítes, incluindo a nova `restaurant-profile` (10 casos), 787 testes, 0 falhas; lint e typecheck sem erro. Números completos na seção 45 do relatório.
+- **Decisão em aberto:** com o restaurante fechado, o checkout público continua aceitando pedidos.

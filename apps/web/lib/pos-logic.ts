@@ -6,6 +6,8 @@
 // small, PDV-specific pure module instead, per the explicit instruction to
 // give the PDV its own state rather than force-fit the public cart.
 
+import { atUnitLimit } from './cart-logic';
+
 export interface PosCartItem {
   productId: string;
   name: string;
@@ -21,6 +23,8 @@ export function addToCart(
   product: { productId: string; name: string; priceCents: number },
 ): PosCartItem[] {
   const existing = items.find((i) => i.productId === product.productId);
+  // B7: at most MAX_UNITS_PER_PRODUCT of one product, the same rule as the public cart.
+  if (existing && atUnitLimit(existing.quantity)) return items;
   if (existing) {
     return items.map((i) =>
       i.productId === product.productId ? { ...i, quantity: i.quantity + 1 } : i,
@@ -30,7 +34,9 @@ export function addToCart(
 }
 
 export function incrementItem(items: PosCartItem[], productId: string): PosCartItem[] {
-  return items.map((i) => (i.productId === productId ? { ...i, quantity: i.quantity + 1 } : i));
+  return items.map((i) =>
+    i.productId === productId && !atUnitLimit(i.quantity) ? { ...i, quantity: i.quantity + 1 } : i,
+  );
 }
 
 // quantity >= 1 always. Reaching 0 removes the item entirely.

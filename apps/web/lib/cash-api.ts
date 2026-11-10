@@ -1,4 +1,5 @@
 import { apiFetch } from './api-client';
+import { formatReais } from './money';
 
 // All money in the cash module travels as INTEGER CENTS, both ways. Expected
 // balance and difference are always computed by the backend.
@@ -102,5 +103,5 @@ export function parseBRLToCents(input: string): number | null {
 export function formatCents(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return '—';
   const sign = cents < 0 ? '-' : '';
-  return `${sign}R$ ${(Math.abs(cents) / 100).toFixed(2).replace('.', ',')}`;
+  return `${sign}R$ ${formatReais(cents)}`;
 }

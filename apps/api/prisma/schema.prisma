@@ -47,6 +47,11 @@ model Tenant {
   // IANA time zone of the restaurant. "Today" for due dates, overdue receivables and report
   // periods is the calendar day in this zone, never the server's.
   timezone  String       @default("America/Sao_Paulo")
+  // Public profile of the brand, shown on the public menu. The contact, the address and the
+  // opening hours belong to the branch that receives online orders (Branch).
+  description String?
+  // Instagram handle, without "@".
+  instagram   String?
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -62,6 +67,8 @@ model Tenant {
   cashMovements     CashMovement[]
   diningTables      DiningTable[]
   tabs              Tab[]
+  tabRounds         TabRound[]
+  tabItemCancellations TabItemCancellation[]
   payments          Payment[]
   inventoryItems    InventoryItem[]
   inventoryBalances InventoryBalance[]
@@ -95,6 +102,8 @@ model Branch {
   code               String
   document           String?
   phone              String?
+  // Digits only, national number (same rule as phone).
+  whatsapp           String?
   email              String?
   address            String?
   number             String?
@@ -112,6 +121,12 @@ model Branch {
   deliveryFeeCents      Int     @default(0)
   deliveryMinOrderCents Int     @default(0)
 
+  // Weekly opening hours, validated by the API (modules/tenants/opening-hours.ts):
+  // [{ "weekday": 0-6 (0 = Sunday), "opens": "HH:MM", "closes": "HH:MM" }], sorted, never
+  // overlapping; "closes" earlier than "opens" means after midnight. A weekday with no
+  // interval is closed. NULL means the restaurant never informed its hours.
+  openingHours Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -123,6 +138,7 @@ model Branch {
   cashSessions      CashRegisterSession[]
   diningTables      DiningTable[]
   tabs              Tab[]
+  tabRounds         TabRound[]
   inventoryBalances InventoryBalance[]
   stockMovements    StockMovement[]
   inventoryCounts   InventoryCount[]
@@ -166,9 +182,29 @@ model User {
   cashbackEntries      CashbackEntry[]
   createdReceivables   Receivable[]
   receivableEntries    ReceivableEntry[]
+  sentTabRounds        TabRound[]            @relation("TabRoundSentBy")
+  sentTabItems         TabItem[]             @relation("TabItemSentBy")
+  tabItemCancellations TabItemCancellation[] @relation("TabItemCancelledBy")
+  platformAdmin        PlatformAdmin?
 
   @@index([tenantId])
   @@map("users")
+}
+
+// Someone who administers the PLATFORM (every restaurant), not a restaurant. Deliberately not a
+// role: roles live inside one tenant (UserRole.tenantId) and OWNER/ADMIN must never reach other
+// tenants. Granted and revoked only by the local CLI (src/cli/platform-admin.ts); no route writes
+// it. Read on every /platform request (PlatformAdminGuard), so a revocation takes effect at once.
+model PlatformAdmin {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  // The operator who ran the grant (OS user@host), for the record. Never comes from a request.
+  grantedBy String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("platform_admins")
 }
 
 model UserBranch {
@@ -426,9 +462,13 @@ model OrderItem {
   unitPriceCents      Int
   quantity            Int
   subtotalCents       Int
+  // B9: the tab item this line bills (table checkout only). Unique: a tab item is charged at most
+  // once, whatever happens.
+  tabItemId           String? @unique
 
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  tabItem TabItem? @relation(fields: [tabItemId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
   @@index([productId])
@@ -608,11 +648,59 @@ model Tab {
   branch Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
   table  DiningTable @relation(fields: [tableId], references: [id], onDelete: Restrict)
   items  TabItem[]
+  rounds TabRound[]
   order  Order?
 
   @@index([tenantId, branchId, status])
   @@index([tableId, status])
   @@map("tabs")
+}
+
+// B9 (piloto 2026-10-23): what happens to a tab item in the kitchen. A waiter sends a ROUND of
+// items; from then on each item is produced (SENT -> PREPARING -> READY), delivered to the table
+// (SERVED) or cancelled. CANCELLED means every unit was cancelled; a partial cancellation keeps
+// the status of the units left (TabItem.cancelledQuantity).
+enum TabItemStatus {
+  SENT
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+// Where the ingredients of cancelled units went: back to the stock (a REVERSAL movement), lost
+// (the consumption written when the round was sent stays), or nowhere (nothing was consumed for
+// them: a product without a recipe, or an item launched before rounds existed).
+enum TabItemStockOutcome {
+  RETURNED
+  WASTED
+  NONE
+}
+
+// B9: one "Enviar para a cozinha" of a tab. Its items are created, and their recipes consumed,
+// in the same transaction as the round. The waiter's idempotency key makes a repeated send
+// return this round instead of a second one.
+model TabRound {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  tabId          String
+  // 1, 2, 3... within the tab: what the kitchen sees ("Mesa 4 · rodada 2").
+  number         Int
+  idempotencyKey String
+  sentByUserId   String
+  sentAt         DateTime @default(now())
+
+  tenant Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tab    Tab       @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  sentBy User      @relation("TabRoundSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
+  items  TabItem[]
+
+  @@unique([tabId, number])
+  @@unique([tabId, idempotencyKey])
+  @@index([tenantId, branchId, sentAt])
+  @@map("tab_rounds")
 }
 
 model TabItem {
@@ -627,12 +715,55 @@ model TabItem {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  tab     Tab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  // B9. NULL round = an item launched before rounds existed (migration 19): it never went to the
+  // kitchen, counts as SERVED, and its recipe is consumed at checkout. Every newer item belongs
+  // to the round that sent it (CHECK in the migration).
+  roundId           String?
+  status            TabItemStatus @default(SENT)
+  // Units cancelled so far (each cancellation is a TabItemCancellation row). What the bill
+  // charges is quantity - cancelledQuantity; all of them cancelled <=> status CANCELLED (CHECK).
+  cancelledQuantity Int           @default(0)
+  sentAt            DateTime?
+  sentByUserId      String?
+  preparingAt       DateTime?
+  readyAt           DateTime?
+  servedAt          DateTime?
+  cancelledAt       DateTime?
+
+  tab           Tab                   @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  product       Product               @relation(fields: [productId], references: [id], onDelete: Restrict)
+  round         TabRound?             @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  sentBy        User?                 @relation("TabItemSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
+  cancellations TabItemCancellation[]
+  orderItem     OrderItem?
 
   @@index([tabId])
   @@index([productId])
+  @@index([roundId])
   @@map("tab_items")
+}
+
+// B9: one cancellation of some units of a tab item - who, when, why, how many, in which state
+// they were and what happened to their ingredients. Append-only history; the stock reversal of a
+// RETURNED cancellation points at this row (StockMovement referenceType TAB_ITEM_CANCELLATION).
+model TabItemCancellation {
+  id                String              @id @default(uuid())
+  tenantId          String
+  tabItemId         String
+  quantity          Int
+  reason            String
+  statusAtCancel    TabItemStatus
+  stockOutcome      TabItemStockOutcome
+  cancelledByUserId String
+  createdAt         DateTime            @default(now())
+
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tabItem     TabItem @relation(fields: [tabItemId], references: [id], onDelete: Cascade)
+  cancelledBy User    @relation("TabItemCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tabItemId])
+  @@index([tenantId, createdAt])
+  @@map("tab_item_cancellations")
 }
 
 enum PaymentStatus {
@@ -701,6 +832,10 @@ enum StockReferenceType {
   ORDER
   INVENTORY_COUNT
   PURCHASE
+  // B9: the SALE of a tab item, written when its round is sent to the kitchen.
+  TAB_ITEM
+  // B9: the REVERSAL of a cancellation whose units went back to the stock.
+  TAB_ITEM_CANCELLATION
 }
 
 model InventoryItem {

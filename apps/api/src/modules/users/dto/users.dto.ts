@@ -14,6 +14,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { ASSIGNABLE_ROLES, AssignableRole } from '../user-rules';
+import { toLoginEmail } from '../../../common/util/login-email.util';
 
 const trimmed = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -31,7 +32,7 @@ export class CreateUserDto {
   name!: string;
 
   @ApiProperty({ example: 'ana@example.com' })
-  @Transform(trimmed)
+  @Transform(toLoginEmail)
   @IsEmail()
   @MaxLength(254)
   email!: string;

@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Bell, Wallet } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { getCurrentSession } from '@/lib/cash-api';
+import { hasPermission } from '@/lib/permissions';
 import { listOrders } from '@/lib/orders-api';
 import { useActiveBranch } from '@/lib/use-active-branch';
 import { useOrderAlerts } from '@/lib/use-order-alerts';
@@ -26,7 +27,8 @@ export function DashboardChips() {
   const cash = useQuery({
     queryKey: ['cash-current', branchId],
     queryFn: () => getCurrentSession(accessToken as string, branchId as string),
-    enabled: !!accessToken && !!branchId,
+    // B12: only roles that can read the drawer ask (the others got a 403 on every screen).
+    enabled: !!accessToken && !!branchId && hasPermission(user?.roles, 'cash.read'),
     refetchInterval: 30_000,
   });
 

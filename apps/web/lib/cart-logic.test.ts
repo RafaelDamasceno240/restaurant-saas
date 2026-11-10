@@ -1,6 +1,9 @@
 import {
   CART_STORAGE_KEY,
+  MAX_UNITS_HINT,
+  MAX_UNITS_PER_PRODUCT,
   addItem,
+  atUnitLimit,
   clearCart,
   decrementItem,
   emptyCart,
@@ -11,6 +14,7 @@ import {
   needsRestaurantSwitchConfirm,
   removeItem,
   saveCart,
+  unitsOfProduct,
 } from './cart-logic';
 import { CartState } from './cart-types';
 
@@ -133,5 +137,49 @@ describe('cart-logic', () => {
       const cartB: CartState = addItem(emptyCart, burger, restaurantB);
       expect(cartA.restaurantSlug).not.toBe(cartB.restaurantSlug);
     });
+  });
+});
+
+describe('50 units of one product at most (B7)', () => {
+  const full = (): CartState => ({
+    restaurantSlug: restaurantA.slug,
+    restaurantName: restaurantA.name,
+    items: [{ ...burger, quantity: MAX_UNITS_PER_PRODUCT }],
+  });
+
+  it('adding or "+" stops at 50; other products are still free', () => {
+    expect(MAX_UNITS_PER_PRODUCT).toBe(50);
+    expect(addItem(full(), burger, restaurantA).items[0].quantity).toBe(50);
+    expect(incrementItem(full(), burger.productId).items[0].quantity).toBe(50);
+    const withFries = addItem(full(), fries, restaurantA);
+    expect(withFries.items.map((i) => i.quantity)).toEqual([50, 1]);
+    let state: CartState = emptyCart;
+    for (let i = 0; i < 60; i++) state = addItem(state, burger, restaurantA);
+    expect(state.items[0].quantity).toBe(50);
+  });
+
+  it('"−" still works at the limit and the limit is reported for the screens', () => {
+    expect(decrementItem(full(), burger.productId).items[0].quantity).toBe(49);
+    expect(atUnitLimit(49)).toBe(false);
+    expect(atUnitLimit(50)).toBe(true);
+    expect(MAX_UNITS_HINT).toBe('Máximo de 50 unidades por produto.');
+  });
+
+  it('a saved cart with more than 50 comes back with 50', () => {
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({ restaurantSlug: 'a', restaurantName: 'A', items: [{ ...burger, quantity: 56 }, { ...fries, quantity: 3 }] }),
+    );
+    expect(loadCart()?.items.map((i) => i.quantity)).toEqual([50, 3]);
+  });
+
+  it('adds up every line of a product (tab lines)', () => {
+    const lines = [
+      { productId: 'p1', quantity: 25 },
+      { productId: 'p2', quantity: 40 },
+      { productId: 'p1', quantity: 25 },
+    ];
+    expect(unitsOfProduct(lines, 'p1')).toBe(50);
+    expect(unitsOfProduct(lines, 'p3')).toBe(0);
   });
 });

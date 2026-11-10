@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -19,6 +20,7 @@ import { CashRegisterService } from '../cash/cash-register.service';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import { statusConsumesStock } from '../inventory/inventory-calculations';
 import { ListOrdersQueryDto, OrdersBoardQueryDto } from './dto/list-orders-query.dto';
+import { CANCEL_REASON_MAX, CANCEL_REASON_MIN } from './dto/update-order-status.dto';
 import {
   OrderDetailDto,
   OrderListItemDto,
@@ -42,6 +44,14 @@ const DEFAULT_PAGE_SIZE = 20;
 // of the flow, and how many orders each column carries at most.
 export const ORDER_BOARD_STATUSES = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY'] as const satisfies readonly OrderStatus[];
 export const ORDER_BOARD_COLUMN_LIMIT = 50;
+
+// B9: the column of the board each production status of a table round goes to.
+const ROUND_COLUMN: Record<'SENT' | 'PREPARING' | 'READY', (typeof ORDER_BOARD_STATUSES)[number]> = {
+  SENT: 'PENDING',
+  PREPARING: 'PREPARING',
+  READY: 'READY',
+};
+const ROUND_STATUS_ORDER = ['SENT', 'PREPARING', 'READY'] as const;
 
 @Injectable()
 export class OrdersService {
@@ -91,8 +101,24 @@ export class OrdersService {
   // same order (newest first) and the same item shape, so nothing changes in what is shown.
   async boardForUser(user: AuthenticatedRequestUser, query: OrdersBoardQueryDto): Promise<OrdersBoardResponseDto> {
     const scope = await this.listScope(user, query.branchId);
-    const results = await this.prisma.$transaction(
-      ORDER_BOARD_STATUSES.flatMap((status) => [
+    const [rounds, ...results] = await this.prisma.$transaction([
+      // B9: the table rounds with anything still in production, in the same request (one poll =
+      // one request, whatever the board shows). Same scope as the orders: tenant from the token,
+      // branches the caller may see. The tab may already be paid: production goes on.
+      this.prisma.tabRound.findMany({
+        where: {
+          tenantId: scope.tenantId as string,
+          ...(scope.branchId ? { branchId: scope.branchId as Prisma.StringFilter | string } : {}),
+          items: { some: { status: { in: [...ROUND_STATUS_ORDER] } } },
+        },
+        orderBy: { sentAt: 'desc' },
+        take: ORDER_BOARD_COLUMN_LIMIT * ROUND_STATUS_ORDER.length,
+        include: {
+          tab: { select: { table: { select: { number: true, name: true } } } },
+          items: { where: { status: { in: [...ROUND_STATUS_ORDER] } }, orderBy: { createdAt: 'asc' } },
+        },
+      }),
+      ...ORDER_BOARD_STATUSES.flatMap((status) => [
         this.prisma.order.count({ where: { ...scope, status } }),
         this.prisma.order.findMany({
           where: { ...scope, status },
@@ -101,14 +127,38 @@ export class OrdersService {
           include: { items: true, delivery: deliverySummarySelect, _count: { select: { items: true } } },
         }),
       ]),
-    );
+    ]);
+    const roundCards = rounds.map((round) => {
+      const status = ROUND_STATUS_ORDER.find((s) => round.items.some((item) => item.status === s))!;
+      return {
+        id: round.id,
+        tabId: round.tabId,
+        roundNumber: round.number,
+        tableNumber: round.tab.table.number,
+        tableName: round.tab.table.name,
+        sentAt: round.sentAt,
+        status,
+        items: round.items.map((item) => ({
+          id: item.id,
+          name: item.productNameSnapshot,
+          quantity: item.quantity - item.cancelledQuantity,
+          notes: item.notes,
+          status: item.status,
+        })),
+      };
+    });
     return {
       columnLimit: ORDER_BOARD_COLUMN_LIMIT,
-      columns: ORDER_BOARD_STATUSES.map((status, index) => ({
-        status,
-        total: results[index * 2] as number,
-        data: (results[index * 2 + 1] as OrderWithItemsAndCount[]).map((o) => this.toListItemDto(o)),
-      })),
+      columns: ORDER_BOARD_STATUSES.map((status, index) => {
+        const inColumn = roundCards.filter((card) => ROUND_COLUMN[card.status as keyof typeof ROUND_COLUMN] === status);
+        return {
+          status,
+          total: results[index * 2] as number,
+          data: (results[index * 2 + 1] as OrderWithItemsAndCount[]).map((o) => this.toListItemDto(o)),
+          tableRounds: inColumn.slice(0, ORDER_BOARD_COLUMN_LIMIT),
+          tableRoundsTotal: inColumn.length,
+        };
+      }),
     };
   }
 
@@ -167,6 +217,7 @@ export class OrdersService {
     id: string,
     newStatus: OrderStatus,
     actor: AuthenticatedRequestUser,
+    reason?: string,
   ): Promise<OrderDetailDto> {
     // `orders.update` (checked by the controller's guard) is the baseline
     // gate for this whole endpoint. Cancelling is treated as a stricter
@@ -176,6 +227,15 @@ export class OrdersService {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
         message: 'Você não tem permissão para cancelar pedidos.',
+      });
+    }
+    // B5: the DTO already demands it on the HTTP route; checked here too so no other caller can
+    // cancel without saying why.
+    const cancelReason = reason?.trim() ?? '';
+    if (newStatus === 'CANCELLED' && cancelReason.length < CANCEL_REASON_MIN) {
+      throw new BadRequestException({
+        code: 'CANCEL_REASON_REQUIRED',
+        message: `Informe o motivo do cancelamento (de ${CANCEL_REASON_MIN} a ${CANCEL_REASON_MAX} caracteres).`,
       });
     }
 
@@ -190,8 +250,11 @@ export class OrdersService {
     let result: { before: OrderStatus; movements: StockMovement[] };
     try {
       result = await this.prisma.$transaction(async (tx) => {
-        const rows = await tx.$queryRaw<{ status: OrderStatus; branchId: string; fulfillmentType: string; orderNumber: string }[]>`
-          SELECT "status", "branchId", "fulfillmentType", "orderNumber" FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
+        const rows = await tx.$queryRaw<
+          { status: OrderStatus; branchId: string; fulfillmentType: string; orderNumber: string; paymentMethod: string; totalCents: number }[]
+        >`
+          SELECT "status", "branchId", "fulfillmentType", "orderNumber", "paymentMethod", "totalCents"
+          FROM "orders" WHERE "id" = ${id} AND "tenantId" = ${tenantId} FOR UPDATE`;
         if (rows.length === 0 || (allowedBranchIds && !allowedBranchIds.includes(rows[0].branchId))) {
           throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
         }
@@ -206,6 +269,20 @@ export class OrdersService {
           newStatus === 'CANCELLED' && (isValidOrderStatusTransition(before, 'CANCELLED') || (before === 'READY' && isDelivery));
         const cashRefund = mayCancel
           ? await this.cashRegister.lockSessionForSaleRefund(tx, { tenantId, branchId: rows[0].branchId, orderId: id })
+          : null;
+        // B3: concluding an order paid in cash that has not entered the drawer yet (online, paid on
+        // pickup) is when the money is received: same place in the lock order, same rule (no open
+        // session, no conclusion). Only when this request can really conclude it. A DELIVERY order
+        // is concluded by DeliveryService (DELIVERED), which does the same.
+        const mayComplete = newStatus === 'COMPLETED' && !isDelivery && isValidOrderStatusTransition(before, 'COMPLETED');
+        const cashSaleSessionId = mayComplete
+          ? await this.cashRegister.lockSessionForCashOnConclusion(tx, {
+              tenantId,
+              branchId: rows[0].branchId,
+              orderId: id,
+              paymentMethod: rows[0].paymentMethod,
+              totalCents: rows[0].totalCents,
+            })
           : null;
         // Then DELIVERY — the same order DeliveryService uses (it never touches the cash session).
         const deliveryStatus = isDelivery ? await this.lockDeliveryStatus(tx, tenantId, id) : null;
@@ -234,6 +311,35 @@ export class OrdersService {
         // also in this transaction: cancelled and refunded commit together.
         if (newStatus === 'CANCELLED') {
           await this.effects.onOrderCancelledInTx(tx, { tenantId, orderId: id, actorUserId: actor.userId });
+          // B5: who cancelled, which order, when (createdAt) and why, in the same transaction:
+          // the cancellation and its record commit together, or neither does.
+          await this.audit.recordTx(tx, {
+            tenantId,
+            userId: actor.userId,
+            action: 'ORDER_CANCELLED',
+            entity: 'Order',
+            entityId: id,
+            beforeData: { status: before },
+            afterData: { status: 'CANCELLED', orderNumber: rows[0].orderNumber, reason: cancelReason },
+          });
+        }
+        // B3: ...and the cash received for it enters the drawer, linked to the order (CashMovement.orderId).
+        if (cashSaleSessionId) {
+          const sale = await this.cashRegister.recordSale(tx, {
+            sessionId: cashSaleSessionId,
+            tenantId,
+            orderId: id,
+            amountCents: rows[0].totalCents,
+            userId: actor.userId,
+          });
+          await this.audit.recordTx(tx, {
+            tenantId,
+            userId: actor.userId,
+            action: 'CASH_MOVEMENT_CREATED',
+            entity: 'CashMovement',
+            entityId: sale.id,
+            afterData: { type: 'SALE', orderId: id, sessionId: cashSaleSessionId, amountCents: rows[0].totalCents, reason: 'ORDER_COMPLETED' },
+          });
         }
         // ...and so does the cash it put in the drawer. The movement and its audit entry are part
         // of the cancellation: cancelled and refunded commit together, or neither does.

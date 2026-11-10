@@ -30,7 +30,7 @@ export function DeliverySettingsDialog({
   const errorMessage = useErrorMessage();
   const queryClient = useQueryClient();
   const saving = useRef(false);
-  const [enabled, setEnabled] = useState(true);
+  const [enabled, setEnabled] = useState(false);
   const [fee, setFee] = useState('0,00');
   const [minOrder, setMinOrder] = useState('0,00');
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +121,18 @@ export function DeliverySettingsDialog({
               placeholder="0,00"
             />
           </Field>
+          {/* B11: a new restaurant starts with delivery off; turning it on with no fee or no minimum
+              is allowed (free delivery is a choice) but never goes unnoticed. */}
+          {enabled && (costToCents(fee) === 0 || costToCents(minOrder) === 0) && (
+            <Alert tone="warning">
+              {[
+                costToCents(fee) === 0 ? 'A taxa está em R$ 0,00: a entrega sai grátis para o cliente.' : null,
+                costToCents(minOrder) === 0 ? 'Sem pedido mínimo: qualquer valor pode ser entregue.' : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            </Alert>
+          )}
           {error && <Alert tone="danger">{error}</Alert>}
         </div>
       )}

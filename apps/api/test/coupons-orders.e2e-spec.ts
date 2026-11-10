@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -433,7 +434,7 @@ describe('Coupons x orders (e2e)', () => {
       await request(server)
         .patch(`/v1/orders/${res.body.id}/status`)
         .set(auth(ctx.accessToken))
-        .send({ status: 'CANCELLED' })
+        .send(statusBody('CANCELLED'))
         .expect(200);
       expect(await usage(c.id)).toBe(1);
       await failed(
@@ -596,6 +597,22 @@ describe('Coupons x orders (e2e)', () => {
         'COUPON_INVALID',
       );
       expect([await usage(c.id), await redemptions(c.id)]).toEqual([0, 0]);
+      // B10: the guest is told where such a coupon works, in the one message every refusal gets
+      // (so it does not reveal that the code exists), at the checkout and in its preview.
+      const online = await pub(ctx, { couponCode: c.code }).expect(400);
+      expect(online.body.message).toBe(
+        'Cupom inválido ou não aplicável a este pedido. Cupons limitados por cliente valem só no balcão, com o cadastro do cliente.',
+      );
+      const unknown = await pub(ctx, { couponCode: 'NAOEXISTE123' }).expect(400);
+      expect(unknown.body).toMatchObject({ code: 'COUPON_INVALID', message: online.body.message });
+      const preview = await request(server)
+        .post('/v1/public/orders/coupon-preview')
+        .send({ restaurantSlug: ctx.slug, code: c.code, items: [{ productId: ctx.product.id, quantity: 1 }] })
+        .expect(400);
+      expect(preview.body).toMatchObject({ code: 'COUPON_INVALID', message: online.body.message });
+      // ...and at the counter, with the registered customer, it works.
+      const counter = await pdv(ctx.accessToken, ctx, { couponCode: c.code, customerId: cust.id }).expect(201);
+      expect(counter.body.discount).toBe(2.5);
     });
 
     it('tenant isolation: a guest of restaurant A cannot use a coupon of restaurant B', async () => {

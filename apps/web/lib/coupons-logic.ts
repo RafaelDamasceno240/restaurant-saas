@@ -7,6 +7,7 @@ import type {
   CouponStatusFilter,
   CouponUpdateInput,
 } from './coupons-api';
+import { formatCentsAsBRL } from './money';
 
 // Presentation and form rules for the coupons screen. The API is the authority (it normalizes and
 // validates again, and decides everything about a discount); these only give fast feedback.
@@ -69,8 +70,8 @@ export function parseWholeNumber(raw: string): number | null {
 
 // "R$ 5,00 de desconto" / "10% de desconto" (+ cap).
 export function describeDiscount(coupon: Pick<Coupon, 'discountType' | 'value' | 'maxDiscountCents'>): string {
-  if (coupon.discountType === 'FIXED') return `R$ ${centsToInput(coupon.value)}`;
-  const cap = coupon.maxDiscountCents !== null ? ` (até R$ ${centsToInput(coupon.maxDiscountCents)})` : '';
+  if (coupon.discountType === 'FIXED') return formatCentsAsBRL(coupon.value);
+  const cap = coupon.maxDiscountCents !== null ? ` (até ${formatCentsAsBRL(coupon.maxDiscountCents)})` : '';
   return `${coupon.value}%${cap}`;
 }
 
@@ -268,9 +269,18 @@ export function couponErrorMessage(code: string | undefined, fallback: string): 
 
 // What the PDV/checkout show when applying a coupon fails. The public checkout only ever gets the
 // generic COUPON_INVALID; the PDV (staff) also gets the specific reasons from the API message.
+// B10: a coupon limited per customer only works at the counter, so the guest is told where it does.
+export const PUBLIC_COUPON_INVALID_MESSAGE =
+  'Cupom inválido ou não aplicável a este pedido. Cupons limitados por cliente valem só no balcão, com o cadastro do cliente.';
+
 export function couponApplyMessage(code: string | undefined, fallback: string): string {
-  if (code === 'COUPON_INVALID') return 'Cupom inválido ou não aplicável a este pedido.';
+  if (code === 'COUPON_INVALID') return PUBLIC_COUPON_INVALID_MESSAGE;
   return fallback;
+}
+
+// B10: where a coupon can be used, for the coupons screen.
+export function couponChannelNote(coupon: Pick<Coupon, 'perCustomerLimit'>): string | null {
+  return coupon.perCustomerLimit !== null ? 'só no balcão (PDV)' : null;
 }
 
 // When the list must tell "no coupons yet" from "nothing matches the filters".

@@ -28,14 +28,15 @@ import {
   defaultCourierFilter,
   localDayRange,
 } from '@/lib/delivery-logic';
-import { OrderStatus, updateOrderStatus } from '@/lib/orders-api';
+import { OrderStatus, getOrderDetail, updateOrderStatus } from '@/lib/orders-api';
+import { cancellationEffects } from '@/lib/cancel-order-logic';
 import { useActiveBranch } from '@/lib/use-active-branch';
 import { Badge } from '@/components/ds/Badge';
 import { Button } from '@/components/ds/Button';
 import { Card } from '@/components/ds/Card';
 import { Input, SearchInput, Select } from '@/components/ds/Input';
 import { Page, PageHeader } from '@/components/ds/PageHeader';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ds/States';
+import { Alert, EmptyState, ErrorState, LoadingState } from '@/components/ds/States';
 import { Table, TableWrap, TBody, Td, Th, THead, Tr } from '@/components/ds/Table';
 import { Tabs } from '@/components/ds/Tabs';
 import { useToast } from '@/components/ds/Toast';
@@ -44,6 +45,7 @@ import { AssignCourierDialog, DeliveryHistoryDialog } from '@/components/deliver
 import { DeliverySettingsDialog } from '@/components/delivery/DeliverySettingsDialog';
 import { useErrorMessage } from '@/components/estoque/use-inventory';
 import { StatusBadge } from '@/components/pedidos/StatusBadge';
+import { CancelOrderDialog } from '@/components/pedidos/CancelOrderDialog';
 
 const MANAGEMENT = ['OWNER', 'ADMIN', 'MANAGER'];
 const OPERATORS = [...MANAGEMENT, 'DELIVERY'];
@@ -82,7 +84,8 @@ type Modal =
   | null;
 
 type Action =
-  | { kind: 'dispatch' | 'complete' | 'redeliver' | 'cancelOrder' | 'unassign'; item: DeliveryItem }
+  | { kind: 'dispatch' | 'complete' | 'redeliver' | 'unassign'; item: DeliveryItem }
+  | { kind: 'cancelOrder'; item: DeliveryItem; reason: string }
   | { kind: 'assign'; item: DeliveryItem; courierUserId: string }
   | { kind: 'fail'; item: DeliveryItem; reason: string }
   | { kind: 'notes'; item: DeliveryItem; notes: string | null };
@@ -120,6 +123,8 @@ export default function DeliveryPage() {
   // avoids redundant requests and duplicate toasts.
   const inFlight = useRef(new Set<string>());
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
+  // B5: a refused cancellation is shown inside the cancel dialog, which stays open.
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   useEffect(() => setPage(1), [status, search, orderStatus, day, branchId, courierFilter]);
 
@@ -141,6 +146,22 @@ export default function DeliveryPage() {
     enabled: !!accessToken && !!branchId && canOperate,
     refetchInterval: POLL_MS,
     placeholderData: (previous) => previous,
+  });
+
+  // B5: what the cancellation will undo depends on fields the delivery list does not carry
+  // (source, cashback, coupon), so the order is read when the cancel dialog opens.
+  const cancelItem = modal?.kind === 'cancelOrder' ? modal.item : null;
+  const cancelOrderDetail = useQuery({
+    queryKey: ['order', cancelItem?.orderId],
+    queryFn: () => getOrderDetail(accessToken as string, cancelItem?.orderId as string),
+    enabled: !!accessToken && !!cancelItem,
+  });
+
+  // B11: a new restaurant starts with delivery off; management sees it here, not only in the dialog.
+  const settings = useQuery({
+    queryKey: ['delivery', 'settings', branchId],
+    queryFn: () => deliveryApi.getSettings(accessToken as string, branchId as string),
+    enabled: !!accessToken && !!branchId && canConfigure,
   });
 
   // Courier names for the filter; only management can list them (delivery.assign).
@@ -197,7 +218,8 @@ export default function DeliveryPage() {
           message = `Observação do pedido ${item.orderNumber} salva.`;
           break;
         case 'cancelOrder':
-          await updateOrderStatus(token, item.orderId, 'CANCELLED');
+          await updateOrderStatus(token, item.orderId, 'CANCELLED', action.reason);
+          void queryClient.invalidateQueries({ queryKey: ['order', item.orderId] });
           message = `Pedido ${item.orderNumber} cancelado.`;
           break;
       }
@@ -205,7 +227,9 @@ export default function DeliveryPage() {
       await queryClient.invalidateQueries({ queryKey: ['delivery'] });
       return true;
     } catch (error) {
-      toast.error(errorMessage(error, 'Não foi possível atualizar a entrega.'));
+      const text = errorMessage(error, 'Não foi possível atualizar a entrega.');
+      if (action.kind === 'cancelOrder') setCancelError(text);
+      else toast.error(text);
       await queryClient.invalidateQueries({ queryKey: ['delivery'] });
       return false;
     } finally {
@@ -243,6 +267,13 @@ export default function DeliveryPage() {
           ) : undefined
         }
       />
+
+      {settings.data && !settings.data.enabled && (
+        <Alert tone="warning">
+          A entrega está desligada: o cardápio online só aceita retirada. Defina a taxa e o pedido mínimo e ligue em
+          &ldquo;Configurações de entrega&rdquo;.
+        </Alert>
+      )}
 
       <Tabs
         variant="pill"
@@ -460,7 +491,10 @@ export default function DeliveryPage() {
                                   size="sm"
                                   variant="danger-ghost"
                                   disabled={isBusy}
-                                  onClick={() => setModal({ kind: 'cancelOrder', item })}
+                                  onClick={() => {
+                                    setCancelError(null);
+                                    setModal({ kind: 'cancelOrder', item });
+                                  }}
                                 >
                                   Cancelar pedido
                                 </Button>
@@ -532,20 +566,18 @@ export default function DeliveryPage() {
           A entrega volta para &ldquo;Pendente&rdquo; e poderá ser despachada de novo. A falha anterior fica registrada no histórico.
         </p>
       </ConfirmDeliveryDialog>
-      <ConfirmDeliveryDialog
-        open={modal?.kind === 'cancelOrder'}
-        busy={modalBusy}
-        danger
-        title="Cancelar pedido"
-        description={modal ? `Pedido ${modal.item.orderNumber}` : undefined}
-        confirmLabel="Cancelar pedido"
+      <CancelOrderDialog
+        open={!!cancelItem}
+        orderNumber={cancelItem?.orderNumber ?? ''}
+        effects={
+          cancelOrderDetail.data
+            ? cancellationEffects(cancelOrderDetail.data)
+            : cancellationEffects({ status: cancelItem?.orderStatus ?? 'PENDING', paymentMethod: cancelItem?.paymentMethod ?? '' })
+        }
+        error={cancelError}
         onClose={() => setModal(null)}
-        onConfirm={() => (modal?.kind === 'cancelOrder' ? run({ kind: 'cancelOrder', item: modal.item }) : Promise.resolve(false))}
-      >
-        <p className="text-sm text-muted-foreground">
-          O pedido será cancelado e o estoque consumido por ele será estornado. Esta ação não pode ser desfeita.
-        </p>
-      </ConfirmDeliveryDialog>
+        onConfirm={(reason) => (cancelItem ? run({ kind: 'cancelOrder', item: cancelItem, reason }) : Promise.resolve(false))}
+      />
 
       <AssignCourierDialog
         item={modal?.kind === 'assign' ? modal.item : null}

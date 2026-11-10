@@ -2,6 +2,21 @@ import { CartItem, CartState } from './cart-types';
 
 export const CART_STORAGE_KEY = 'restaurant-saas:cart';
 
+// B7 (piloto 2026-10-23): at most 50 units of one product (the API refuses more: it is the same
+// MAX_UNITS_PER_PRODUCT of apps/api/src/common/util/item-quantity.util.ts). The cart, the PDV and
+// the tab stop the "+" there instead of letting the order fail at the end.
+export const MAX_UNITS_PER_PRODUCT = 50;
+export const MAX_UNITS_HINT = `Máximo de ${MAX_UNITS_PER_PRODUCT} unidades por produto.`;
+
+export function atUnitLimit(quantity: number): boolean {
+  return quantity >= MAX_UNITS_PER_PRODUCT;
+}
+
+// Units of one product over every line that has it (a tab adds a new line per launch).
+export function unitsOfProduct(items: { productId: string; quantity: number }[], productId: string): number {
+  return items.reduce((sum, i) => (i.productId === productId ? sum + i.quantity : sum), 0);
+}
+
 export const emptyCart: CartState = { restaurantSlug: null, restaurantName: null, items: [] };
 
 export interface AddItemInput {
@@ -43,6 +58,7 @@ export function addItem(
 
   const baseItems = mustSwitch ? [] : state.items;
   const existing = baseItems.find((i) => i.productId === item.productId);
+  if (existing && atUnitLimit(existing.quantity)) return state;
   const items: CartItem[] = existing
     ? baseItems.map((i) => (i.productId === item.productId ? { ...i, quantity: i.quantity + 1 } : i))
     : [...baseItems, { ...item, quantity: 1 }];
@@ -50,10 +66,13 @@ export function addItem(
   return { restaurantSlug: restaurant.slug, restaurantName: restaurant.name, items };
 }
 
+// Stops at MAX_UNITS_PER_PRODUCT (B7).
 export function incrementItem(state: CartState, productId: string): CartState {
   return {
     ...state,
-    items: state.items.map((i) => (i.productId === productId ? { ...i, quantity: i.quantity + 1 } : i)),
+    items: state.items.map((i) =>
+      i.productId === productId && !atUnitLimit(i.quantity) ? { ...i, quantity: i.quantity + 1 } : i,
+    ),
   };
 }
 
@@ -95,7 +114,8 @@ export function loadCart(): CartState | null {
     return {
       restaurantSlug: parsed.restaurantSlug ?? null,
       restaurantName: parsed.restaurantName ?? null,
-      items: parsed.items,
+      // A cart saved before B7 may hold more than the limit: brought down to it, not lost.
+      items: parsed.items.map((i) => (atUnitLimit(i.quantity) ? { ...i, quantity: MAX_UNITS_PER_PRODUCT } : i)),
     };
   } catch {
     return null; // corrupted storage — start fresh rather than crash

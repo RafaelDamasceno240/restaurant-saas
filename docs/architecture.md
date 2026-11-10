@@ -59,7 +59,7 @@ Criar, concluir e cancelar um pedido movem vários registros financeiros (caixa,
 linha do pedido → sessão de caixa → cupom → conta de cashback → conta de crédito (fiado) → conta de fidelidade → saldos de estoque
 ```
 
-O cancelamento só trava a sessão de caixa quando o pedido tem uma venda em dinheiro a devolver (movimento `SALE_REFUND`, na sessão aberta da unidade; sem caixa aberto o cancelamento é recusado). A entrega (`deliveries`) é travada depois da sessão de caixa, e o fluxo de entrega nunca toca o caixa.
+O cancelamento só trava a sessão de caixa quando o pedido tem uma venda em dinheiro a devolver (movimento `SALE_REFUND`, na sessão aberta da unidade; sem caixa aberto o cancelamento é recusado). A entrega (`deliveries`) é travada depois da sessão de caixa. Desde 2026-10-23 (correção B3 do piloto), concluir um pedido pago em dinheiro que ainda não entrou no caixa (online: `COMPLETED` ou `DELIVERED`) também trava a sessão de caixa, no mesmo lugar da ordem (pedido -> sessão de caixa -> entrega), e grava o `SALE` na mesma transação. Ao fazer um pedido `PENDING`, os saldos de estoque dos insumos dele são travados no fim da transação (correção B2), mantendo o estoque como última trava.
 
 A ordem única é o que impede deadlock entre, por exemplo, o fechamento de uma mesa e o cancelamento de outro pedido do mesmo cliente. Um fluxo novo que trave mais de um desses registros deve seguir essa ordem. `test/financial-chain.e2e-spec.ts` exercita os módulos juntos, inclusive esse cenário.
 

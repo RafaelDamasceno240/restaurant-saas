@@ -53,6 +53,8 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     // and that refresh is what gets refused.
     const revoked = await this.revocations.isRevoked({
       userId: payload.sub,
+      // A suspended restaurant: every token of its accounts dies at once (PlatformTenantsService).
+      tenantId: payload.tenantId,
       sessionId: payload.sid,
       issuedAtMs: payload.iatMs ?? (payload.iat ?? 0) * 1000,
     });

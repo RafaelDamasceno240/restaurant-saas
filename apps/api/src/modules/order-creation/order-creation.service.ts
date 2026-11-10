@@ -27,6 +27,7 @@ import { isCashbackError } from '../cashback/cashback-errors';
 import { CreditTerms, ReceivablesService } from '../receivables/receivables.service';
 import { isReceivableError } from '../receivables/receivable-errors';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
+import { MAX_UNITS_PER_PRODUCT, productOverUnitLimit } from '../../common/util/item-quantity.util';
 
 // Orders that use the SAME limited coupon queue on its row lock, each holding a pooled
 // connection while it waits. Prisma's defaults (5 s to finish, 2 s to get a connection) are tuned
@@ -57,7 +58,8 @@ export interface OrderCreationInput {
   // Set only by the PDV. When present AND paymentMethod is CASH, the order
   // requires an OPEN cash session for the branch and a SALE movement is
   // written in the SAME transaction (no Order without SALE, no SALE without
-  // Order). Online CASH (pay on delivery/pickup) does not touch the drawer.
+  // Order). Online CASH (pay on delivery/pickup) does not touch the drawer
+  // here: it enters it when the order is concluded (B3, CashRegisterService).
   recordCashSaleByUserId?: string;
   // Set by the CALLING service (PublicOrdersService always passes ONLINE;
   // PosOrdersService always passes COUNTER) — never taken from raw client
@@ -104,6 +106,8 @@ export interface PricedOrderItem {
   productNameSnapshot: string;
   unitPriceCents: number;
   quantity: number;
+  // B9: the tab item this line bills (table checkout only; UNIQUE in the database).
+  tabItemId?: string;
 }
 
 export interface PricedOrderInput extends Omit<OrderCreationInput, 'items'> {
@@ -111,6 +115,10 @@ export interface PricedOrderInput extends Omit<OrderCreationInput, 'items'> {
   status?: OrderStatus;
   tabId?: string;
   idempotencyKey?: string;
+  // B9: the caller has already dealt with the stock of these items (the table checkout: each round
+  // consumed its recipes when it was sent to the kitchen), so an order born concluded consumes
+  // nothing here. Every other caller leaves it unset and nothing changes for them.
+  stockHandledByCaller?: boolean;
 }
 
 export type OrderWithItems = Order & { items: OrderItem[] };
@@ -220,6 +228,15 @@ export class OrderCreationService {
       });
     }
 
+    // B7: the DTO caps each line; the same product repeated over several lines is added up here.
+    const overLimit = productOverUnitLimit(items);
+    if (overLimit) {
+      throw new BadRequestException({
+        code: 'QUANTITY_LIMIT',
+        message: `No máximo ${MAX_UNITS_PER_PRODUCT} unidades de "${productById.get(overLimit)!.name}" por pedido.`,
+      });
+    }
+
     return items.map((item) => {
       const product = productById.get(item.productId)!;
       return {
@@ -311,6 +328,7 @@ export class OrderCreationService {
       unitPriceCents: item.unitPriceCents,
       quantity: item.quantity,
       subtotalCents: item.unitPriceCents * item.quantity,
+      tabItemId: item.tabItemId ?? null,
     }));
     const subtotalCents = orderItemsData.reduce((sum, i) => sum + i.subtotalCents, 0);
     const isDelivery = input.fulfillmentType === 'DELIVERY';
@@ -481,18 +499,31 @@ export class OrderCreationService {
       });
     }
 
-    // Fase 09: an order that is BORN confirmed (table checkout -> COMPLETED)
-    // consumes its recipes right here, in the same transaction as the Order,
-    // the SALE cash movement and the payment. PENDING orders (online, PDV)
-    // consume later, on the PENDING -> CONFIRMED transition (OrdersService).
+    // Fase 09: an order that is BORN confirmed consumes its recipes right here, in the same
+    // transaction as the Order, the SALE cash movement and the payment - unless the caller already
+    // took care of the stock (B9: the table checkout, whose rounds consumed their recipes when they
+    // were sent to the kitchen). PENDING orders (online, PDV) consume later, on the
+    // PENDING -> CONFIRMED transition (OrdersService).
     // Last: the stock balances are always locked after the customer's accounts (see above).
-    const stockMovements = statusConsumesStock(order.status)
+    const stockMovements = statusConsumesStock(order.status) && !input.stockHandledByCaller
       ? await this.inventory.consumeForOrderInTx(
           tx,
           { id: order.id, tenantId: order.tenantId, branchId: order.branchId, items: order.items },
           input.recordCashSaleByUserId ?? null,
         )
       : [];
+
+    // B2: an order born PENDING consumes nothing now, but it is only taken if the stock can
+    // still cover it together with every other PENDING order of the branch (balances locked,
+    // so two orders cannot both take the last units). Also last: same lock order as above.
+    if (order.status === 'PENDING') {
+      await this.inventory.assertAvailableForNewPendingOrderInTx(tx, {
+        id: order.id,
+        tenantId: order.tenantId,
+        branchId: order.branchId,
+        items: order.items,
+      });
+    }
 
     return { order, cashMovementId: movement?.id ?? null, stockMovementIds: stockMovements.map((m) => m.id) };
   }

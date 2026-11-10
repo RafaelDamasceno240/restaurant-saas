@@ -3,7 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import request from 'supertest';
 import { hashToken } from '../src/modules/auth/token.util';
-import { createTestApp, getPrisma, uniqueDocument, uniqueSuffix } from './test-app.util';
+import {
+  createTestApp,
+  getPrisma,
+  provisionAndSignInE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 // What the session has to survive in a real browser: an access token that
 // expired while the user was working, and a logout that arrives after it did.
@@ -42,7 +48,7 @@ describe('Auth session (e2e)', () => {
       email: `owner-${suffix}@example.com`,
       password: 'Sup3rSecret!',
     };
-    const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const res = await provisionAndSignInE2E(app, payload);
     return {
       payload,
       cookie: cookieOf(res),
@@ -193,7 +199,7 @@ describe('Auth session (e2e)', () => {
 
   describe('refresh cookie attributes', () => {
     it('is not Secure outside production, so local http keeps working', async () => {
-      const res = await request(server).post('/v1/auth/register').send((await registerPayload())).expect(201);
+      const res = await provisionAndSignInE2E(app, await registerPayload());
       const setCookie: string = res.headers['set-cookie'][0];
       expect(setCookie).not.toMatch(/Secure/i);
       expect(setCookie).not.toMatch(/Domain=/i);
@@ -205,7 +211,7 @@ describe('Auth session (e2e)', () => {
       const production = await createTestApp();
       try {
         const productionServer = production.getHttpServer();
-        const res = await request(productionServer).post('/v1/auth/register').send(await registerPayload()).expect(201);
+        const res = await provisionAndSignInE2E(production, await registerPayload());
         const setCookie: string = res.headers['set-cookie'][0];
         expect(setCookie).toMatch(/^refresh_token=/);
         expect(setCookie).toMatch(/; HttpOnly/i);

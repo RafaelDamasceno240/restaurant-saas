@@ -49,6 +49,7 @@ pelo `JwtStrategy` em toda requisição autenticada, um `MGET`):
 |---|---|---|
 | `POST /auth/logout` que de fato encerrou uma sessão | `auth:revoked:session:<sid>` | todo access token **daquela sessão** passa a responder `401 SESSION_REVOKED`, inclusive os emitidos antes de uma rotação; as outras sessões do mesmo usuário seguem |
 | reuso de refresh token fora da janela de tolerância (token roubado) | `auth:revoked:user:<userId>` = instante do evento | todo access token do usuário emitido **até aquele instante** morre; um login feito depois funciona normalmente |
+| restaurante suspenso pela plataforma (`POST /platform/tenants/:id/suspend`) | `auth:revoked:tenant:<tenantId>` = instante da suspensão | todo access token de **todas as contas do restaurante** emitido até aquele instante morre; login e refresh já são recusados enquanto ele estiver suspenso, e depois da reativação um login novo funciona |
 
 - Cada marca expira sozinha depois do tempo de vida do access token mais 60 s:
   a lista nunca cresce.
@@ -61,10 +62,10 @@ pelo `JwtStrategy` em toda requisição autenticada, um `MGET`):
   transforma o logout em erro (o refresh token já foi revogado no banco).
 - Tokens emitidos antes de existir `sid` continuam válidos até expirar e só
   são alcançados pela marca por usuário.
-- **Não coberto:** suspender um restaurante ou bloquear um usuário direto no
-  banco não grava marca nenhuma (não existe tela nem endpoint para isso): o
-  access token já emitido vale até expirar; login e refresh são recusados na
-  hora.
+- **Não coberto:** mudar o status de um restaurante ou bloquear um usuário
+  **direto no banco** não grava marca nenhuma: o access token já emitido vale
+  até expirar; login e refresh são recusados na hora. Pelo painel da plataforma
+  (`/super-admin`, docs/SUPER_ADMIN.md) a suspensão grava a marca do tenant.
 
 ## O que o login revela
 
@@ -79,8 +80,45 @@ A senha é conferida **antes** de qualquer coisa ser dita sobre a conta:
 - a tentativa com senha errada contra uma conta real continua auditada
   (`LOGIN_FAILED`).
 
-O registro público responde `EMAIL_ALREADY_EXISTS`/`TENANT_ALREADY_EXISTS`
-(inerente a um cadastro aberto) e é limitado por endereço.
+### E-mail sem diferença de maiúsculas (desde 2026-11-10)
+
+O e-mail é o login e é comparado **sem** diferenciar maiúsculas de minúsculas
+(`apps/api/src/common/util/login-email.util.ts`):
+
+- toda gravação guarda o e-mail aparado e em minúsculas (cadastro de
+  funcionário, provisionamento pelo comando e pelo painel da plataforma);
+- toda busca compara `lower(email)`: login, conferência de duplicidade e os
+  comandos `platform-admin:grant`/`revoke` e `user:reset-password`. Uma conta
+  gravada com maiúsculas antes dessa data continua entrando, e o e-mail dela
+  **não** é reescrito;
+- `Ana@x.com` e `ana@x.com` são o mesmo login: o segundo cadastro é recusado
+  com `EMAIL_ALREADY_EXISTS`. Se já existirem duas contas antigas que só
+  diferem na caixa, entra a que for digitada exatamente como foi gravada; com
+  qualquer outra grafia, nenhuma (o login não adivinha de quem é a senha);
+- SQL puro de propósito: o `mode: 'insensitive'` do Prisma vira `ILIKE`, em
+  que `_` é curinga.
+
+Sem migration: o índice único de `users.email` continua o mesmo.
+
+## Sem cadastro público (desde 2026-10-28)
+
+O serviço é vendido, não é autoatendimento: ninguém cria restaurante pela API. `POST /auth/register`
+foi removido e responde `404` como qualquer rota inexistente, com ou sem sessão, sem criar tenant,
+unidade ou usuário. As únicas rotas públicas de autenticação são `login`, `refresh` e `logout`.
+
+Um restaurante (tenant + primeira unidade + conta OWNER) é criado por
+`TenantProvisioningService` (`apps/api/src/modules/tenants/`), que **não tem rota HTTP**: quem o chama
+é o comando local `tenant:provision` (docs/PROVISIONING.md), rodado por quem tem o `DATABASE_URL`, e os
+e2e, pelo container Nest do teste. O serviço valida os dados com as mesmas regras de um corpo de
+requisição, recusa slug, documento ou e-mail já usados (`409 TENANT_ALREADY_EXISTS` /
+`EMAIL_ALREADY_EXISTS`, também numa criação simultânea), grava `TENANT_PROVISIONED` na mesma transação e
+não abre sessão: o OWNER entra pelo
+`POST /auth/login`. No web, `/login` tem só e-mail, senha e Entrar; `/register` mostra apenas que
+"Novos acessos são liberados diretamente pela equipe responsável", sem formulário.
+
+Desde o Super Admin (docs/SUPER_ADMIN.md) o mesmo serviço tem uma segunda porta, **não pública**:
+`POST /platform/tenants`, só para administradores da plataforma (`PlatformAdminGuard`; anônimo `401`,
+qualquer conta de restaurante `403`, OWNER e ADMIN inclusive).
 
 ## Renovação do access token no frontend
 
@@ -145,6 +183,13 @@ Duas coisas dependem de enxergar esse cookie:
 
 `/` é o único valor que é prefixo de ambos ao mesmo tempo.
 
+**Vários ambientes na mesma máquina:** o navegador não separa cookies por
+porta. `localhost:3000`, `localhost:3100` e `localhost:3300` compartilham o
+mesmo `refresh_token`: entrar em um derruba a sessão dos outros. Para usar
+dois ambientes ao mesmo tempo, abra cada um por um nome de host diferente
+(`localhost` em um, `127.0.0.1` no outro) ou num perfil separado do navegador.
+O ambiente da apresentação final usa `http://127.0.0.1:3600` por isso.
+
 ### O navegador só fala com o frontend (proxy `/api`)
 
 `Path` resolve o prefixo, mas não o **host**: um cookie sem `Domain` pertence
@@ -206,7 +251,7 @@ a entrega à pessoa.
   uma única unidade ativa ela é atribuída sozinha; com várias, a lista é obrigatória
   (`400 BRANCHES_REQUIRED`). Unidade inexistente ou de outro restaurante: `404`.
 - **E-mail** é o login e é único entre todos os restaurantes (`409 EMAIL_ALREADY_EXISTS`),
-  como no cadastro. Não é editável.
+  como no provisionamento do restaurante. Não é editável.
 - **Inativar** (`active: false`) em vez de excluir: o histórico da pessoa continua.
 - **Sessões**: o access token carrega papéis e permissões. Mudar o papel, inativar ou
   redefinir a senha revoga os refresh tokens na mesma transação e, logo após o commit,
@@ -214,11 +259,28 @@ a entrega à pessoa.
   sessão: os vínculos de unidade são relidos a cada requisição.
 - **Trocar a própria senha**: `POST /v1/auth/change-password` (exige a senha atual,
   limitado como o login). Encerra todas as sessões da conta, inclusive a atual, e limpa
-  o cookie. É o único caminho para o OWNER, que não tem quem redefina a senha por ele:
-  **não existe recuperação para um OWNER que esqueceu a senha** (exigiria e-mail).
+  o cookie. É o único caminho do próprio OWNER pelo sistema: ninguém no painel redefine a
+  senha dele, e não há recuperação por e-mail.
+- **OWNER (ou qualquer conta) que esqueceu a senha**: só o comando local, rodado por quem
+  tem o `DATABASE_URL` (não há rota HTTP para isso):
+
+  ```bash
+  pnpm user:reset-password -- --email dono@empresa.com.br
+  ```
+
+  Mostra banco, host, identificador do cluster, ambiente, Redis, a conta (restaurante,
+  papéis, se é administradora da plataforma, sessões ativas), pergunta a nova senha duas
+  vezes sem eco (nunca como argumento) e só grava depois de `REDEFINIR`. Mesmo Argon2 e
+  mesma regra de tamanho do painel; encerra os refresh tokens na transação e corta os
+  access tokens no Redis (por isso se recusa a rodar sem Redis acessível). Papéis,
+  restaurante e administração da plataforma não mudam. `DATABASE_URL`, `REDIS_URL` e
+  `JWT_ACCESS_EXPIRES_IN` vêm todos das variáveis de ambiente ou todos do `.env` da pasta.
+  Na imagem de produção: `pnpm --filter api user:reset-password:prod -- --email ...`.
 - **Auditoria**: `USER_CREATED`, `USER_UPDATED` e `USER_PASSWORD_RESET` são gravadas na
   mesma transação; `PASSWORD_CHANGED` e `PASSWORD_CHANGE_FAILED` são best-effort. Nenhuma
-  guarda nome, e-mail ou senha.
+  guarda nome, e-mail ou senha. `ADMIN_PASSWORD_RESET` (o comando acima) vai na mesma
+  transação da troca, com o e-mail da conta, quem rodou (`usuário@máquina`) e quantas
+  sessões foram encerradas; nunca a senha nem o hash.
 - **Limite conhecido**: um refresh que já passou das próprias verificações no instante
   do commit pode emitir tokens novos. A redefinição de senha faz uma segunda revogação
   depois do commit para fechar essa janela; na mudança de papel e na inativação a
@@ -255,9 +317,9 @@ O `tenantId` do usuário autenticado vem **exclusivamente** do payload do JWT
   microfone, geolocalização, pagamento e USB negados) e, em build de produção,
   `Strict-Transport-Security`
 - Visitante anônimo não dispara refresh: na página inicial, no cardápio
-  público (`/menu`) e na demonstração (`/demo`) o `AuthProvider` fica parado
-  (`lib/session-area.ts`); a troca do cookie por um access token só acontece
-  em `/login`, `/register` e `/dashboard`
+  público (`/menu`), na demonstração (`/demo`) e no aviso de `/register` o
+  `AuthProvider` fica parado (`lib/session-area.ts`); a troca do cookie por um
+  access token só acontece em `/login` e `/dashboard`
 - Slug de cardápio inexistente (ou de restaurante suspenso) responde **HTTP
   404** de verdade para o cardápio, o carrinho e o checkout: a consulta é
   feita no layout do segmento, antes de a resposta começar

@@ -107,12 +107,13 @@ pnpm dev:web       # somente o frontend
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 46 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, equipe e senhas, cardápio, pedidos, KDS e quadro da cozinha, PDV, caixa, estorno de venda em dinheiro, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback, fiado, relatórios e a cadeia financeira do pedido
+pnpm --filter api test:e2e    # e2e: 47 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, perfil do restaurante, equipe e senhas, cardápio, pedidos, KDS e quadro da cozinha, PDV, caixa, estorno de venda em dinheiro, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback, fiado, relatórios e a cadeia financeira do pedido
 ```
 
 Resultado em 2026-10-10: API unit 297, API e2e 777 (46 suítes), web unit 312, sem falhas — nesta
 máquina, em um clone limpo seguindo este README e dentro de um container Linux
-(`deploy/README.md`).
+(`deploy/README.md`). Em 2026-10-17, com o perfil do restaurante: API unit 315, API e2e 787
+(47 suítes), web unit 319, sem falhas, nesta máquina (o container Linux não foi repetido).
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do
 ambiente — aponte para um banco de teste descartável antes de rodá-los.
@@ -120,9 +121,9 @@ ambiente — aponte para um banco de teste descartável antes de rodá-los.
 ### Preparar o banco descartável dos e2e
 
 Um banco novo (só com as migrations) **não basta**: as roles e permissões (RBAC)
-precisam estar semeadas. O `POST /v1/auth/register` — usado pelos e2e para criar
-cada tenant de teste — depende delas; sem o seed ele responde `500` e as suítes
-falham em massa (observado na validação do CRM: 41 de 41 testes de clientes
+precisam estar semeadas. O provisionamento de restaurante (`TenantProvisioningService`) —
+usado pelos e2e para criar cada tenant de teste, já que não há cadastro público — depende delas
+(papel OWNER); sem o seed ele falha e as suítes falham em massa (observado na validação do CRM: 41 de 41 testes de clientes
 falharam até o seed ser executado). O seed (`prisma/seed.ts`) cria apenas roles,
 permissões e a ligação entre elas; não cria tenants, usuários nem produtos.
 
@@ -183,7 +184,7 @@ delas (TypeScript, Tailwind, PostCSS). Se a plataforma define `NODE_ENV=producti
 defina também `NPM_CONFIG_PRODUCTION=false`, ou use as imagens de `deploy/`, que compilam em um
 estágio com devDependencies e entregam a imagem final sem elas.
 
-São 17 migrations (`prisma/migrations`). O `postinstall` do `@prisma/client` não gera o cliente
+São 18 migrations (`prisma/migrations`). O `postinstall` do `@prisma/client` não gera o cliente
 neste monorepo: ele só existe depois de `prisma generate`, que faz parte do build.
 
 O seed é obrigatório num banco novo — sem papéis e permissões o registro de

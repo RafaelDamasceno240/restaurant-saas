@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -223,7 +224,7 @@ describe('Delivery operations (e2e)', () => {
       const delivered = await outForDelivery(ctx);
       await post(ctx.accessToken, `/v1/delivery/${delivered.deliveryId}/complete`).expect(200);
       const cancelled = await failedDelivery(ctx);
-      await patch(ctx.accessToken, `/v1/orders/${cancelled.orderId}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${cancelled.orderId}/status`, statusBody('CANCELLED')).expect(200);
 
       for (const [label, id] of [
         ['never attempted', fresh.deliveryId],
@@ -251,7 +252,7 @@ describe('Delivery operations (e2e)', () => {
     it('lets the order be cancelled only as an explicit decision on a FAILED delivery', async () => {
       const ctx = await setup();
       const { orderId, deliveryId } = await failedDelivery(ctx);
-      await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody('CANCELLED')).expect(200);
 
       expect(await orderStatus(orderId)).toBe('CANCELLED');
       const delivery = await deliveryRow(deliveryId);
@@ -286,7 +287,7 @@ describe('Delivery operations (e2e)', () => {
       // Real kitchen flow this time: confirming the order consumes 2 x 150 g.
       const order = (await publicOrder(ctx).expect(201)).body as { id: string };
       for (const status of ['CONFIRMED', 'PREPARING', 'READY']) {
-        await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, { status }).expect(200);
+        await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, statusBody(status)).expect(200);
       }
       expect(await stock()).toBe(1.7);
 
@@ -295,7 +296,7 @@ describe('Delivery operations (e2e)', () => {
       await post(ctx.accessToken, `/v1/delivery/${delivery.id}/fail`, { reason: 'Cliente ausente' }).expect(200);
       expect(await stock()).toBe(1.7);
 
-      await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${order.id}/status`, statusBody('CANCELLED')).expect(200);
       expect(await stock()).toBe(2);
       expect(await prisma().stockMovement.count({ where: { referenceId: order.id, type: 'REVERSAL' } })).toBe(1);
       expect((await deliveryRow(delivery.id)).status).toBe('CANCELLED');
@@ -304,13 +305,13 @@ describe('Delivery operations (e2e)', () => {
     it('keeps refusing to cancel a READY order whose delivery did not fail', async () => {
       const ctx = await setup();
       const pending = await readyDelivery(ctx);
-      expect((await patch(ctx.accessToken, `/v1/orders/${pending.orderId}/status`, { status: 'CANCELLED' }).expect(409)).body.code).toBe(
+      expect((await patch(ctx.accessToken, `/v1/orders/${pending.orderId}/status`, statusBody('CANCELLED')).expect(409)).body.code).toBe(
         'INVALID_STATUS_TRANSITION',
       );
 
       const requeued = await failedDelivery(ctx);
       await post(ctx.accessToken, `/v1/delivery/${requeued.deliveryId}/redeliver`).expect(200);
-      expect((await patch(ctx.accessToken, `/v1/orders/${requeued.orderId}/status`, { status: 'CANCELLED' }).expect(409)).body.code).toBe(
+      expect((await patch(ctx.accessToken, `/v1/orders/${requeued.orderId}/status`, statusBody('CANCELLED')).expect(409)).body.code).toBe(
         'INVALID_STATUS_TRANSITION',
       );
       expect(await orderStatus(requeued.orderId)).toBe('READY');
@@ -321,7 +322,7 @@ describe('Delivery operations (e2e)', () => {
       const ctx = await setup();
       const { orderId, deliveryId } = await failedDelivery(ctx);
       const courier = await createStaffAndLoginE2E(app, server, ctx.tenantId, RoleName.DELIVERY, [ctx.branchId]);
-      await patch(courier, `/v1/orders/${orderId}/status`, { status: 'CANCELLED' }).expect(403);
+      await patch(courier, `/v1/orders/${orderId}/status`, statusBody('CANCELLED')).expect(403);
       await post(courier, `/v1/delivery/${deliveryId}/redeliver`).expect(200);
     });
   });
@@ -390,7 +391,7 @@ describe('Delivery operations (e2e)', () => {
       const res = await patch(ctx.accessToken, `/v1/delivery/${delivered.deliveryId}/notes`, { notes: 'Tarde' }).expect(409);
       expect(res.body.code).toBe('DELIVERY_NOTES_LOCKED');
 
-      await patch(ctx.accessToken, `/v1/orders/${failed.orderId}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${failed.orderId}/status`, statusBody('CANCELLED')).expect(200);
       await patch(ctx.accessToken, `/v1/delivery/${failed.deliveryId}/notes`, { notes: 'Cancelada' }).expect(409);
       expect((await deliveryRow(failed.deliveryId)).notes).toBe('Ligar antes de sair');
     });
@@ -687,7 +688,7 @@ describe('Delivery operations (e2e)', () => {
       const ctx = await setup();
       const { orderId, deliveryId } = await failedDelivery(ctx);
       await failAudit(ctx.tenantId, 'DELIVERY_CANCELLED');
-      await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: 'CANCELLED' }).expect(500);
+      await patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody('CANCELLED')).expect(500);
       expect(await orderStatus(orderId)).toBe('READY');
       expect((await deliveryRow(deliveryId)).status).toBe('FAILED');
     });

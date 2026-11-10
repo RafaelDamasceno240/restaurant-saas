@@ -17,6 +17,32 @@ export class ApiError extends Error {
   }
 }
 
+// B8 (piloto 2026-10-23): the API answers in Portuguese (validation included), but a proxy, an old
+// API or the framework itself can still answer with English or no message at all. This is the one
+// place every error passes through on its way to a screen: a message that is not one readable
+// Portuguese string becomes the sentence for its status. The code is kept for the screens that
+// decide by it.
+const TECHNICAL_MESSAGE =
+  /^(Bad Request|Unauthorized|Forbidden( resource)?|Not Found|Conflict|Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)$|^Cannot (GET|POST|PUT|PATCH|DELETE) |ThrottlerException|JSON|\b(must|should) (be|not|contain|match|exist)\b|<html/i;
+
+const STATUS_MESSAGE: Record<number, string> = {
+  400: 'Os dados enviados não são válidos. Confira e tente novamente.',
+  401: 'Sua sessão expirou. Entre novamente.',
+  403: 'Você não tem permissão para fazer isso.',
+  404: 'Não encontrado.',
+  409: 'Não foi possível concluir: os dados mudaram. Atualize a página e tente novamente.',
+  429: 'Muitas tentativas em pouco tempo. Aguarde um instante e tente novamente.',
+};
+
+export const NETWORK_ERROR_MESSAGE = 'Não foi possível falar com o servidor. Confira a conexão e tente novamente.';
+
+export function friendlyErrorMessage(status: number, message: unknown): string {
+  const text = Array.isArray(message) ? message.filter((m) => typeof m === 'string').join(' ') : message;
+  if (typeof text === 'string' && text.trim() && !TECHNICAL_MESSAGE.test(text)) return text;
+  if (status >= 500) return 'O servidor não conseguiu concluir agora. Tente novamente em instantes.';
+  return STATUS_MESSAGE[status] ?? 'Ocorreu um erro inesperado.';
+}
+
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
@@ -63,7 +89,18 @@ function emit(event: SessionEvent): void {
   listeners.forEach((listener) => listener(event));
 }
 
-function send(path: string, options: RequestOptions, accessToken: string | null): Promise<Response> {
+// A request that never got an answer (offline, server down) is an ApiError too, with status 0, so
+// screens show the Portuguese sentence instead of the browser's "Failed to fetch". Status 0 is not
+// a 4xx: queries still retry it and the session is kept (runRefresh only ends it on 401/403).
+async function send(path: string, options: RequestOptions, accessToken: string | null): Promise<Response> {
+  try {
+    return await rawSend(path, options, accessToken);
+  } catch {
+    throw new ApiError(0, 'NETWORK_ERROR', NETWORK_ERROR_MESSAGE);
+  }
+}
+
+function rawSend(path: string, options: RequestOptions, accessToken: string | null): Promise<Response> {
   return fetch(`${API_BASE}${path}`, {
     method: options.method ?? 'GET',
     credentials: 'include',
@@ -86,11 +123,7 @@ async function parse<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new ApiError(
-      response.status,
-      data.code ?? 'UNKNOWN_ERROR',
-      data.message ?? 'Ocorreu um erro inesperado.',
-    );
+    throw new ApiError(response.status, data.code ?? 'UNKNOWN_ERROR', friendlyErrorMessage(response.status, data.message));
   }
 
   return data as T;

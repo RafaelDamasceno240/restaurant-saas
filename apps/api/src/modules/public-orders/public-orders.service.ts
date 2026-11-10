@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { fromCents } from '../../common/util/money.util';
 import { isTenantBlocked } from '../../common/util/tenant-status.util';
@@ -6,6 +6,7 @@ import { OrderCreationService, OrderWithItems } from '../order-creation/order-cr
 import { BranchAccessService } from '../branches/branch-access.service';
 import { CreateOrderDto, PublicCouponPreviewDto } from './dto/create-order.dto';
 import { toPublicCouponError } from '../coupons/coupon-errors';
+import { acceptsOrdersAt, readOpeningHours } from '../tenants/opening-hours';
 import { OrderResponseDto, PublicOrderConfirmationDto } from './dto/order-response.dto';
 
 @Injectable()
@@ -31,13 +32,15 @@ export class PublicOrdersService {
     }
 
     const branchId = await this.branchAccess.getDefaultBranchId(tenant.id);
+    await this.assertAcceptingOrders(tenant, branchId, dto.idempotencyKey);
     let order: OrderWithItems;
     try {
       order = await this.orderCreation.createOrder({
         tenantId: tenant.id,
         // MVP: online orders go to the tenant's default branch (no branch
         // picker on the public menu yet). No cash-sale flag: online CASH is
-        // paid on delivery/pickup and does not touch the drawer.
+        // paid on delivery/pickup and enters the drawer only when the order is
+        // concluded (COMPLETED/DELIVERED, B3), never when it is taken.
         branchId,
         source: 'ONLINE',
         items: dto.items,
@@ -57,6 +60,27 @@ export class PublicOrdersService {
     }
 
     return this.toDto(order);
+  }
+
+  // B1: the opening hours are a rule of the order, not only a badge on the menu. Checked here, on
+  // the anonymous endpoint, so a direct call cannot skip what the checkout screen shows; the PDV
+  // and the table checkout are staff flows and stay available outside the published hours.
+  // Same function as "Aberto agora" (hours never informed = no restriction). A retry of an order
+  // already taken while open (same idempotency key) is still answered with that order.
+  private async assertAcceptingOrders(tenant: { id: string; timezone: string }, branchId: string, idempotencyKey?: string) {
+    const branch = await this.prisma.branch.findUnique({ where: { id: branchId }, select: { openingHours: true } });
+    if (acceptsOrdersAt(readOpeningHours(branch?.openingHours), new Date(), tenant.timezone)) return;
+    if (idempotencyKey) {
+      const taken = await this.prisma.order.findUnique({
+        where: { tenantId_idempotencyKey: { tenantId: tenant.id, idempotencyKey } },
+        select: { id: true },
+      });
+      if (taken) return;
+    }
+    throw new ConflictException({
+      code: 'RESTAURANT_CLOSED',
+      message: 'O restaurante está fechado agora e não está recebendo pedidos. Confira o horário de funcionamento no cardápio.',
+    });
   }
 
   // Read-only preview for the checkout. Resolves the tenant by slug only, prices the basket on

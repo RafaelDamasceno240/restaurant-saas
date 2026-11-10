@@ -130,6 +130,7 @@ Exemplo: sistema 10 KG, contado 8,5 KG → `ADJUSTMENT −1,5 KG`. O saldo **nun
   - O checkout de mesa nasce `COMPLETED` e baixa em `OrderCreationService.createPricedOrderInTx`.
 - **Consumo:** ficha × quantidade, agregado por insumo. Por exemplo, 2 × X-Burger com 150 G de carne consome 300 G.
 - **Mesma transação:** a mudança de status e a baixa são uma transação só, com a linha do pedido travada. Se faltar insumo com estoque negativo desligado, a resposta é `409 INSUFFICIENT_STOCK` e o pedido continua `PENDING`.
+- **Disponibilidade ao fazer o pedido (correção B2 do piloto, 2026-10-23):** um pedido que nasce `PENDING` (cardápio online e PDV) não baixa nada, mas só é aceito se o saldo cobre o que ele precisa **somado ao que os outros pedidos `PENDING` da unidade já precisam**. É o último passo da transação do pedido (`InventoryService.assertAvailableForNewPendingOrderInTx`): trava os saldos dos insumos envolvidos (`FOR UPDATE`, em ordem de id, o mesmo lock da confirmação) e então soma as fichas dos pedidos pendentes. Assim dois pedidos ao mesmo tempo não pegam as mesmas últimas unidades. Recusa: `409 PRODUCT_OUT_OF_STOCK` com o nome do produto e sem quantidades. Unidade com estoque negativo permitido e produto sem ficha não são restringidos. Um pedido pendente cancelado libera o que reservava. A confirmação continua validando o saldo (`INSUFFICIENT_STOCK`) para o caso de o estoque cair depois do pedido (perda, ajuste).
 - **Cancelamento após a baixa:** gera movimentos `REVERSAL` que compensam **exatamente** os `SALE` gravados, e não a ficha atual. O histórico nunca é apagado.
 
 ## Idempotência
@@ -148,7 +149,7 @@ Toda alteração de saldo passa por `StockLedgerService`:
 
 Em operações com vários insumos (pedido, inventário), as linhas são travadas em ordem de `inventoryItemId`, o que evita deadlock. Nunca se confia em `if (saldo >= quantidade)` fora do lock.
 
-**Teste obrigatório, coberto de duas formas:** com saldo 5, duas saídas manuais simultâneas de 4 e de 3, e também **duas vendas** (4 e 3 unidades) confirmadas ao mesmo tempo. Com estoque negativo desligado, exatamente uma é aceita e a outra recebe `INSUFFICIENT_STOCK`. Na venda recusada, o pedido permanece `PENDING`.
+**Teste obrigatório, coberto de duas formas:** com saldo 5, duas saídas manuais simultâneas de 4 e de 3, e também **duas vendas** confirmadas ao mesmo tempo (4 e 1 unidade, feitas com saldo 5 que depois cai para 4 por uma perda: desde a correção B2 uma venda que o saldo não cobre já é recusada ao ser feita). Com estoque negativo desligado, exatamente uma é aceita e a outra recebe `INSUFFICIENT_STOCK`. Na venda recusada, o pedido permanece `PENDING`. Pedidos simultâneos (cardápio) são cobertos em `test/orders-stock-availability.e2e-spec.ts`: 5 pedidos ao mesmo tempo com saldo para 3 → exatamente 3 aceitos, e os 3 confirmam.
 
 ## Estoque negativo
 

@@ -35,6 +35,21 @@
 > - **Não é retroativo:** vendas em dinheiro canceladas antes da migration
 >   `20261010230000_cash_sale_refund` continuam sem estorno.
 > - O endpoint manual de movimentos continua aceitando só suprimento e sangria.
+>
+> **Correções do piloto (2026-10-23, bugs B3 e B4):**
+> - **Pedido online pago em dinheiro entra no caixa quando é concluído** (`COMPLETED` pelo
+>   detalhe do pedido ou pela Cozinha; `DELIVERED` pelo Delivery), não quando é feito nem quando
+>   é confirmado. Na mesma transação da conclusão é gravado um `SALE` do total do pedido, com
+>   `orderId` (rastreável na tela do Caixa pelo número do pedido). Ordem de lock: pedido -> sessão
+>   de caixa -> entrega. Sem caixa aberto, a conclusão é recusada (`409 CASH_REGISTER_NOT_OPEN`,
+>   mesma regra da venda e do estorno em dinheiro). Nunca duplica: venda do PDV já tem o seu
+>   `SALE`, uma conclusão repetida encontra o seu, e `cash_movements.orderId` é único no banco.
+>   Pix, cartão e fiado não geram movimento. Cancelar antes de concluir não mexe no caixa; depois
+>   de concluído o pedido não é cancelável.
+> - **Sangria limitada ao dinheiro do caixa:** acima do saldo esperado é recusada
+>   (`409 WITHDRAWAL_EXCEEDS_BALANCE`, mensagem com o valor disponível); igual ao saldo é aceita
+>   (zera a gaveta). O saldo é recalculado depois do lock da sessão, então duas sangrias ao mesmo
+>   tempo nunca passam do saldo. A tela mostra o disponível no formulário.
 
 ## 1. Objetivo
 
@@ -379,8 +394,8 @@ o registro cria uma branch `MATRIZ` e vincula o OWNER a ela.
 Política (a) do plano, implementada: venda `CASH` no PDV sem sessão OPEN na
 branch → `409 CASH_REGISTER_NOT_OPEN`, **nada é persistido**. `PIX`/`CARD`
 nunca geram movimento. Pedidos **online** em CASH (pagamento na
-entrega/retirada) também **não** tocam o caixa nesta fase — só vendas de
-balcão.
+entrega/retirada) entram no caixa quando são concluídos (desde 2026-10-23, ver
+"Correções do piloto" no topo); antes disso não tocavam o caixa.
 
 ## E. Permissões efetivas
 

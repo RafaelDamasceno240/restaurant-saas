@@ -10,6 +10,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { AuditService } from '../audit/audit.service';
+import { findAccountsByLoginEmail } from '../../common/util/login-email.util';
 import { SessionRevocationService } from '../auth/session-revocation.service';
 import { CreateUserDto, ResetUserPasswordDto, UpdateUserDto } from './dto/users.dto';
 import { canAssignRole, canManageUser, roleNeedsBranch } from './user-rules';
@@ -98,9 +99,10 @@ export class UsersService {
     try {
       userId = await this.prisma.$transaction(async (tx) => {
         const branchIds = await this.resolveBranchIds(tx, tenantId, dto.role, dto.branchIds);
-        // E-mail is the login and is unique across restaurants, as in the registration.
-        const existing = await tx.user.findUnique({ where: { email: dto.email }, select: { id: true } });
-        if (existing) throw emailTaken();
+        // E-mail is the login and is unique across restaurants, as in the registration, in any
+        // case (login-email.util.ts): the unique index alone would let "Ana@x" in next to "ana@x".
+        const existing = await findAccountsByLoginEmail(tx, dto.email);
+        if (existing.length > 0) throw emailTaken();
 
         const role = await tx.role.findUniqueOrThrow({ where: { name: dto.role } });
         const user = await tx.user.create({

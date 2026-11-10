@@ -18,11 +18,16 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
 import { CreditTermsDto } from '../../receivables/dto/receivables.dto';
+import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
 
 export class PosOrderItemDto {
   @ApiProperty() @IsUUID() productId!: string;
 
-  @ApiProperty({ example: 2 }) @IsInt() @Min(1) @Max(50) quantity!: number;
+  @ApiProperty({ example: 2, maximum: MAX_UNITS_PER_PRODUCT })
+  @IsInt()
+  @Min(1)
+  @Max(MAX_UNITS_PER_PRODUCT, { message: MAX_UNITS_MESSAGE })
+  quantity!: number;
 }
 
 // Deliberately minimal — matches the exact payload shape requested: items,

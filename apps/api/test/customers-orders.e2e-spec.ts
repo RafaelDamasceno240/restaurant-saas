@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -231,7 +232,7 @@ describe('Customers x orders (e2e)', () => {
       const c = await newCustomer(ctx);
       const kept = await order(ctx, { customerId: c.id }, 1); // 2500
       const cancelled = await order(ctx, { customerId: c.id }, 4); // 10000
-      await patch(ctx.accessToken, `/v1/orders/${cancelled.id}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${cancelled.id}/status`, statusBody('CANCELLED')).expect(200);
       // the cancelled order is the OLDEST one: it must not become the first purchase
       await prisma().order.update({ where: { id: cancelled.id }, data: { createdAt: new Date(Date.now() - 5 * 86_400_000) } });
 
@@ -253,7 +254,7 @@ describe('Customers x orders (e2e)', () => {
       const ctx = await setup();
       const c = await newCustomer(ctx);
       const o = await order(ctx, { customerId: c.id });
-      await patch(ctx.accessToken, `/v1/orders/${o.id}/status`, { status: 'CANCELLED' }).expect(200);
+      await patch(ctx.accessToken, `/v1/orders/${o.id}/status`, statusBody('CANCELLED')).expect(200);
       const m = (await get(ctx.accessToken, `/v1/customers/${c.id}`).expect(200)).body.metrics;
       expect(m).toEqual({ ordersCount: 0, cancelledCount: 1, totalSpentCents: 0, averageTicketCents: 0, firstOrderAt: null, lastOrderAt: null });
     });

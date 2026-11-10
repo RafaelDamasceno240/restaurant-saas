@@ -1,7 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import request from 'supertest';
-import { createActiveProductE2E, createStaffAndLoginE2E, createTestApp, getPrisma, registerTenantE2E, uniqueSuffix } from './test-app.util';
+import { createActiveProductE2E, createStaffAndLoginE2E, createTestApp, getPrisma, registerTenantE2E, uniqueSuffix, statusBody, roundBody } from './test-app.util';
 
 type Json = Record<string, unknown>;
 
@@ -47,7 +47,7 @@ describe('Reports (e2e)', () => {
 
   const sale = (ctx: Ctx, extra: Json = {}, items: { productId: string; quantity: number }[] = [{ productId: ctx.burger.id, quantity: 1 }], token = ctx.accessToken) =>
     post(token, '/v1/pos/orders', { branchId: ctx.branchId, items, paymentMethod: 'PIX', ...extra });
-  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, { status: next });
+  const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(next));
   async function complete(ctx: Ctx, orderId: string) {
     for (const next of ['CONFIRMED', 'PREPARING', 'READY', 'COMPLETED']) await status(ctx, orderId, next).expect(200);
   }
@@ -77,7 +77,7 @@ describe('Reports (e2e)', () => {
       // A table bill: another source, born completed.
       const table = (await post(ctx.accessToken, '/v1/tables', { branchId: ctx.branchId, number: 1 }).expect(201)).body;
       const tab = (await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id }).expect(201)).body;
-      await post(ctx.accessToken, `/v1/tabs/${tab.id}/items`, { productId: ctx.burger.id, quantity: 1 }).expect(201);
+      await post(ctx.accessToken, `/v1/tabs/${tab.id}/rounds`, roundBody([{ productId: ctx.burger.id, quantity: 1 }])).expect(201);
       await post(ctx.accessToken, `/v1/tabs/${tab.id}/checkout`, { paymentMethod: 'CARD', idempotencyKey: key() }).expect(200); // CARD 4000
 
       const body = await report(ctx.accessToken, 'sales');

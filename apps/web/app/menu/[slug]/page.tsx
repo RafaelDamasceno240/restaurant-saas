@@ -4,6 +4,7 @@ import { ApiError } from '@/lib/api-client';
 import { loadPublicMenu } from '@/lib/public-menu-server';
 import { ProductCard } from '@/components/menu/ProductCard';
 import { CartFloatingButton } from '@/components/menu/CartFloatingButton';
+import { RestaurantInfo } from '@/components/menu/RestaurantInfo';
 
 interface PageProps {
   params: { slug: string };
@@ -45,6 +46,8 @@ export default async function PublicMenuPage({ params }: PageProps) {
       <header className="sticky top-0 z-10 border-b border-line bg-surface/90 px-4 py-4 backdrop-blur">
         <h1 className="truncate text-lg font-semibold">{menu.restaurant.name}</h1>
       </header>
+
+      <RestaurantInfo restaurant={menu.restaurant} />
 
       {menu.categories.length === 0 ? (
         <p className="p-8 text-center text-sm text-muted-foreground">

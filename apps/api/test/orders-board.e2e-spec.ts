@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 // GET /v1/orders/board: the kitchen screen's four columns in ONE request.
@@ -62,7 +63,7 @@ describe('Orders board (e2e)', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async function moveTo(ctx: Ctx, orderId: string, steps: string[], target: any = server) {
     for (const status of steps) {
-      await request(target).patch(`/v1/orders/${orderId}/status`).set(auth(ctx.accessToken)).send({ status }).expect(200);
+      await request(target).patch(`/v1/orders/${orderId}/status`).set(auth(ctx.accessToken)).send(statusBody(status)).expect(200);
     }
   }
   type Column = { status: string; total: number; data: { id: string; branchId: string }[] };
@@ -108,7 +109,7 @@ describe('Orders board (e2e)', () => {
     it('is empty, not an error, for a restaurant with no orders', async () => {
       const ctx = await setup();
       const res = await board(server, ctx.accessToken).expect(200);
-      expect(res.body.columns).toEqual(STATUSES.map((status) => ({ status, total: 0, data: [] })));
+      expect(res.body.columns).toEqual(STATUSES.map((status) => ({ status, total: 0, data: [], tableRounds: [], tableRoundsTotal: 0 })));
     });
 
     it('shows the newest orders first and caps a column, saying how many there really are', async () => {
