@@ -6,10 +6,13 @@ deploy, sem tocar em master, produção, homologação, piloto, demo ou no ambie
 
 **Resumo:** o código foi integrado (merge local `695f312`) e a migration 21 foi aplicada ao DEV
 depois de validada numa cópia restaurada do backup. Os testes passaram: unitários 448 + 444 + 14,
-E2E 952/952, navegador. O DEV está no ar em 3100/4100 com o código novo. **A importação do
-cardápio da Do'cê no DEV ficou PENDENTE**: existe no DEV um produto feito à mão, "Burger Bacon", com
-o mesmo nome de um produto da Brendi, e a regra é não sobrescrever cadastros existentes sem a sua
-decisão. A importação completa foi testada numa cópia descartável do DEV (fidelidade 723/723).
+E2E 952/952, navegador. O DEV está no ar em 3100/4100 com o código novo.
+
+**Atualização (11/11, 20h28): a importação da Do'cê no DEV foi CONCLUÍDA** (seção 15). O "Burger
+Bacon" foi adotado por decisão sua. Os dados da loja foram mantidos.
+
+As seções 5 a 8 e o item 1 das pendências descrevem o estado anterior, quando a importação ainda
+dependia da sua decisão.
 
 ## 1. Branches integradas
 
@@ -194,7 +197,9 @@ cd apps/web && NODE_ENV=production PORT=3100 API_URL=http://127.0.0.1:4100/v1 no
 
 ## 13. Pendências
 
-1. **Importar o cardápio da Do'cê no DEV: precisa da sua decisão sobre o "Burger Bacon"**:
+1. ~~Importar o cardápio da Do'cê no DEV~~ **Resolvido na seção 15** (adoção escolhida por você,
+   loja mantida). Texto original:
+   **Importar o cardápio da Do'cê no DEV: precisa da sua decisão sobre o "Burger Bacon"**:
    - (a) **adotar**: o produto manual passa a ser o da Brendi (R$ 30,00, descrição, foto,
      adicionais, categoria "Burgers Especias"); o id é mantido. Foi o que se testou na cópia;
    - (b) **manter os dois**: renomear o manual no painel (ex.: "Burger Bacon (antigo)") e importar;
@@ -230,3 +235,114 @@ Intacto: worktree `restaurant-saas-final` em `e04d4a7`, sem nenhuma alteração;
 `restaurant_saas_final` não foi acessado. O PowerPoint, a homologação (3000/4000), o piloto
 (3500/4500), a demo (3300/4300) e master não foram tocados. A worktree `restaurant-saas-cardapio`
 foi preservada (`84c325e`, sem alterações).
+
+## 15. Importação da Do'cê no DEV (concluída em 11/11/2026, 20h28)
+
+Pedido: prompt "FINALIZAR IMPORTAÇÃO DA DO'CÊ NO DEV". Sem repetir o merge, a migration ou o E2E
+completo.
+
+### 15.1 Burger Bacon: comparação e decisão
+
+| | Manual no DEV | Brendi |
+| --- | --- | --- |
+| ID | `2902d5a7-a82c-4b0c-a906-a66f143f328b` | origem `ef8UEWdMyRdhOBeDYsQ9` |
+| Nome | Burger Bacon | Burger Bacon |
+| Descrição / ingredientes | nenhuma | Pão brioche, hambúrguer 160g, mussarela, fatias de bacon crocante, molho especial |
+| Preço | R$ 26,00 | R$ 30,00 ("a partir de") |
+| Categoria | "lanche b" (feita à mão) | Burgers Especias |
+| Foto | nenhuma | sim |
+| Adicionais | nenhum (não existiam antes da migration 21) | grupo "Turbine seu lanche!" |
+| Pedidos (`order_items`) | 0 | — |
+| Comandas | **1 comanda ABERTA** desde 10/11 13:06, com 1 unidade enviada à cozinha a R$ 26,00 | — |
+| Receita / estoque | nenhuma | — |
+
+O nome é igual, mas preço, categoria e descrição não permitem provar que é o mesmo produto. Por
+isso **não adotei sozinho e pedi sua decisão. Você escolheu adotar.**
+
+Antes de aplicar, conferi no código:
+- a adoção atualiza o produto **pelo mesmo ID** (`tx.product.update`) e guarda os valores
+  anteriores no relatório, para `--desfazer`;
+- a comanda fecha pelo preço congelado no item (`unitPriceCentsSnapshot`), não pelo preço atual do
+  produto.
+
+Resultado no DEV: mesmo ID, R$ 30,00, categoria Burgers Especias, foto e 1 grupo de adicionais. O
+item da comanda aberta continua **R$ 26,00**: a comanda e os itens estão idênticos byte a byte. A
+categoria "lanche b" ficou vazia e **não foi apagada**.
+
+### 15.2 Dados da loja: diferenças (MANTIDOS os do DEV)
+
+| Campo | DEV (mantido) | Brendi |
+| --- | --- | --- |
+| WhatsApp | vazio | preenchido (número público da loja) |
+| Endereço | vazio | Rua Santa Catarina, 70, Centro, Ilicínea-MG, 37175-000 (ref.: próximo à padaria Central) |
+| Horários | sem horários | qui 19:00–22:30, sex 19:00–23:00, sáb 19:00–22:45, dom 19:00–22:45 |
+| Taxa de entrega | R$ 0,00 (o cardápio mostra "Grátis") | R$ 3,00 |
+| Raio de entrega | o SaaS não tem raio | faixas 0–5 km e 5–10 km, mesma taxa, 30–40 min |
+| Entrega grátis a partir de | não definido | R$ 23,00 |
+| Pedido mínimo | R$ 0,00 | R$ 21,00 |
+| Retirada | disponível | disponível, 50–60 min |
+| Logo, capa, cor | nenhum (o cardápio mostra a inicial "D") | logo e capa da Brendi |
+| Pagamentos, agendamento | regras do SaaS | Pix e cartão online; dinheiro e cartão na entrega; agendamento até 8 dias |
+
+O importador só troca a loja **inteira** (`--incluir-loja`: logo, capa, horários, WhatsApp, endereço,
+taxas e mínimo, tudo junto). Não há como escolher campo por campo. Como nenhum campo estava
+autorizado, **a importação foi feita sem `--incluir-loja`**. A unidade e o restaurante ficaram
+idênticos ao backup (md5 da linha conferido).
+
+### 15.3 Antes de gravar
+
+| | |
+| --- | --- |
+| Backup novo (pós-migration 21) | `restaurant-saas-backups/dev/restaurant_saas_dev_20261111_202726_antes_importacao_doce.dump`, sha256 `ec6638d5…2489`; restaurado em banco descartável: **56/56 tabelas idênticas** |
+| Tenant | `doce-hamburgueria` (`0c995069…`), único plausível; dono confirmado |
+| Simulação sem adoção | 1 conflito (Burger Bacon), nada mais (`execucoes/19-dev-simulacao.json`) |
+| Simulação com adoção | criar 9 categorias, 2 grupos, 27 adicionais e 77 produtos; adotar 1; 0 conflitos (`execucoes/19-dev-simulacao-adotando.json`) |
+| Opções usadas | `--adotar-por-nome --aplicar --confirmar-banco restaurant_saas --confirmar-restaurante doce-hamburgueria`. **Sem** `--sobrescrever-edicoes` e **sem** `--incluir-loja` |
+
+Relatório da aplicação: `importacao-brendi/execucoes/20-dev-aplicacao.json` (fora do Git; guarde-o).
+Para desfazer:
+
+```
+cd apps/api && pnpm menu:import --restaurante doce-hamburgueria \
+  --desfazer ../../importacao-brendi/execucoes/20-dev-aplicacao.json \
+  --aplicar --confirmar-banco restaurant_saas --confirmar-restaurante doce-hamburgueria
+```
+
+### 15.4 Depois de gravar
+
+| Verificação | Resultado |
+| --- | --- |
+| Produtos | **78** (todos ligados à Brendi; 77 novos + Burger Bacon adotado) |
+| Categorias com produtos | **9** (+ "lanche b" vazia, preservada) |
+| Grupos / adicionais | **2 / 27**; 30 vínculos produto↔grupo |
+| Fotos | **75** produtos com foto, 75 imagens no banco (3 produtos não têm foto na Brendi: Água sem gás, Água com gás e Suco latinha pêssego) |
+| Esgotados / preço "de" / destaques | 9 / 2 / 5, iguais à fonte (fidelidade) |
+| Duplicatas | 0 nomes repetidos, 0 `externalId` repetidos |
+| Tabelas alteradas | só `categories`, `products`, `option_groups`, `option_items`, `product_option_groups`, `media_assets` e 1 linha em `audit_logs` (`MENU_IMPORTED`) |
+| Pedidos e comandas antigos | comanda aberta e itens idênticos; 0 pedidos da Do'cê antes e depois |
+| Isolamento | dados de **todos os outros restaurantes idênticos nas 56 tabelas** (md5 de cada linha); os cardápios públicos de `burger-dev-…` e `tenant-1790557114775-…` não têm produtos nem logo da Do'cê |
+
+### 15.5 Validação
+
+| Teste | Resultado |
+| --- | --- |
+| Fidelidade Brendi → SaaS (`conferir-fidelidade.mjs` na API do DEV) | **718/723**. Todo o cardápio confere: preço, "de", esgotado, categoria, descrição, foto, destaque, adicionais, regras dos grupos e contagem. As 5 diferenças são os dados da loja mantidos de propósito: taxa, mínimo, grátis a partir de, logo e capa |
+| Navegador no DEV, celular e computador: cardápio, busca, produto (nome e descrição longos), esgotado, combo com adicional obrigatório, adicionais com quantidade, observação, carrinho, checkout (entrega, Pix, cupom inválido), carrinho vazio, produto e restaurante inexistentes | **8/8**, acessibilidade ok nas 18 telas. **O pedido não foi enviado**: o formulário foi preenchido e o botão "Confirmar pedido" conferido, sem clicar. Pedidos no DEV: 668 antes e 668 depois |
+| Foto servida pelo web (`/api/public/media/…`) | 200 image/jpeg |
+| Administração de produtos e de adicionais **no DEV** | **Não executada**: exige entrar com a sua conta, e a sua senha não foi usada nem alterada. A mesma tela, com o mesmo código, passou 18/18 na cópia do DEV (seção 11) e nos E2E |
+
+### 15.6 Pendências depois da importação
+
+1. **Entrar no painel e conferir** Cardápio → Produtos e Adicionais com a sua conta:
+   http://localhost:3100/login.
+2. **Dados da loja**: o cardápio do DEV mostra entrega grátis e sem pedido mínimo, porque esses
+   campos estão vazios. Para usar os valores reais, preencha no painel (Delivery para taxa, mínimo e
+   grátis a partir de; Restaurante para horários, endereço, WhatsApp, logo, capa e cor). A outra
+   opção é autorizar `--incluir-loja`, que troca tudo de uma vez e grava os valores anteriores no
+   relatório.
+3. **Comanda aberta desde 10/11** (mesa, 1 Burger Bacon a R$ 26,00): era um teste seu? Feche ou
+   cancele pelo painel quando quiser. Não mexi nela.
+4. **Categoria "lanche b"** ficou vazia: pode ser excluída ou desativada no painel, se não for mais
+   usada.
+5. As pendências 2 a 6 da seção 13 continuam: adicionais no PDV e nas comandas, fotos no banco,
+   master/push/deploy e a cópia `rs-integ-pg`.
