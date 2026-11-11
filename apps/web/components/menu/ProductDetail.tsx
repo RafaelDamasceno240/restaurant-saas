@@ -155,26 +155,28 @@ export function ProductDetail({
           />
         ))}
 
-        <section className="mt-2 bg-surface px-4 py-4 sm:mt-4 sm:rounded-3xl sm:border sm:border-line">
-          <label
-            htmlFor="observacao"
-            className="flex items-baseline justify-between text-sm font-semibold text-foreground"
-          >
-            Alguma observação?
-            <span className="text-2xs font-normal text-subtle">
-              {notes.length}/{NOTE_MAX}
-            </span>
-          </label>
-          <textarea
-            id="observacao"
-            value={notes}
-            maxLength={NOTE_MAX}
-            rows={2}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Ex.: sem cebola, ponto da carne..."
-            className="mt-2 w-full resize-none rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-foreground outline-none placeholder:text-subtle focus:border-primary focus:bg-surface"
-          />
-        </section>
+        {!soldOut && (
+          <section className="mt-2 bg-surface px-4 py-4 sm:mt-4 sm:rounded-3xl sm:border sm:border-line">
+            <label
+              htmlFor="observacao"
+              className="flex items-baseline justify-between text-sm font-semibold text-foreground"
+            >
+              Alguma observação?
+              <span className="text-2xs font-normal text-subtle">
+                {notes.length}/{NOTE_MAX}
+              </span>
+            </label>
+            <textarea
+              id="observacao"
+              value={notes}
+              maxLength={NOTE_MAX}
+              rows={2}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Ex.: sem cebola, ponto da carne..."
+              className="mt-2 w-full resize-none rounded-xl border border-line bg-surface-2 px-3 py-2 text-sm text-foreground outline-none placeholder:text-subtle focus:border-primary focus:bg-surface"
+            />
+          </section>
+        )}
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
@@ -255,6 +257,13 @@ function OptionGroupSection({
             {group.name}
           </h2>
           <p className="text-xs text-muted-foreground">{groupRuleText(group)}</p>
+          {highlighted && !satisfied && (
+            <p role="alert" className="mt-1 text-xs font-semibold text-danger">
+              {group.minSelect === 1
+                ? 'Escolha 1 opção para continuar.'
+                : `Escolha pelo menos ${group.minSelect} opções para continuar.`}
+            </p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {!single && (
@@ -288,11 +297,14 @@ function OptionGroupSection({
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Buscar opção"
-            className="h-9 w-full rounded-full border border-line bg-surface-2 pl-9 pr-3 text-sm outline-none placeholder:text-subtle focus:border-primary focus:bg-surface"
+            className="h-9 w-full rounded-full border border-line bg-surface-2 pl-9 pr-3 text-sm outline-none placeholder:text-subtle focus:border-primary focus:bg-surface [&::-webkit-search-cancel-button]:appearance-none"
           />
         </label>
       )}
 
+      {options.length === 0 && (
+        <p className="mt-3 text-sm text-muted-foreground">Nenhuma opção encontrada.</p>
+      )}
       <ul className="mt-3 space-y-2">
         {options.map((option) => {
           const qty = selection[option.id] ?? 0;

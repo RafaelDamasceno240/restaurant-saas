@@ -18,6 +18,12 @@ roda já tem o `DATABASE_URL`.
   mesmo nome (sem diferenciar maiúsculas, acentos e espaços) é um **CONFLITO** e impede a gravação.
   Só `--adotar-por-nome` atualiza esses itens a partir da fonte, e é preciso pedir.
 - **Itens que saíram da fonte** são apenas relatados ("mantido"), nunca apagados.
+- **A fonte vence nos itens importados.** Reimportar devolve preço, esgotado, ativo e demais campos
+  dos itens importados aos valores do arquivo, desfazendo o que tiver sido mudado no painel. Use a
+  importação para migrar; depois que o restaurante passar a cuidar do cardápio pelo painel, não
+  repita (ver `importacao-brendi/PLANO_ADMINISTRACAO.md`).
+- **Loja (`--incluir-loja`):** a simulação lista só os campos da unidade que mudariam ("loja: sem
+  mudança" quando nada muda).
 - **Imagens:** só JPEG, PNG ou WebP reconhecidos pelos bytes, até 3 MB, guardadas no banco
   (`media_assets`), uma vez por restaurante (SHA-256). Imagem ausente ou recusada vira aviso; o
   item entra sem foto.

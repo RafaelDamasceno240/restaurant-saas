@@ -405,6 +405,23 @@ describe('Public menu with add-ons and images (e2e)', () => {
     ]).expect(400);
   });
 
+  it('the panel identity: /auth/me carries each restaurant its own logo, or none', async () => {
+    const a = await setup();
+    const b = await registerTenantE2E(server);
+    const me = (token: string) =>
+      request(server).get('/v1/auth/me').set('Authorization', `Bearer ${token}`).expect(200);
+    const meA = await me(a.accessToken);
+    expect(meA.body.tenant).toEqual({
+      id: a.tenantId,
+      name: expect.any(String),
+      slug: a.slug,
+      logoUrl: `/api/public/media/${a.media.id}`,
+    });
+    const meB = await me(b.accessToken);
+    expect(meB.body.tenant.id).toBe(b.tenantId);
+    expect(meB.body.tenant.logoUrl).toBeNull();
+  });
+
   it('a retry with the same key and the same add-ons is the same order; other add-ons with that key are refused', async () => {
     const t = await setup();
     const items = [

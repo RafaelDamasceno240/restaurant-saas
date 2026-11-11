@@ -25,7 +25,8 @@ import { isPublicArea, isSessionRefusal } from './session-area';
 export interface AuthUser {
   id: string;
   tenantId: string;
-  tenant?: { id: string; name: string; slug: string };
+  // logoUrl: the restaurant's own logo for the panel (null = none: the panel shows its initials).
+  tenant?: { id: string; name: string; slug: string; logoUrl?: string | null };
   name: string;
   email: string;
   roles: string[];

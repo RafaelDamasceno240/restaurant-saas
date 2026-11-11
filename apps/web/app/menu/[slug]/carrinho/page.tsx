@@ -52,7 +52,7 @@ export default function CartPage({ params }: PageProps) {
           <button
             type="button"
             onClick={clearCart}
-            className="ml-auto text-sm font-medium text-muted-foreground hover:text-danger"
+            className="-mr-2 ml-auto rounded-lg px-2 py-2.5 text-sm font-medium text-muted-foreground hover:text-danger"
           >
             Limpar
           </button>
@@ -89,7 +89,7 @@ export default function CartPage({ params }: PageProps) {
                         type="button"
                         onClick={() => removeItem(item.lineId)}
                         aria-label={`Remover ${item.name} do carrinho`}
-                        className="rounded-full p-1 text-subtle hover:text-danger"
+                        className="-m-2 rounded-full p-3 text-subtle hover:text-danger"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -119,7 +119,7 @@ export default function CartPage({ params }: PageProps) {
                           <Plus className="h-4 w-4" />
                         </button>
                       </div>
-                      <span className="font-semibold tabular-nums">
+                      <span className="shrink-0 whitespace-nowrap font-semibold tabular-nums">
                         {formatCentsAsBRL(item.priceCents * item.quantity)}
                       </span>
                     </div>
@@ -133,7 +133,7 @@ export default function CartPage({ params }: PageProps) {
           <div className="px-4 pt-4">
             <Link
               href={`/menu/${params.slug}`}
-              className="text-sm font-semibold text-primary hover:underline"
+              className="-my-2 inline-block py-3 text-sm font-semibold text-primary hover:underline"
             >
               + Adicionar mais itens
             </Link>

@@ -176,7 +176,8 @@ export function Storefront({ menu, slug }: { menu: PublicMenuResponse; slug: str
               </dd>
               {delivery.enabled && fee > 0 && freeAbove !== null && (
                 <dd className="text-2xs text-success">
-                  grátis acima de {formatCentsAsBRL(freeAbove)}
+                  grátis acima de{' '}
+                  <span className="whitespace-nowrap">{formatCentsAsBRL(freeAbove)}</span>
                 </dd>
               )}
             </div>
@@ -210,7 +211,7 @@ export function Storefront({ menu, slug }: { menu: PublicMenuResponse; slug: str
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Buscar no cardápio"
-                  className="h-10 w-full rounded-full border border-line bg-surface-2 pl-9 pr-9 text-sm text-foreground outline-none placeholder:text-subtle focus:border-primary focus:bg-surface"
+                  className="h-10 w-full rounded-full border border-line bg-surface-2 pl-9 pr-9 text-sm text-foreground outline-none placeholder:text-subtle focus:border-primary focus:bg-surface [&::-webkit-search-cancel-button]:appearance-none"
                 />
                 {query && (
                   <button
@@ -296,7 +297,7 @@ function FeaturedStrip({ products, slug }: { products: PublicMenuProduct[]; slug
       <ul className="scrollbar-none flex snap-x scroll-px-4 gap-3 overflow-x-auto px-4">
         {products.map((p) => (
           <li key={p.id} className="w-36 shrink-0 snap-start sm:w-40">
-            <Link href={`/menu/${slug}/produto/${p.id}`} className="group block">
+            <Link href={`/menu/${slug}/produto/${p.id}`} prefetch={false} className="group block">
               <ProductImage
                 src={p.imageUrl}
                 alt=""

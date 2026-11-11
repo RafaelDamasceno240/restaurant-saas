@@ -84,7 +84,7 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
                   notes={item.notes}
                 />
               </span>
-              <span className="font-medium">{formatBRL(item.subtotal)}</span>
+              <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">{formatBRL(item.subtotal)}</span>
             </li>
           ))}
         </ul>
@@ -94,10 +94,10 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
             <span>− {formatBRL(order.discount)}</span>
           </div>
         )}
-        {order.deliveryFee > 0 && (
+        {(order.deliveryFee > 0 || order.fulfillmentType === 'DELIVERY') && (
           <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-sm text-muted-foreground">
             <span>Taxa de entrega</span>
-            <span>{formatBRL(order.deliveryFee)}</span>
+            <span>{order.deliveryFee > 0 ? formatBRL(order.deliveryFee) : 'Grátis'}</span>
           </div>
         )}
         <div className="mt-2 flex items-center justify-between border-t border-line pt-2 font-semibold">
@@ -135,7 +135,7 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
       )}
 
       <div className="text-center">
-        <Link href={`/menu/${params.slug}`} className="text-sm text-muted-foreground underline">
+        <Link href={`/menu/${params.slug}`} className="inline-block py-3 text-sm text-muted-foreground underline">
           Voltar ao cardápio
         </Link>
       </div>

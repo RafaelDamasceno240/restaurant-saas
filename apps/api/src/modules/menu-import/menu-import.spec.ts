@@ -6,7 +6,12 @@ import {
   normalizeName,
 } from './menu-import-plan';
 import { SourceMenu, mapBadges, validateSource } from './menu-import-source';
-import { parseImportArgs, storeBranchValues, UsageError } from '../../cli/import-menu.cli';
+import {
+  changedStoreFields,
+  parseImportArgs,
+  storeBranchValues,
+  UsageError,
+} from '../../cli/import-menu.cli';
 
 const source = (): SourceMenu => ({
   fonte: {
@@ -365,5 +370,32 @@ describe('import CLI', () => {
     ranges.loja.entrega!.faixas = [{ taxaCentavos: 300 }, { taxaCentavos: 500 }];
     expect(storeBranchValues(ranges, warnings).deliveryFeeCents).toBe(500);
     expect(warnings[0]).toMatch(/por distância/);
+  });
+});
+
+describe('changedStoreFields', () => {
+  it('reports only what differs, comparing JSON whatever the key order', () => {
+    const values = {
+      openingHours: [{ weekday: 4, opens: '19:00', closes: '22:30' }],
+      whatsapp: '35984171394',
+      deliveryFreeAboveCents: 2300,
+      complement: 'Loja 2',
+    };
+    const same = {
+      openingHours: [{ closes: '22:30', opens: '19:00', weekday: 4 }],
+      whatsapp: '35984171394',
+      deliveryFreeAboveCents: 2300,
+      complement: 'Loja 2',
+    };
+    expect(changedStoreFields(values, same)).toEqual([]);
+    expect(
+      changedStoreFields(values, { ...same, deliveryFreeAboveCents: null, complement: undefined }),
+    ).toEqual(['deliveryFreeAboveCents', 'complement']);
+    expect(
+      changedStoreFields(values, {
+        ...same,
+        openingHours: [{ weekday: 4, opens: '18:00', closes: '22:30' }],
+      }),
+    ).toEqual(['openingHours']);
   });
 });

@@ -232,7 +232,7 @@ export default function CheckoutPage({ params }: PageProps) {
   return (
     <main className="mx-auto min-h-screen max-w-2xl space-y-6 bg-background px-4 pb-36 pt-6">
       <div>
-        <Link href={`/menu/${params.slug}/carrinho`} className="text-sm text-muted-foreground underline">
+        <Link href={`/menu/${params.slug}/carrinho`} className="-my-3 inline-block py-3 text-sm text-muted-foreground underline">
           ← Voltar ao carrinho
         </Link>
         <h1 className="mt-2 text-lg font-semibold">
@@ -255,7 +255,7 @@ export default function CheckoutPage({ params }: PageProps) {
                 {item.quantity}× {item.name}
                 <CartLineDetails options={item.options} notes={item.notes} />
               </span>
-              <span className="font-medium">
+              <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">
                 {formatCentsAsBRL(item.priceCents * item.quantity)}
               </span>
             </li>
@@ -282,9 +282,17 @@ export default function CheckoutPage({ params }: PageProps) {
       <form onSubmit={handleSubmit} className="space-y-6">
         <section className="space-y-3 rounded-xl border border-line bg-surface p-4">
           <h2 className="text-sm font-medium text-muted-foreground">Seus dados</h2>
-          <Input placeholder="Nome" required autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            placeholder="Nome"
+            aria-label="Nome"
+            required
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
           <Input
             placeholder="Telefone (com DDD)"
+            aria-label="Telefone com DDD"
             required
             type="tel"
             inputMode="tel"
@@ -335,35 +343,45 @@ export default function CheckoutPage({ params }: PageProps) {
               <Input
                 className="col-span-2"
                 placeholder="Rua"
+                aria-label="Rua"
+                autoComplete="address-line1"
                 required
                 value={address.street}
                 onChange={(e) => setAddress({ ...address, street: e.target.value })}
               />
               <Input
                 placeholder="Número"
+                aria-label="Número"
                 required
                 value={address.number}
                 onChange={(e) => setAddress({ ...address, number: e.target.value })}
               />
               <Input
-                placeholder="Complemento (opcional)"
+                placeholder="Complemento"
+                aria-label="Complemento (opcional)"
+                autoComplete="address-line2"
                 value={address.complement}
                 onChange={(e) => setAddress({ ...address, complement: e.target.value })}
               />
               <Input
                 placeholder="Bairro"
+                aria-label="Bairro"
                 required
                 value={address.neighborhood}
                 onChange={(e) => setAddress({ ...address, neighborhood: e.target.value })}
               />
               <Input
                 placeholder="Cidade"
+                aria-label="Cidade"
+                autoComplete="address-level2"
                 required
                 value={address.city}
                 onChange={(e) => setAddress({ ...address, city: e.target.value })}
               />
               <Input
                 placeholder="UF"
+                aria-label="UF (estado)"
+                autoComplete="address-level1"
                 required
                 maxLength={2}
                 value={address.state}
@@ -371,6 +389,7 @@ export default function CheckoutPage({ params }: PageProps) {
               />
               <Input
                 placeholder="CEP"
+                aria-label="CEP"
                 required
                 inputMode="numeric"
                 autoComplete="postal-code"
@@ -479,6 +498,7 @@ export default function CheckoutPage({ params }: PageProps) {
           <h2 className="text-sm font-medium text-muted-foreground">Observações (opcional)</h2>
           <Textarea
             placeholder="Ex.: sem cebola, troco para R$ 50..."
+            aria-label="Observações do pedido"
             maxLength={500}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}

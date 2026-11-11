@@ -17,6 +17,7 @@ export function AppShell({
   brandHref,
   brandName,
   brandSubtitle,
+  brandLogoUrl,
   user,
   onChangePassword,
   onLogout,
@@ -28,6 +29,7 @@ export function AppShell({
   brandHref: string;
   brandName: string;
   brandSubtitle?: string;
+  brandLogoUrl?: string | null;
   user: SidebarUser;
   onChangePassword?: () => void;
   onLogout?: () => void;
@@ -86,6 +88,7 @@ export function AppShell({
     brandHref,
     brandName,
     brandSubtitle,
+    brandLogoUrl,
     user,
     onChangePassword,
     onLogout,

@@ -1,7 +1,6 @@
 'use client';
 
 import { ReactNode, useState } from 'react';
-import Image from 'next/image';
 import clsx from 'clsx';
 import {
   Banknote,
@@ -23,6 +22,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { Badge, BadgeTone, Button, Card, CardHeader, Page, StatCard } from '@/components/ds';
 import { OperationStatus, ProfileChannel, RestaurantProfile } from '@/lib/restaurant-profile';
+import { BrandMark } from '@/components/shell/BrandMark';
 import { EditProfileDialog } from './EditProfileDialog';
 
 const OPERATION_ICON: Record<string, LucideIcon> = {
@@ -86,11 +86,17 @@ function InfoRow({
 // who may only read the profile.
 export function RestaurantProfileView({
   profile: initialProfile,
+  logoUrl,
+  logoImageClassName,
   editable,
   metricsLoading,
   onEdit,
 }: {
   profile: RestaurantProfile;
+  /** The restaurant's own logo (null: its initials). */
+  logoUrl?: string | null;
+  /** Zoom for a badge-shaped logo with margins (the demonstration's artwork). */
+  logoImageClassName?: string;
   editable: boolean;
   metricsLoading?: boolean;
   onEdit?: () => void;
@@ -110,16 +116,13 @@ export function RestaurantProfileView({
           aria-hidden
         />
         <div className="flex flex-col gap-4 px-4 pb-5 sm:flex-row sm:items-end sm:px-6">
-          <span className="relative -mt-12 block h-24 w-24 shrink-0 overflow-hidden rounded-full bg-background ring-2 ring-accent/60 sm:-mt-14 sm:h-28 sm:w-28">
-            <Image
-              src="/brand/doce-logo.png"
-              alt="Logo do Do'cê Hamburgueria e Confeitaria"
-              fill
-              sizes="112px"
-              priority
-              className="scale-[1.28] object-contain"
-            />
-          </span>
+          <BrandMark
+            name={profile.name}
+            logoUrl={logoUrl}
+            imageClassName={logoImageClassName}
+            className="-mt-12 h-24 w-24 text-3xl ring-2 ring-accent/60 sm:-mt-14 sm:h-28 sm:w-28"
+            decorative
+          />
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
               {profile.name}

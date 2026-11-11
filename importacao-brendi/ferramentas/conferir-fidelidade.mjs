@@ -72,6 +72,50 @@ expect(
   rules(src.grupos.map((g) => `${g.nome} ${g.minimo}-${g.maximo}`)),
 );
 expect('quantidade de produtos', saasProducts.length, src.produtos.length);
+// Ordem: categorias com produtos publicados, na ordem da loja; produtos na ordem da categoria.
+const productsById = new Map(src.produtos.map((p) => [p.idOrigem, p]));
+const srcCategories = [...src.categorias]
+  .sort((a, b) => a.ordem - b.ordem)
+  .map((c) => ({ nome: c.nome, produtos: c.produtos.filter((id) => productsById.has(id)) }))
+  .filter((c) => c.produtos.length > 0);
+expect(
+  'ordem das categorias',
+  saas.categories.map((c) => c.name),
+  srcCategories.map((c) => c.nome),
+);
+for (const c of srcCategories) {
+  expect(
+    `ordem dos produtos em ${c.nome}`,
+    (saas.categories.find((x) => x.name === c.nome)?.products ?? []).map((p) => clean(p.name)),
+    c.produtos
+      .map((id) => productsById.get(id))
+      .sort((a, b) => a.ordemNaCategoria - b.ordemNaCategoria)
+      .map((p) => clean(p.nome)),
+  );
+}
+// Contagens resumidas.
+expect('esgotados', saasProducts.filter((p) => p.soldOut).length, src.produtos.filter((p) => p.esgotado).length);
+expect(
+  'promoções (preço "de")',
+  saasProducts.filter((p) => p.compareAtPrice != null).length,
+  src.produtos.filter((p) => p.precoDeCentavos != null).length,
+);
+expect('produtos com foto', saasProducts.filter((p) => p.imageUrl).length, src.produtos.filter((p) => p.imagem).length);
+const offeredOptions = new Set(
+  saasProducts.flatMap((p) => (p.optionGroups ?? []).flatMap((g) => g.options.map((o) => o.id))),
+);
+expect(
+  'adicionais oferecidos',
+  offeredOptions.size,
+  src.grupos.flatMap((g) => g.opcoes.filter((o) => o.ativo && !o.esgotado)).length,
+);
+// Loja (só quando importada com --incluir-loja).
+const entrega = src.loja.entrega;
+expect('entrega grátis a partir de', Math.round((saas.delivery.freeAbove ?? 0) * 100), entrega.gratisAcimaDeCentavos);
+expect('pedido mínimo', Math.round((saas.delivery.minOrder ?? 0) * 100), src.loja.pedidoMinimoCentavos);
+expect('taxa de entrega', Math.round(saas.delivery.fee * 100), entrega.faixas[0].taxaCentavos);
+expect('logo', !!saas.restaurant.logoUrl, !!src.loja.logo);
+expect('capa', !!saas.restaurant.coverUrl, !!src.loja.capa);
 console.log(`fidelidade: ${checks - problems.length}/${checks} verificações`);
 for (const x of problems) console.log(' -', x);
 process.exitCode = problems.length ? 1 : 0;

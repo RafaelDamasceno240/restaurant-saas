@@ -156,9 +156,32 @@ export function storeBranchValues(menu: SourceMenu, warnings: string[]): Record<
       );
     }
   }
-  if (store.entrega?.gratisAcimaDeCentavos) values.deliveryFreeAboveCents = store.entrega.gratisAcimaDeCentavos;
+  if (store.entrega?.gratisAcimaDeCentavos)
+    values.deliveryFreeAboveCents = store.entrega.gratisAcimaDeCentavos;
   if (store.pedidoMinimoCentavos != null) values.deliveryMinOrderCents = store.pedidoMinimoCentavos;
   return values;
+}
+
+// Which of those values differ from the branch as it is, so a rerun reports "sem mudança"
+// for the store like it does for the catalog. JSON is compared with sorted keys: PostgreSQL
+// returns jsonb with its own key order.
+export function changedStoreFields(
+  values: Record<string, unknown>,
+  current: Record<string, unknown>,
+): string[] {
+  const canonical = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(canonical)
+      : v && typeof v === 'object'
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, canonical((v as Record<string, unknown>)[k])]),
+          )
+        : (v ?? null);
+  return Object.keys(values).filter(
+    (k) => JSON.stringify(canonical(values[k])) !== JSON.stringify(canonical(current[k])),
+  );
 }
 
 export interface ImportCliDeps {
@@ -314,7 +337,19 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
     describeRows('grupo', plan.groups, out);
     describeRows('adicional', plan.options, out);
     describeRows('produto', plan.products, out);
-    if (store.branch) out(`  loja: ${Object.keys(store.branch.values).join(', ')}`);
+    if (store.branch) {
+      const fields = Object.keys(store.branch.values);
+      const branchNow = await prisma.branch.findUniqueOrThrow({
+        where: { id: store.branch.branchId },
+        select: Object.fromEntries(fields.map((k) => [k, true])),
+      });
+      const changed = changedStoreFields(store.branch.values, branchNow as Record<string, unknown>);
+      out(
+        changed.length
+          ? `  loja: alterar ${changed.join(', ')}; sem mudança ${fields.length - changed.length}`
+          : `  loja: sem mudança (${fields.length} campos)`,
+      );
+    }
     if (store.identity) out('  loja: logo e capa');
     if (store.brandColor) out(`  loja: cor da marca ${store.brandColor}`);
     for (const m of plan.missingFromSource)

@@ -17,12 +17,14 @@ export function ProductRow({ product, slug }: { product: PublicMenuProduct; slug
     <li>
       <Link
         href={`/menu/${slug}/produto/${product.id}`}
+        // A menu lists dozens of products: prefetching each would render every product page on
+        // the server (and read the menu) just because it scrolled into view.
+        prefetch={false}
         scroll={true}
         className={clsx(
           'flex min-h-[7.5rem] gap-3 px-4 py-4 transition-colors hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none',
           soldOut && 'opacity-60',
         )}
-        aria-label={`${product.name}${soldOut ? ' (esgotado)' : ''}`}
       >
         <div className="flex min-w-0 flex-1 flex-col">
           {(product.badges?.length ?? 0) > 0 && (

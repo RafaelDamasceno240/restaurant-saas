@@ -60,6 +60,7 @@ export default function RestaurantePage() {
     <>
       <RestaurantProfileView
         profile={profile}
+        logoUrl={user?.tenant?.logoUrl}
         editable={false}
         metricsLoading={statsLoading}
         onEdit={canEdit ? () => setEditing(true) : undefined}

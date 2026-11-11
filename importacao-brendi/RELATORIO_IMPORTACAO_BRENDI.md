@@ -157,7 +157,7 @@ Ficam em `importacao-brendi/capturas/` (fora do Git, só nesta máquina):
    entre quinta e domingo, das 19:00 às 23:00, sem finalizar pedido.
 2. **Tela do painel para editar adicionais, logo, capa, cor, destaques, selos, promoção e
    esgotado.** Hoje só o importador grava esses dados; a tela de entrega já edita "grátis a partir
-   de".
+   de". Análise, esforço e riscos em `PLANO_ADMINISTRACAO.md`.
 3. **Adicionais no PDV e nas comandas.** Nesses canais o produto é vendido pelo preço base e o
    grupo obrigatório não é exigido.
 4. **Recursos da Brendi ainda não suportados:** tempo estimado, agendamento, pausas programadas,
@@ -171,8 +171,9 @@ Ficam em `importacao-brendi/capturas/` (fora do Git, só nesta máquina):
    logo; a Brendi não informa uma cor. Confirmar com o proprietário.
 8. **Direitos de uso:** as fotos e os textos são do restaurante. Confirmar com o proprietário antes
    de publicar.
-9. **Já existia antes desta etapa:** a barra lateral do painel tem o logo e o nome da Do'cê fixos no
-   código (`components/shell/Sidebar.tsx`). Agora pode usar o `logoMediaId` do restaurante.
+9. ~~A barra lateral do painel tinha o logo e o nome da Do'cê fixos no código.~~ **Resolvido na
+   revisão de 10/11** (ver `REVISAO_QUALIDADE.md`): cada restaurante vê o próprio logo, ou as
+   iniciais quando não tem.
 10. **Relatório de vendas:** o valor dos adicionais entra no preço da linha; não existe relatório
     por adicional.
 
@@ -198,12 +199,15 @@ Ficam em `importacao-brendi/capturas/` (fora do Git, só nesta máquina):
 
 ## Ambiente de teste deixado no ar (descartável)
 
-- **Containers:** `rs-cardapio-pg` (127.0.0.1:55442, bancos `rs_cardapio` e `rs_cardapio_e2e`) e
-  `rs-cardapio-redis` (127.0.0.1:56389), com o label `projeto=cardapio-brendi-descartavel`.
+- **Containers:** `rs-cardapio-pg` (127.0.0.1:55442, bancos `rs_cardapio`, `rs_cardapio_e2e`,
+  `rs_cardapio_e2e_r2` e `rs_cardapio_e2e_r3`, os dois últimos criados vazios na revisão para as
+  rodadas E2E finais) e `rs-cardapio-redis` (127.0.0.1:56389), com o label
+  `projeto=cardapio-brendi-descartavel`.
 - **Serviços:** API em http://127.0.0.1:4700 e web em http://127.0.0.1:3700/menu/doce-importacao,
   ambos com builds de produção.
 - **Restaurantes de teste:** `doce-importacao` (dono: dono@importacao-teste.example) e
-  `outro-restaurante`. As senhas são de teste e estão só no histórico desta sessão; o ambiente não
+  `outro-restaurante` (dona: dona@outro-teste.example). Na revisão, as duas contas de teste
+  ganharam uma senha nova aleatória, guardada só num arquivo temporário da sessão; o ambiente não
   tem nenhuma conta real.
 - **Pedidos de teste:** o banco `rs_cardapio` tem os pedidos criados pelo teste no navegador.
 - **Horários:** voltaram aos importados (quinta a domingo, a partir das 19:00), então o cardápio
