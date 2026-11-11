@@ -4,6 +4,7 @@ import { ReactNode, useState } from 'react';
 import clsx from 'clsx';
 import {
   Banknote,
+  Palette,
   Bike,
   CalendarClock,
   ChefHat,
@@ -88,18 +89,24 @@ export function RestaurantProfileView({
   profile: initialProfile,
   logoUrl,
   logoImageClassName,
+  coverUrl,
   editable,
   metricsLoading,
   onEdit,
+  onEditBranding,
 }: {
   profile: RestaurantProfile;
   /** The restaurant's own logo (null: its initials). */
   logoUrl?: string | null;
   /** Zoom for a badge-shaped logo with margins (the demonstration's artwork). */
   logoImageClassName?: string;
+  /** The cover of the public menu, shown as the banner (none: a gradient). */
+  coverUrl?: string | null;
   editable: boolean;
   metricsLoading?: boolean;
   onEdit?: () => void;
+  /** Opens the logo / cover / color editor (only for who may change them). */
+  onEditBranding?: () => void;
 }) {
   const [override, setOverride] = useState<RestaurantProfile | null>(null);
   const [editing, setEditing] = useState(false);
@@ -111,10 +118,15 @@ export function RestaurantProfileView({
   return (
     <Page wide>
       <Card className="overflow-hidden">
-        <div
-          className="h-24 bg-gradient-to-r from-primary/50 via-accent/15 to-transparent sm:h-28"
-          aria-hidden
-        />
+        {coverUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={coverUrl} alt="" className="h-24 w-full object-cover sm:h-28" />
+        ) : (
+          <div
+            className="h-24 bg-gradient-to-r from-primary/50 via-accent/15 to-transparent sm:h-28"
+            aria-hidden
+          />
+        )}
         <div className="flex flex-col gap-4 px-4 pb-5 sm:flex-row sm:items-end sm:px-6">
           <BrandMark
             name={profile.name}
@@ -148,6 +160,15 @@ export function RestaurantProfileView({
               onClick={() => (onEdit ? onEdit() : setEditing(true))}
             >
               Editar perfil
+            </Button>
+          )}
+          {onEditBranding && (
+            <Button
+              variant="outline"
+              icon={<Palette className="h-4 w-4" aria-hidden />}
+              onClick={onEditBranding}
+            >
+              Identidade visual
             </Button>
           )}
         </div>

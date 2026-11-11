@@ -1,11 +1,12 @@
 # Plano — administração do cardápio novo pelo painel
 
-Análise feita em 10/11/2026, na branch `cardapio-brendi`. **Nada disto foi implementado**: o
-pedido foi saber o que existe, o que falta e os riscos antes de começar.
+Análise feita em 10/11/2026, na branch `cardapio-brendi`.
 
-**Situação em 11/11/2026:** o plano está fechado e continua **sem implementação**. A decisão de
-começar, e por qual prioridade (P0 a P3, seção 3), é do responsável pelo projeto. O único item da
-lista que já mudou foi a identidade visual do painel por restaurante (seção 1).
+**Situação em 11/11/2026 (tarde): P0, P1 e P2 foram implementados**, a pedido, e a importação
+ganhou a proteção das edições do painel. O que foi feito, as telas, os testes e o que falta estão
+em `RELATORIO_ADMINISTRACAO_CARDAPIO.md`. **Continua de fora (P3):** adicionais no PDV e nas
+comandas, e relatório de vendas por adicional. Este plano fica como registro da análise; as seções
+abaixo descrevem o estado de 10/11.
 
 Hoje os dados novos da migration 21 (adicionais, foto no banco, esgotado, preço "de",
 destaque, selos, logo, capa, cor) **só são gravados pelo importador** (`pnpm menu:import`).

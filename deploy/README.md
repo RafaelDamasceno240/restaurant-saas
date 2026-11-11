@@ -335,7 +335,11 @@ Variáveis, só os nomes:
   `AUTH_RATE_LIMIT_PER_MINUTE`. `NODE_ENV=production` já vem na imagem.
 - **Job de banco**: só `DATABASE_URL`, a mesma da API daquele ambiente.
 - **Web**: `API_URL`, no **build** (argumento) e na execução. O endereço fica gravado no build: uma
-  imagem do web serve para um endereço de API.
+  imagem do web serve para um endereço de API. Duas travas impedem que um web converse com a API de
+  outro ambiente: `next build` falha sem `API_URL` (só o `next dev` mantém o padrão
+  `localhost:4000`), e `node server.js` não sobe se `API_URL` faltar ou for diferente do endereço
+  gravado no build (`apps/web/server/api-url-guard.js`); a mensagem diz com que `API_URL`
+  recompilar. As imagens Docker já passam o mesmo valor nos dois momentos.
 
 Saúde: API em `/health/live` (processo) e `/health/ready` (PostgreSQL + Redis), sem `/v1`. Os
 Dockerfiles da API e do web já declaram `HEALTHCHECK`.

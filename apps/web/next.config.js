@@ -1,11 +1,20 @@
 // Server-only: where the API really lives (e.g. https://<api-host>/v1). It is read here, at build
 // time, for the /api rewrite, and by lib/api-client.ts at runtime for Server Components. It is
 // deliberately not a NEXT_PUBLIC_ variable: the browser never needs the API's address.
+const { PHASE_PRODUCTION_BUILD } = require('next/constants');
+
 const apiUrl = (process.env.API_URL ?? 'http://localhost:4000/v1').replace(/\/+$/, '');
 
-// On Vercel a missing API_URL would silently bake the localhost fallback into the rewrite.
-if (process.env.VERCEL && !process.env.API_URL) {
-  throw new Error('API_URL is required: set it to the public URL of the API, including /v1.');
+// A production build without API_URL would silently bake the localhost fallback into the /api
+// rewrite, and the web would then talk to whatever API answers on localhost:4000 (on a machine
+// with several environments, another environment's). Only `next dev` keeps the fallback.
+function requireApiUrlForBuild(phase, env = process.env) {
+  if ((phase === PHASE_PRODUCTION_BUILD || env.VERCEL) && !env.API_URL) {
+    throw new Error(
+      'API_URL is required to build: set it to the URL of the API this web will use, including /v1 ' +
+        '(e.g. API_URL=http://127.0.0.1:4000/v1). It is fixed into the build.',
+    );
+  }
 }
 
 /** @type {import('next').NextConfig} */
@@ -52,4 +61,13 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// The check runs where the address is used: rewrites() is called when a build writes the /api
+// proxy (and by the dev server), never by `next lint` or the type checker, which also load this file.
+module.exports = (phase) => ({
+  ...nextConfig,
+  async rewrites() {
+    requireApiUrlForBuild(phase);
+    return nextConfig.rewrites();
+  },
+});
+module.exports.requireApiUrlForBuild = requireApiUrlForBuild;

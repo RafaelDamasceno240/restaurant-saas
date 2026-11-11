@@ -5,6 +5,8 @@ import { AuditService } from '../audit/audit.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { UpdateRestaurantProfileDto } from './dto/restaurant-profile.dto';
+import { MediaService, UploadedImage } from '../media/media.service';
+import { publicImageUrl } from '../media/media-url';
 import {
   isOpenAt,
   normalizeOpeningHours,
@@ -20,7 +22,11 @@ import {
 
 const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 
-const TENANT_FIELDS = ['name', 'legalName', 'description', 'instagram'] as const;
+const TENANT_FIELDS = ['name', 'legalName', 'description', 'instagram', 'brandColor'] as const;
+
+// The two pictures of the public menu, each in its own column of the tenant.
+export type BrandImage = 'logo' | 'cover';
+const IMAGE_COLUMN = { logo: 'logoMediaId', cover: 'coverMediaId' } as const;
 const BRANCH_FIELDS = [
   'phone',
   'whatsapp',
@@ -45,6 +51,10 @@ export interface RestaurantProfile {
   timezone: string;
   description: string | null;
   instagram: string | null;
+  // Look of the public menu: main color ("#RRGGBB", null = the default) and the two pictures.
+  brandColor: string | null;
+  logoUrl: string | null;
+  coverUrl: string | null;
   // The branch that receives online orders: its contact, address and hours are the ones the
   // public menu shows.
   branch: {
@@ -72,6 +82,7 @@ export class TenantsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly branchAccess: BranchAccessService,
+    private readonly media: MediaService,
   ) {}
 
   // "Current tenant" only — Phase 01 has no cross-tenant admin surface.
@@ -152,6 +163,33 @@ export class TenantsService {
 
     return toProfile(tenant, branch);
   }
+
+  // Sends (file) or removes (null) the logo or the cover. Same lock and audit as the profile; the
+  // previous image stays in media_assets (an import report may still point to it).
+  async setImage(
+    user: AuthenticatedRequestUser,
+    kind: BrandImage,
+    file: UploadedImage | null,
+  ): Promise<RestaurantProfile> {
+    const column = IMAGE_COLUMN[kind];
+    const mediaId = file ? await this.media.storeImage(user.tenantId, file) : null;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "tenants" WHERE "id" = ${user.tenantId} FOR UPDATE`;
+      const before = await tx.tenant.findUniqueOrThrow({ where: { id: user.tenantId } });
+      if (before[column] === mediaId) return;
+      await tx.tenant.update({ where: { id: user.tenantId }, data: { [column]: mediaId } });
+      await this.audit.recordTx(tx, {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        action: 'RESTAURANT_BRANDING_UPDATED',
+        entity: 'Tenant',
+        entityId: user.tenantId,
+        beforeData: { [column]: before[column] },
+        afterData: { [column]: mediaId },
+      });
+    }, TRANSACTION_OPTIONS);
+    return this.getProfile(user.tenantId);
+  }
 }
 
 // The DTO already refused anything the normalizers reject, so a normalizer never turns a value
@@ -164,6 +202,7 @@ function normalizeDto(
     legalName: (v: string) => v,
     description: (v: string | null) => v,
     instagram: (v: string | null) => (v === null ? null : normalizeInstagram(v)),
+    brandColor: (v: string | null) => (v === null ? null : v.toUpperCase()),
     phone: (v: string | null) => (v === null ? null : normalizePhone(v)),
     whatsapp: (v: string | null) => (v === null ? null : normalizePhone(v)),
     email: (v: string | null) => (v === null ? null : v.toLowerCase()),
@@ -201,6 +240,9 @@ function toProfile(tenant: Tenant, branch: Branch, now = new Date()): Restaurant
     timezone: tenant.timezone,
     description: tenant.description,
     instagram: tenant.instagram,
+    brandColor: tenant.brandColor,
+    logoUrl: publicImageUrl(tenant.logoMediaId, null),
+    coverUrl: publicImageUrl(tenant.coverMediaId, null),
     branch: {
       id: branch.id,
       name: branch.name,

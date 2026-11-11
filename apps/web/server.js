@@ -7,10 +7,29 @@
 // build its own way (Vercel) never executes this file.
 process.env.NODE_ENV = process.env.NODE_ENV || 'production';
 
+const fs = require('fs');
+const path = require('path');
 const next = require('next');
 const { createWebServer } = require('./server/web-server');
+const { checkApiUrl } = require('./server/api-url-guard');
 
 const port = Number(process.env.PORT) || 3000;
+
+// Fail closed: never serve a build whose /api proxy points somewhere other than API_URL (or
+// when API_URL is missing). See server/api-url-guard.js.
+let manifest = null;
+try {
+  manifest = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '.next', 'routes-manifest.json'), 'utf8'),
+  );
+} catch {
+  manifest = null;
+}
+const apiCheck = checkApiUrl({ runtimeApiUrl: process.env.API_URL, manifest });
+if (!apiCheck.ok) {
+  console.error(`Web server NOT started: ${apiCheck.message}`);
+  process.exit(1);
+}
 const app = next({ dev: false, dir: __dirname, hostname: 'localhost', port });
 
 app

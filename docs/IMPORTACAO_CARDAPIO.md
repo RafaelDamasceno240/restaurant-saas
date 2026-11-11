@@ -18,10 +18,20 @@ roda já tem o `DATABASE_URL`.
   mesmo nome (sem diferenciar maiúsculas, acentos e espaços) é um **CONFLITO** e impede a gravação.
   Só `--adotar-por-nome` atualiza esses itens a partir da fonte, e é preciso pedir.
 - **Itens que saíram da fonte** são apenas relatados ("mantido"), nunca apagados.
-- **A fonte vence nos itens importados.** Reimportar devolve preço, esgotado, ativo e demais campos
-  dos itens importados aos valores do arquivo, desfazendo o que tiver sido mudado no painel. Use a
-  importação para migrar; depois que o restaurante passar a cuidar do cardápio pelo painel, não
-  repita (ver `importacao-brendi/PLANO_ADMINISTRACAO.md`).
+- **Edições do painel são protegidas.** Cada aplicação guarda, na sua entrada de auditoria
+  `MENU_IMPORTED`, uma "impressão digital" de cada item que deixou no banco (e da loja). Na próxima
+  importação:
+  - item **mudado no painel** depois disso (preço, promoção, esgotado, foto, ordem, adicionais...)
+    fica **MANTIDO** como está; a simulação mostra o que a fonte mudaria nele;
+  - item **excluído no painel** não é recriado (nem as opções ou produtos que dependiam dele);
+  - **loja** (logo, capa, cor, dados da unidade) mudada no painel fica **MANTIDA**;
+  - `--sobrescrever-edicoes` faz a fonte vencer em tudo, de propósito. Mesmo assim o relatório
+    permite `--desfazer`, que devolve as edições e a proteção anterior.
+  - Grupos de adicionais criados no painel e ligados a produtos importados nunca são tocados pela
+    importação e não contam como edição.
+- **Sem referência, não grava.** Num restaurante que já recebeu uma importação feita antes desta
+  proteção, não há como saber o que o painel mudou: a simulação avisa e a aplicação é recusada,
+  salvo com `--sobrescrever-edicoes` (que passa a gravar a referência).
 - **Loja (`--incluir-loja`):** a simulação lista só os campos da unidade que mudariam ("loja: sem
   mudança" quando nada muda).
 - **Imagens:** só JPEG, PNG ou WebP reconhecidos pelos bytes, até 3 MB, guardadas no banco
@@ -46,6 +56,9 @@ pnpm menu:import --arquivo ../../importacao-brendi/dados/cardapio.json --restaur
 pnpm menu:import --arquivo ../../importacao-brendi/dados/cardapio.json --restaurante <slug> \
   --aplicar --confirmar-banco <banco> --confirmar-restaurante <slug> \
   --relatorio ../../importacao-brendi/execucoes/<data>-aplicacao.json
+
+# 2b. Só se a fonte deve vencer também nos itens editados ou excluídos no painel
+#     (mesmo comando do passo 2, com --sobrescrever-edicoes)
 
 # 3. Se precisar desfazer
 pnpm menu:import --restaurante <slug> --desfazer <relatório da aplicação> \

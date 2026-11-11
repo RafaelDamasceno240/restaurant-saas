@@ -3,10 +3,14 @@ import { dirname, join, resolve } from 'path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
   CurrentCatalog,
+  Fingerprints,
   ImportPlan,
   PlanRow,
+  STORE_KEY,
   buildPlan,
+  catalogFingerprints,
   countActions,
+  fingerprint,
   hasConflicts,
 } from '../modules/menu-import/menu-import-plan';
 import { SourceMenu, validateSource } from '../modules/menu-import/menu-import-source';
@@ -40,6 +44,8 @@ export const USAGE = [
   '  --restaurante <slug>            Restaurante de destino (obrigatório; já precisa existir)',
   '  --prefixo <nome>                Prefixo da identidade de origem (padrão: a plataforma da fonte, ex.: brendi)',
   '  --adotar-por-nome               Atualiza itens criados à mão com o mesmo nome (senão é conflito)',
+  '  --sobrescrever-edicoes          A fonte vence também nos itens editados ou excluídos no painel',
+  '                                  (sem isto, esses itens são mantidos como estão)',
   '  --incluir-loja                  Também logo, capa, horários, WhatsApp, endereço, taxa e pedido mínimo',
   '  --cor-marca <#RRGGBB>           Cor da marca no cardápio público',
   '  --relatorio <caminho>           Onde gravar o relatório (padrão: pasta atual)',
@@ -58,6 +64,7 @@ export interface ImportArgs {
   tenant?: string;
   prefix?: string;
   adoptByName: boolean;
+  overwriteEdits: boolean;
   includeStore: boolean;
   brandColor?: string;
   report?: string;
@@ -81,13 +88,20 @@ const VALUE_FLAGS: Record<string, keyof ImportArgs> = {
 };
 const BOOLEAN_FLAGS: Record<string, keyof ImportArgs> = {
   'adotar-por-nome': 'adoptByName',
+  'sobrescrever-edicoes': 'overwriteEdits',
   'incluir-loja': 'includeStore',
   aplicar: 'apply',
   help: 'help',
 };
 
 export function parseImportArgs(argv: string[]): ImportArgs {
-  const args: ImportArgs = { adoptByName: false, includeStore: false, apply: false, help: false };
+  const args: ImportArgs = {
+    adoptByName: false,
+    overwriteEdits: false,
+    includeStore: false,
+    apply: false,
+    help: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const raw = argv[i];
     if (raw === '--') continue;
@@ -165,23 +179,90 @@ export function storeBranchValues(menu: SourceMenu, warnings: string[]): Record<
 // Which of those values differ from the branch as it is, so a rerun reports "sem mudança"
 // for the store like it does for the catalog. JSON is compared with sorted keys: PostgreSQL
 // returns jsonb with its own key order.
+const canonical = (v: unknown): unknown =>
+  Array.isArray(v)
+    ? v.map(canonical)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, canonical((v as Record<string, unknown>)[k])]),
+        )
+      : (v ?? null);
+
 export function changedStoreFields(
   values: Record<string, unknown>,
   current: Record<string, unknown>,
 ): string[] {
-  const canonical = (v: unknown): unknown =>
-    Array.isArray(v)
-      ? v.map(canonical)
-      : v && typeof v === 'object'
-        ? Object.fromEntries(
-            Object.keys(v)
-              .sort()
-              .map((k) => [k, canonical((v as Record<string, unknown>)[k])]),
-          )
-        : (v ?? null);
   return Object.keys(values).filter(
     (k) => JSON.stringify(canonical(values[k])) !== JSON.stringify(canonical(current[k])),
   );
+}
+
+// What --incluir-loja manages, as it is now: logo, cover, brand color and the branch fields the
+// source fills. Its fingerprint tells whether the panel changed any of it since the last import.
+export interface StoreState {
+  logoSha: string | null;
+  coverSha: string | null;
+  brandColor: string | null;
+  branch: Record<string, unknown>;
+}
+
+export function storeFingerprint(state: StoreState): string {
+  return fingerprint(canonical(state));
+}
+
+async function readStoreState(
+  db: PrismaClient | Prisma.TransactionClient,
+  tenantId: string,
+  branchId: string | undefined,
+  branchFields: string[],
+): Promise<StoreState> {
+  const tenant = await db.tenant.findUniqueOrThrow({
+    where: { id: tenantId },
+    select: {
+      brandColor: true,
+      logoMedia: { select: { sha256: true } },
+      coverMedia: { select: { sha256: true } },
+    },
+  });
+  const branch =
+    branchId && branchFields.length
+      ? ((await db.branch.findUniqueOrThrow({
+          where: { id: branchId },
+          select: Object.fromEntries(branchFields.map((k) => [k, true])),
+        })) as Record<string, unknown>)
+      : {};
+  return {
+    logoSha: tenant.logoMedia?.sha256 ?? null,
+    coverSha: tenant.coverMedia?.sha256 ?? null,
+    brandColor: tenant.brandColor,
+    branch,
+  };
+}
+
+// The fingerprints left by the last applied import of this prefix (its MENU_IMPORTED entry, or the
+// MENU_IMPORT_UNDONE entry that undid it). null when there is none, or when the last one was made
+// before the fingerprints existed: then nothing can tell which rows the panel changed.
+export async function readBaseline(
+  db: PrismaClient | Prisma.TransactionClient,
+  tenantId: string,
+  prefix: string,
+): Promise<Fingerprints | null> {
+  const entries = await db.auditLog.findMany({
+    where: { tenantId, action: { in: ['MENU_IMPORTED', 'MENU_IMPORT_UNDONE'] } },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    select: { afterData: true },
+  });
+  for (const entry of entries) {
+    const data = (entry.afterData ?? {}) as Record<string, unknown>;
+    if (data.prefix === undefined) return null;
+    if (data.prefix !== prefix) continue;
+    const prints = data.fingerprints;
+    return prints && typeof prints === 'object' ? (prints as Fingerprints) : null;
+  }
+  return null;
 }
 
 export interface ImportCliDeps {
@@ -201,12 +282,21 @@ const label: Record<string, string> = {
   unchanged: 'sem mudança',
   conflict: 'CONFLITO',
   adopt: 'adotar',
+  kept: 'MANTIDO',
+};
+const keptLabel: Record<string, string> = {
+  edited: 'editado no painel',
+  deleted: 'excluído no painel, não será recriado',
+  'parent-deleted': 'categoria ou grupo excluído no painel',
 };
 
 function describeRows(title: string, rows: PlanRow<unknown>[], out: (line: string) => void) {
   for (const r of rows.filter((x) => x.action !== 'unchanged')) {
     const changes = r.changes.length ? ` (${r.changes.map((c) => c.field).join(', ')})` : '';
-    out(`  ${title} ${label[r.action]}: ${r.name}${changes}`);
+    const why = r.keptReason
+      ? ` [${keptLabel[r.keptReason]}; a fonte mudaria${changes || ': nada'}]`
+      : '';
+    out(`  ${title} ${label[r.action]}: ${r.name}${why || changes}`);
   }
 }
 
@@ -304,7 +394,21 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
 
     const prefix = args.prefix ?? menu.fonte.plataforma.toLowerCase().replace(/[^a-z0-9-]/g, '');
     const current: CurrentCatalog = await readCatalog(prisma, tenant.id);
-    const plan = buildPlan(menu, current, { prefix, adoptByName: args.adoptByName });
+    // Edits made in the panel since the last import are kept, unless --sobrescrever-edicoes.
+    const baseline = await readBaseline(prisma, tenant.id, prefix);
+    const importedBefore = [
+      ...current.categories,
+      ...current.groups,
+      ...current.options,
+      ...current.products,
+    ].some((r) => r.externalId?.startsWith(`${prefix}:`));
+    const unknownEdits = importedBefore && baseline === null && !args.overwriteEdits;
+    const plan = buildPlan(menu, current, {
+      prefix,
+      adoptByName: args.adoptByName,
+      baseline,
+      overwriteEdits: args.overwriteEdits,
+    });
     const branchId = args.includeStore
       ? (
           await prisma.branch.findFirst({
@@ -314,7 +418,7 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
           })
         )?.id
       : undefined;
-    const store: StoreUpdate = {
+    let store: StoreUpdate = {
       identity: args.includeStore,
       brandColor: args.brandColor?.toUpperCase() ?? null,
       branch:
@@ -322,6 +426,16 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
           ? { branchId, values: storeBranchValues(menu, warnings) }
           : null,
     };
+    const storeRequested = store.identity || !!store.brandColor;
+    const storeFields = Object.keys(store.branch?.values ?? {});
+    let storeKept = false;
+    if (storeRequested && baseline?.[STORE_KEY] !== undefined && !args.overwriteEdits) {
+      const now = storeFingerprint(await readStoreState(prisma, tenant.id, branchId, storeFields));
+      if (now !== baseline[STORE_KEY]) {
+        storeKept = true;
+        store = { identity: false, brandColor: null, branch: null };
+      }
+    }
 
     const counts = countActions(plan);
     out(
@@ -330,7 +444,7 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
     out(`Imagens válidas: ${images.size}`);
     for (const [kind, c] of Object.entries(counts)) {
       out(
-        `  ${kind.padEnd(11)} criar ${c.create}, atualizar ${c.update}, sem mudança ${c.unchanged}, adotar ${c.adopt}, conflitos ${c.conflict}`,
+        `  ${kind.padEnd(11)} criar ${c.create}, atualizar ${c.update}, sem mudança ${c.unchanged}, adotar ${c.adopt}, conflitos ${c.conflict}, mantidos ${c.kept}`,
       );
     }
     describeRows('categoria', plan.categories, out);
@@ -350,12 +464,27 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
           : `  loja: sem mudança (${fields.length} campos)`,
       );
     }
+    if (storeKept)
+      out(
+        '  loja MANTIDA: logo, capa, cor ou dados da unidade foram mudados no painel (use --sobrescrever-edicoes para trocar).',
+      );
     if (store.identity) out('  loja: logo e capa');
     if (store.brandColor) out(`  loja: cor da marca ${store.brandColor}`);
     for (const m of plan.missingFromSource)
       out(`  aviso: ${m.kind} "${m.name}" foi importado antes e não está mais na fonte (mantido).`);
     for (const s of plan.skipped) out(`  aviso: ${s}`);
     for (const w of warnings) out(`  aviso: ${w}`);
+    if (unknownEdits) {
+      out(
+        '  ATENÇÃO: este restaurante já recebeu uma importação, mas não há a referência que mostra o que',
+      );
+      out(
+        '  foi mudado no painel desde então (importação anterior à proteção de edições). Gravar agora',
+      );
+      out(
+        '  poderia desfazer edições do painel sem aviso: só com --sobrescrever-edicoes (a fonte vence em tudo).',
+      );
+    }
 
     const report = {
       geradoEm: deps.now().toISOString(),
@@ -366,6 +495,11 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
       fonte: menu.fonte,
       prefixo: prefix,
       contagem: counts,
+      protecao: {
+        referencia: baseline ? 'última importação' : 'nenhuma',
+        sobrescreverEdicoes: args.overwriteEdits,
+        lojaMantida: storeKept,
+      },
       plano: summarizePlan(plan),
       avisos: [...plan.skipped, ...warnings],
       aplicado: null as AppliedChanges | null,
@@ -376,6 +510,14 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
         'Há itens criados à mão com o mesmo nome (CONFLITO). Nada será gravado enquanto houver conflitos:',
       );
       err('renomeie-os, ou rode com --adotar-por-nome para atualizá-los a partir da fonte.');
+      writeReport(report, args, deps, tenant.slug);
+      return 1;
+    }
+    if (unknownEdits && args.apply) {
+      err(
+        'Sem referência da última importação: nada foi gravado. Confira a simulação e, se a fonte deve',
+      );
+      err('vencer em tudo, rode de novo com --sobrescrever-edicoes.');
       writeReport(report, args, deps, tenant.slug);
       return 1;
     }
@@ -390,6 +532,23 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
     const applied = await prisma.$transaction(
       async (tx) => {
         const result = await applyPlan(tx, tenant.id, menu, plan, images, store);
+        result.baselineBefore = baseline;
+        // The new baseline: what this run left. A row kept as the panel left it keeps its old
+        // fingerprint, so it stays protected next time too.
+        const prints = catalogFingerprints(await readCatalog(tx, tenant.id), prefix);
+        for (const row of [...plan.categories, ...plan.groups, ...plan.options, ...plan.products]) {
+          if (row.action !== 'kept') continue;
+          if (baseline?.[row.externalId] !== undefined)
+            prints[row.externalId] = baseline[row.externalId];
+          else delete prints[row.externalId];
+        }
+        if (storeRequested && !storeKept) {
+          prints[STORE_KEY] = storeFingerprint(
+            await readStoreState(tx, tenant.id, branchId, storeFields),
+          );
+        } else if (baseline?.[STORE_KEY] !== undefined) {
+          prints[STORE_KEY] = baseline[STORE_KEY];
+        }
         await tx.auditLog.create({
           data: {
             tenantId: tenant.id,
@@ -405,6 +564,8 @@ export async function runImportCli(deps: ImportCliDeps): Promise<number> {
                 Object.entries(result.created).map(([k, v]) => [k, v.length]),
               ),
               updated: result.updated.length,
+              prefix,
+              fingerprints: prints,
             } as Prisma.InputJsonValue,
           },
         });
@@ -435,6 +596,7 @@ async function runUndo(
   const { out, err } = deps;
   const report = JSON.parse(readFileSync(resolve(deps.cwd, args.undo!), 'utf8')) as {
     aplicado?: AppliedChanges;
+    prefixo?: string;
   };
   const applied = report.aplicado;
   if (!applied || applied.tenantId !== tenantId) {
@@ -461,7 +623,14 @@ async function runUndo(
       action: 'MENU_IMPORT_UNDONE',
       entity: 'Tenant',
       entityId: tenantId,
-      afterData: { operator: deps.actor, notes },
+      // The protection goes back to what it was before the undone run.
+      afterData: {
+        operator: deps.actor,
+        notes,
+        ...(report.prefixo
+          ? { prefix: report.prefixo, fingerprints: applied.baselineBefore ?? null }
+          : {}),
+      } as Prisma.InputJsonValue,
     },
   });
   for (const n of notes) out(`  ${n}`);
@@ -473,6 +642,7 @@ function summarizePlan(plan: ImportPlan) {
   const rows = (list: PlanRow<unknown>[]) =>
     list.map((r) => ({
       acao: r.action,
+      ...(r.keptReason ? { motivo: r.keptReason } : {}),
       idExterno: r.externalId,
       nome: r.name,
       idExistente: r.existingId,

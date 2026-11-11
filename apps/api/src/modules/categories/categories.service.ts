@@ -42,6 +42,28 @@ export class CategoriesService {
     return this.prisma.category.update({ where: { id }, data: dto });
   }
 
+  // The order of every category of the restaurant. The list must be exactly the restaurant's
+  // categories, so a screen with an outdated list cannot silently leave some of them out.
+  async reorder(tenantId: string, categoryIds: string[]) {
+    const existing = await this.prisma.category.findMany({
+      where: { tenantId },
+      select: { id: true },
+    });
+    const ids = new Set(existing.map((c) => c.id));
+    if (ids.size !== categoryIds.length || categoryIds.some((cid) => !ids.has(cid))) {
+      throw new ConflictException({
+        code: 'CATEGORY_ORDER_OUTDATED',
+        message: 'A lista de categorias mudou. Atualize a página e tente de novo.',
+      });
+    }
+    await this.prisma.$transaction(
+      categoryIds.map((cid, index) =>
+        this.prisma.category.update({ where: { id: cid }, data: { displayOrder: index + 1 } }),
+      ),
+    );
+    return this.findAllForTenant(tenantId);
+  }
+
   async remove(tenantId: string, id: string): Promise<void> {
     await this.findOneForTenant(tenantId, id);
     const productsCount = await this.prisma.product.count({ where: { tenantId, categoryId: id } });

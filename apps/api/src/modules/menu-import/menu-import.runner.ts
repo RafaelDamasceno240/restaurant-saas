@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { checkImage } from '../media/media-content';
-import { CurrentCatalog, ImportPlan } from './menu-import-plan';
+import { CurrentCatalog, Fingerprints, ImportPlan } from './menu-import-plan';
 import { SourceImage, SourceMenu } from './menu-import-source';
 
 type Db = Prisma.TransactionClient | PrismaClient;
@@ -142,6 +142,8 @@ export interface AppliedChanges {
     id: string;
     before: Record<string, unknown>;
   }[];
+  // Fingerprints that protected the panel's edits before this run: undoing it restores them.
+  baselineBefore: Fingerprints | null;
   // Option-group links of each touched product before the run.
   linksBefore: Record<string, { groupId: string; displayOrder: number }[]>;
   tenantBefore: Record<string, unknown> | null;
@@ -171,6 +173,7 @@ export async function applyPlan(
     tenantId,
     created: { media: [], categories: [], groups: [], options: [], products: [] },
     updated: [],
+    baselineBefore: null,
     linksBefore: {},
     tenantBefore: null,
     branchBefore: null,
@@ -305,6 +308,8 @@ export async function applyPlan(
   const importedGroupIds = new Set(groupId.values());
   for (const row of write(plan.products)) {
     const { categoryExternalId, imageSha, groupExternalIds, ...rest } = row.desired;
+    // A category deleted in the panel is not recreated (the plan keeps it out): nowhere to go.
+    if (!categoryId.get(categoryExternalId)) continue;
     const data = {
       ...rest,
       categoryId: categoryId.get(categoryExternalId)!,
@@ -352,7 +357,10 @@ export async function applyPlan(
       select: { groupId: true, displayOrder: true },
     });
     applied.linksBefore[productId] = links;
-    const desiredGroups = groupExternalIds.map((e) => groupId.get(e)!);
+    // A group deleted in the panel is not recreated: its link is left out.
+    const desiredGroups = groupExternalIds
+      .map((e) => groupId.get(e))
+      .filter((g): g is string => !!g);
     const stale = links
       .filter((l) => importedGroupIds.has(l.groupId) && !desiredGroups.includes(l.groupId))
       .map((l) => l.groupId);

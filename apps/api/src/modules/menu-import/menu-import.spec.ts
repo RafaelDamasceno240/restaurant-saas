@@ -1,6 +1,7 @@
 import {
   CurrentCatalog,
   buildPlan,
+  catalogFingerprints,
   countActions,
   hasConflicts,
   normalizeName,
@@ -161,10 +162,10 @@ describe('buildPlan', () => {
   it('first run creates everything that has products, with clean names and externalIds', () => {
     const plan = buildPlan(source(), empty(), opts);
     expect(countActions(plan)).toEqual({
-      categorias: { create: 1, update: 0, unchanged: 0, conflict: 0, adopt: 0 },
-      grupos: { create: 1, update: 0, unchanged: 0, conflict: 0, adopt: 0 },
-      adicionais: { create: 2, update: 0, unchanged: 0, conflict: 0, adopt: 0 },
-      produtos: { create: 2, update: 0, unchanged: 0, conflict: 0, adopt: 0 },
+      categorias: { create: 1, update: 0, unchanged: 0, conflict: 0, adopt: 0, kept: 0 },
+      grupos: { create: 1, update: 0, unchanged: 0, conflict: 0, adopt: 0, kept: 0 },
+      adicionais: { create: 2, update: 0, unchanged: 0, conflict: 0, adopt: 0, kept: 0 },
+      produtos: { create: 2, update: 0, unchanged: 0, conflict: 0, adopt: 0, kept: 0 },
     });
     expect(plan.skipped).toEqual(['Categoria "Promoção" sem produtos publicados: não importada.']);
     const [burger, melt] = plan.products;
@@ -323,6 +324,121 @@ describe('buildPlan', () => {
     expect(buildPlan(source(), catalog, opts).missingFromSource).toEqual([
       { kind: 'produto', name: 'Saiu do cardápio', id: 'P3' },
     ]);
+  });
+
+  describe('edits made in the panel after an import', () => {
+    // The fingerprints an applied import leaves: exactly what is in the database right after it.
+    const baseline = () => catalogFingerprints(imported(), 'brendi');
+    const protectedOpts = (overwriteEdits = false) => ({
+      ...opts,
+      baseline: baseline(),
+      overwriteEdits,
+    });
+
+    it('nothing edited: a rerun with the baseline changes nothing and keeps nothing', () => {
+      const counts = countActions(buildPlan(source(), imported(), protectedOpts()));
+      expect(
+        Object.values(counts).every((c) => c.kept === 0 && c.update === 0 && c.create === 0),
+      ).toBe(true);
+    });
+
+    it('a price changed in the panel is kept, even when the source changed it too', () => {
+      const catalog = imported();
+      catalog.products[0].priceCents = 3900; // the owner raised it in the panel
+      const changed = source();
+      changed.produtos[0].precoCentavos = 3600; // and the source has a new price
+      const plan = buildPlan(changed, catalog, protectedOpts());
+      expect(plan.products[0]).toMatchObject({
+        action: 'kept',
+        keptReason: 'edited',
+        existingId: 'P1',
+        changes: [{ field: 'priceCents', from: 3900, to: 3600 }],
+      });
+      // The other product, untouched in the panel, still follows the source.
+      expect(plan.products[1].action).toBe('unchanged');
+      // On purpose, the source wins again.
+      expect(buildPlan(changed, catalog, protectedOpts(true)).products[0].action).toBe('update');
+    });
+
+    it('sold out, a new photo or other add-on groups set in the panel count as edits', () => {
+      for (const edit of [
+        (c: CurrentCatalog) => (c.products[0].soldOut = true),
+        (c: CurrentCatalog) => (c.products[0].imageSha = 'b'.repeat(64)),
+        (c: CurrentCatalog) => (c.links = []),
+        (c: CurrentCatalog) => (c.options[0].priceCents = 500),
+        (c: CurrentCatalog) => (c.groups[0].minSelect = 1),
+      ]) {
+        const catalog = imported();
+        edit(catalog);
+        const plan = buildPlan(source(), catalog, protectedOpts());
+        const kept = [...plan.products, ...plan.options, ...plan.groups].filter(
+          (r) => r.action === 'kept',
+        );
+        expect(kept).toHaveLength(1);
+        expect(kept[0].keptReason).toBe('edited');
+      }
+    });
+
+    it('a group created in the panel and hung on an imported product is not an edit nor a change', () => {
+      const catalog = imported();
+      catalog.groups.push({
+        id: 'GM',
+        externalId: null,
+        name: 'Molhos',
+        minSelect: 0,
+        maxSelect: 2,
+        active: true,
+      });
+      catalog.links.push({ productId: 'P1', groupId: 'GM', displayOrder: 5 });
+      expect(catalogFingerprints(catalog, 'brendi')['brendi:p1']).toBe(baseline()['brendi:p1']);
+      expect(buildPlan(source(), catalog, protectedOpts()).products[0].action).toBe('unchanged');
+    });
+
+    it('a product deleted in the panel is not created again', () => {
+      const catalog = imported();
+      catalog.products = catalog.products.filter((p) => p.id !== 'P2');
+      const plan = buildPlan(source(), catalog, protectedOpts());
+      expect(plan.products[1]).toMatchObject({
+        action: 'kept',
+        keptReason: 'deleted',
+        existingId: null,
+      });
+      expect(buildPlan(source(), catalog, protectedOpts(true)).products[1].action).toBe('create');
+    });
+
+    it('a new option of a group deleted in the panel has nowhere to go and is kept out', () => {
+      const catalog = imported();
+      catalog.groups = [];
+      catalog.options = [];
+      catalog.links = [];
+      const plan = buildPlan(source(), catalog, protectedOpts());
+      expect(plan.groups[0]).toMatchObject({ action: 'kept', keptReason: 'deleted' });
+      expect(plan.options.map((o) => o.action)).toEqual(['kept', 'kept']);
+    });
+
+    it('without a baseline nothing is protected (the CLI refuses to write in that case)', () => {
+      const catalog = imported();
+      catalog.products[0].priceCents = 3900;
+      expect(buildPlan(source(), catalog, opts).products[0].action).toBe('update');
+    });
+
+    it('fingerprints cover only the rows of the prefix, and follow every managed field', () => {
+      const catalog = imported();
+      catalog.products.push({
+        ...catalog.products[1],
+        id: 'MANUAL',
+        externalId: null,
+        name: 'Feito à mão',
+      });
+      const prints = catalogFingerprints(catalog, 'brendi');
+      expect(Object.keys(prints).sort()).toEqual(
+        ['brendi:c1', 'brendi:g1', 'brendi:o1', 'brendi:o2', 'brendi:p1', 'brendi:p2'].sort(),
+      );
+      catalog.products[1].badges = ['NEW', 'VEGETARIAN']; // same badges, other order
+      expect(catalogFingerprints(catalog, 'brendi')['brendi:p2']).toBe(prints['brendi:p2']);
+      catalog.products[1].description = 'nova';
+      expect(catalogFingerprints(catalog, 'brendi')['brendi:p2']).not.toBe(prints['brendi:p2']);
+    });
   });
 
   it('names compare without case, accents or repeated spaces', () => {
