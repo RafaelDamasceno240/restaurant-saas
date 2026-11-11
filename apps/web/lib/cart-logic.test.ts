@@ -10,10 +10,12 @@ import {
   getSubtotalCents,
   getTotalQuantity,
   incrementItem,
+  lineKey,
   loadCart,
   needsRestaurantSwitchConfirm,
   removeItem,
   saveCart,
+  toOrderItems,
   unitsOfProduct,
 } from './cart-logic';
 import { CartState } from './cart-types';
@@ -33,7 +35,8 @@ describe('cart-logic', () => {
     const state = addItem(emptyCart, burger, restaurantA);
     expect(state.restaurantSlug).toBe(restaurantA.slug);
     expect(state.restaurantName).toBe(restaurantA.name);
-    expect(state.items).toEqual([{ ...burger, quantity: 1 }]);
+    // A line without add-ons and note keeps the productId as its id.
+    expect(state.items).toEqual([{ ...burger, lineId: burger.productId, options: [], notes: null, quantity: 1 }]);
   });
 
   it('increments quantity when adding the same product again', () => {
@@ -127,7 +130,7 @@ describe('cart-logic', () => {
       const state = addItem(emptyCart, burger, restaurantA);
       const switched = addItem(state, fries, restaurantB, true);
       expect(switched.restaurantSlug).toBe(restaurantB.slug);
-      expect(switched.items).toEqual([{ ...fries, quantity: 1 }]);
+      expect(switched.items).toEqual([{ ...fries, lineId: fries.productId, options: [], notes: null, quantity: 1 }]);
       // Restaurant A's item must not leak into B's cart.
       expect(switched.items.some((i) => i.productId === burger.productId)).toBe(false);
     });
@@ -144,7 +147,7 @@ describe('50 units of one product at most (B7)', () => {
   const full = (): CartState => ({
     restaurantSlug: restaurantA.slug,
     restaurantName: restaurantA.name,
-    items: [{ ...burger, quantity: MAX_UNITS_PER_PRODUCT }],
+    items: [{ ...burger, lineId: burger.productId, options: [], notes: null, quantity: MAX_UNITS_PER_PRODUCT }],
   });
 
   it('adding or "+" stops at 50; other products are still free', () => {
@@ -181,5 +184,76 @@ describe('50 units of one product at most (B7)', () => {
     ];
     expect(unitsOfProduct(lines, 'p1')).toBe(50);
     expect(unitsOfProduct(lines, 'p3')).toBe(0);
+  });
+});
+
+describe('lines with add-ons and notes', () => {
+  const bacon = { optionId: 'o-bacon', groupName: 'Turbine', name: 'Bacon', priceCents: 400, quantity: 1 };
+  const egg = { optionId: 'o-ovo', groupName: 'Turbine', name: 'Ovo', priceCents: 200, quantity: 2 };
+
+  beforeEach(() => window.localStorage.clear());
+
+  it('keeps the productId as lineId without add-ons or note', () => {
+    expect(lineKey('p1')).toBe('p1');
+    expect(lineKey('p1', [], '  ')).toBe('p1');
+  });
+
+  it('the same product with other add-ons or another note is another line', () => {
+    let state = addItem(emptyCart, burger, restaurantA);
+    state = addItem(state, { ...burger, priceCents: 2890, options: [bacon] }, restaurantA);
+    state = addItem(state, { ...burger, notes: 'sem cebola' }, restaurantA);
+    expect(state.items).toHaveLength(3);
+    expect(new Set(state.items.map((i) => i.lineId)).size).toBe(3);
+  });
+
+  it('the same add-ons in another order and the same note add up on one line', () => {
+    let state = addItem(emptyCart, { ...burger, options: [bacon, egg], notes: 'bem passado' }, restaurantA);
+    state = addItem(state, { ...burger, options: [egg, bacon], notes: ' bem passado ' }, restaurantA);
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0].quantity).toBe(2);
+  });
+
+  it('adds several units at once, never over 50 of the product over all its lines', () => {
+    let state = addItem(emptyCart, { ...burger, quantity: 30 }, restaurantA);
+    state = addItem(state, { ...burger, options: [bacon], quantity: 30 }, restaurantA);
+    expect(state.items.map((i) => i.quantity)).toEqual([30, 20]);
+    expect(incrementItem(state, state.items[0].lineId)).toBe(state);
+  });
+
+  it('increments, decrements and removes by line', () => {
+    let state = addItem(emptyCart, burger, restaurantA);
+    state = addItem(state, { ...burger, options: [bacon] }, restaurantA);
+    const withBacon = state.items[1].lineId;
+    state = incrementItem(state, withBacon);
+    expect(state.items.map((i) => i.quantity)).toEqual([1, 2]);
+    state = decrementItem(state, withBacon);
+    state = removeItem(state, burger.productId);
+    expect(state.items.map((i) => i.lineId)).toEqual([withBacon]);
+  });
+
+  it('sends only ids and quantities to the order', () => {
+    const state = addItem(emptyCart, { ...burger, priceCents: 3290, options: [bacon, egg], notes: 'sem cebola' }, restaurantA);
+    expect(toOrderItems(state.items)).toEqual([
+      {
+        productId: 'p1',
+        quantity: 1,
+        options: [
+          { optionId: 'o-bacon', quantity: 1 },
+          { optionId: 'o-ovo', quantity: 2 },
+        ],
+        notes: 'sem cebola',
+      },
+    ]);
+    expect(toOrderItems(addItem(emptyCart, fries, restaurantA).items)).toEqual([{ productId: 'p2', quantity: 1 }]);
+  });
+
+  it('reads a cart saved before add-ons existed', () => {
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({ restaurantSlug: 'a', restaurantName: 'A', items: [{ productId: 'p1', name: 'X', priceCents: 100, imageUrl: null, quantity: 2 }] }),
+    );
+    expect(loadCart()?.items).toEqual([
+      { productId: 'p1', name: 'X', priceCents: 100, imageUrl: null, quantity: 2, lineId: 'p1', options: [], notes: null },
+    ]);
   });
 });

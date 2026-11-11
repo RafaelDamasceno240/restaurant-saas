@@ -10,6 +10,16 @@ const codeOf = (fn: () => unknown) => {
   return null;
 };
 
+describe('priceDelivery: free delivery from a subtotal on', () => {
+  const settings = { enabled: true, feeCents: 300, minOrderCents: 2100, freeAboveCents: 2300 };
+
+  it('charges the fee below the threshold and nothing from it on (items subtotal)', () => {
+    expect(priceDelivery(2299, settings)).toEqual({ deliveryFeeCents: 300, totalCents: 2599 });
+    expect(priceDelivery(2300, settings)).toEqual({ deliveryFeeCents: 0, totalCents: 2300 });
+    expect(priceDelivery(5000, { ...settings, freeAboveCents: null })).toEqual({ deliveryFeeCents: 300, totalCents: 5300 });
+  });
+});
+
 describe('priceDelivery', () => {
   it('adds the fee to the subtotal, in integer cents', () => {
     expect(priceDelivery(3000, on)).toEqual({ deliveryFeeCents: 500, totalCents: 3500 });

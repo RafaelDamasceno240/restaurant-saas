@@ -79,6 +79,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           brandHref="/dashboard"
           brandName={user.tenant?.name ?? 'Restaurant SaaS'}
           brandSubtitle="Painel de gestão"
+          brandLogoUrl={user.tenant?.logoUrl}
           user={{
             name: user.name,
             email: user.email,

@@ -141,6 +141,11 @@ describe('Restaurant profile (e2e)', () => {
       },
       openingHours: saved.body.branch.openingHours,
       openNow: saved.body.openNow,
+      // Look of the menu: not configured by the profile screen.
+      timeZone: 'America/Sao_Paulo',
+      logoUrl: null,
+      coverUrl: null,
+      brandColor: null,
     });
     const raw = JSON.stringify(menu.body);
     expect(raw).not.toContain('casadoburger.com.br');

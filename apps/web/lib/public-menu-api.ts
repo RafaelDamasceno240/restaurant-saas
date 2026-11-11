@@ -3,12 +3,39 @@ import { apiFetch } from './api-client';
 // Public contract — deliberately separate from the admin Category/Product
 // types in cardapio-api.ts: this is unauthenticated, customer-facing data
 // (no tenantId, no active/displayOrder, no internal fields at all).
+// An add-on the customer can pick (sold-out ones are not listed). Prices in reais.
+export interface PublicMenuOption {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  maxQuantity: number;
+  imageUrl: string | null;
+}
+
+// minSelect > 0 = required; the units chosen in the group stay between minSelect and maxSelect.
+export interface PublicMenuOptionGroup {
+  id: string;
+  name: string;
+  minSelect: number;
+  maxSelect: number;
+  options: PublicMenuOption[];
+}
+
+export type ProductBadge = 'NEW' | 'VEGETARIAN';
+
 export interface PublicMenuProduct {
   id: string;
   name: string;
   description: string | null;
   price: number;
+  // Promotion: the full price, shown struck through. Older APIs do not send the fields below.
+  compareAtPrice?: number | null;
   imageUrl: string | null;
+  soldOut?: boolean;
+  featured?: boolean;
+  badges?: ProductBadge[];
+  optionGroups?: PublicMenuOptionGroup[];
 }
 
 export interface PublicMenuCategory {
@@ -24,6 +51,8 @@ export interface PublicMenuDelivery {
   enabled: boolean;
   fee: number;
   minOrder: number;
+  // Items subtotal from which the delivery is free (reais); null = never free.
+  freeAbove?: number | null;
 }
 
 // What the restaurant published in its profile. Phones as digits, Instagram without "@";
@@ -46,6 +75,11 @@ export interface PublicRestaurant {
   } | null;
   openingHours: { weekday: number; opens: string; closes: string }[] | null;
   openNow: boolean | null;
+  timeZone?: string;
+  // Look of the menu; null = the neutral defaults.
+  logoUrl?: string | null;
+  coverUrl?: string | null;
+  brandColor?: string | null;
 }
 
 export interface PublicMenuResponse {

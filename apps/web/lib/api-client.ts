@@ -31,6 +31,7 @@ const STATUS_MESSAGE: Record<number, string> = {
   403: 'Você não tem permissão para fazer isso.',
   404: 'Não encontrado.',
   409: 'Não foi possível concluir: os dados mudaram. Atualize a página e tente novamente.',
+  413: 'O arquivo é grande demais.',
   429: 'Muitas tentativas em pouco tempo. Aguarde um instante e tente novamente.',
 };
 
@@ -101,6 +102,9 @@ async function send(path: string, options: RequestOptions, accessToken: string |
 }
 
 function rawSend(path: string, options: RequestOptions, accessToken: string | null): Promise<Response> {
+  // A file upload (FormData) goes as multipart: the browser sets its own Content-Type with the
+  // boundary, so none is set here.
+  const isForm = typeof FormData !== 'undefined' && options.body instanceof FormData;
   return fetch(`${API_BASE}${path}`, {
     method: options.method ?? 'GET',
     credentials: 'include',
@@ -108,10 +112,10 @@ function rawSend(path: string, options: RequestOptions, accessToken: string | nu
     // otherwise keep server-side GETs in its Data Cache indefinitely.
     cache: 'no-store',
     headers: {
-      'Content-Type': 'application/json',
+      ...(isForm ? {} : { 'Content-Type': 'application/json' }),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: isForm ? (options.body as FormData) : options.body ? JSON.stringify(options.body) : undefined,
   });
 }
 

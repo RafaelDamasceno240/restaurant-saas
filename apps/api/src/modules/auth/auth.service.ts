@@ -19,6 +19,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { durationToMs, hashToken } from './token.util';
 import { AccessTokenPayload } from './strategies/jwt.strategy';
 import { SessionRevocationService } from './session-revocation.service';
+import { publicImageUrl } from '../media/media-url';
 
 const REFRESH_REUSE_GRACE_MS = 10_000;
 
@@ -306,7 +307,14 @@ export class AuthService {
     return {
       id: user.id,
       tenantId: user.tenantId,
-      tenant: { id: user.tenant.id, name: user.tenant.name, slug: user.tenant.slug },
+      // logoUrl is only what the panel shows next to the name (its own logo, or none): each
+      // restaurant sees its own identity, never a fixed one.
+      tenant: {
+        id: user.tenant.id,
+        name: user.tenant.name,
+        slug: user.tenant.slug,
+        logoUrl: publicImageUrl(user.tenant.logoMediaId, null),
+      },
       name: user.name,
       email: user.email,
       status: user.status,

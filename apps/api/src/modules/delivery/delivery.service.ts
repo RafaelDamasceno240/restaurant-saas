@@ -378,7 +378,7 @@ export class DeliveryService {
     await this.branchAccess.assertAccess(user, query.branchId);
     const branch = await this.prisma.branch.findFirstOrThrow({
       where: { id: query.branchId, tenantId: user.tenantId },
-      select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+      select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true, deliveryFreeAboveCents: true },
     });
     return this.toSettings(branch);
   }
@@ -388,7 +388,7 @@ export class DeliveryService {
     const branch = await this.prisma.$transaction(async (tx) => {
       const before = await tx.branch.findFirstOrThrow({
         where: { id: dto.branchId, tenantId: user.tenantId },
-        select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+        select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true, deliveryFreeAboveCents: true },
       });
       const updated = await tx.branch.update({
         where: { id: dto.branchId },
@@ -396,8 +396,9 @@ export class DeliveryService {
           deliveryEnabled: dto.enabled,
           deliveryFeeCents: dto.feeCents,
           deliveryMinOrderCents: dto.minOrderCents,
+          ...(dto.freeAboveCents !== undefined ? { deliveryFreeAboveCents: dto.freeAboveCents } : {}),
         },
-        select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+        select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true, deliveryFreeAboveCents: true },
       });
       await this.audit.recordTx(tx, {
         tenantId: user.tenantId,
@@ -409,8 +410,14 @@ export class DeliveryService {
           enabled: before.deliveryEnabled,
           feeCents: before.deliveryFeeCents,
           minOrderCents: before.deliveryMinOrderCents,
+          freeAboveCents: before.deliveryFreeAboveCents,
         },
-        afterData: { enabled: dto.enabled, feeCents: dto.feeCents, minOrderCents: dto.minOrderCents },
+        afterData: {
+          enabled: dto.enabled,
+          feeCents: dto.feeCents,
+          minOrderCents: dto.minOrderCents,
+          freeAboveCents: updated.deliveryFreeAboveCents,
+        },
       });
       return updated;
     }, TRANSACTION_OPTIONS);
@@ -599,12 +606,14 @@ export class DeliveryService {
     deliveryEnabled: boolean;
     deliveryFeeCents: number;
     deliveryMinOrderCents: number;
+    deliveryFreeAboveCents: number | null;
   }) {
     return {
       branchId: branch.id,
       enabled: branch.deliveryEnabled,
       feeCents: branch.deliveryFeeCents,
       minOrderCents: branch.deliveryMinOrderCents,
+      freeAboveCents: branch.deliveryFreeAboveCents,
     };
   }
 

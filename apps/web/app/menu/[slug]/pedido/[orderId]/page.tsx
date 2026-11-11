@@ -4,6 +4,7 @@ import { getOrder } from '@/lib/checkout-api';
 import { ApiError } from '@/lib/api-client';
 import { formatCentsAsBRL, toCents } from '@/lib/money';
 import { trackingHeading } from '@/lib/order-tracking';
+import { CartLineDetails } from '@/components/menu/CartLineDetails';
 
 interface PageProps {
   params: { slug: string; orderId: string };
@@ -74,12 +75,16 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
       <section className="rounded-xl border border-line bg-surface p-4">
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Itens</h2>
         <ul className="divide-y divide-line">
-          {order.items.map((item) => (
-            <li key={item.productId} className="flex items-center justify-between py-2 text-sm">
-              <span>
+          {order.items.map((item, index) => (
+            <li key={`${item.productId}-${index}`} className="flex items-start justify-between gap-3 py-2 text-sm">
+              <span className="min-w-0">
                 {item.quantity}× {item.name}
+                <CartLineDetails
+                  options={(item.options ?? []).map((o) => ({ name: o.name, quantity: o.quantity }))}
+                  notes={item.notes}
+                />
               </span>
-              <span className="font-medium">{formatBRL(item.subtotal)}</span>
+              <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">{formatBRL(item.subtotal)}</span>
             </li>
           ))}
         </ul>
@@ -89,10 +94,10 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
             <span>− {formatBRL(order.discount)}</span>
           </div>
         )}
-        {order.deliveryFee > 0 && (
+        {(order.deliveryFee > 0 || order.fulfillmentType === 'DELIVERY') && (
           <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-sm text-muted-foreground">
             <span>Taxa de entrega</span>
-            <span>{formatBRL(order.deliveryFee)}</span>
+            <span>{order.deliveryFee > 0 ? formatBRL(order.deliveryFee) : 'Grátis'}</span>
           </div>
         )}
         <div className="mt-2 flex items-center justify-between border-t border-line pt-2 font-semibold">
@@ -130,7 +135,7 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
       )}
 
       <div className="text-center">
-        <Link href={`/menu/${params.slug}`} className="text-sm text-muted-foreground underline">
+        <Link href={`/menu/${params.slug}`} className="inline-block py-3 text-sm text-muted-foreground underline">
           Voltar ao cardápio
         </Link>
       </div>

@@ -83,6 +83,11 @@ describe('Public menu (e2e)', () => {
       address: null,
       openingHours: null,
       openNow: null,
+      // Look of the menu: nothing configured.
+      timeZone: 'America/Sao_Paulo',
+      logoUrl: null,
+      coverUrl: null,
+      brandColor: null,
     });
     expect(res.body.categories).toHaveLength(1);
     const [returnedCategory] = res.body.categories;

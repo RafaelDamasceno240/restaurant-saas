@@ -1,10 +1,26 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseEnumPipe,
+  Patch,
+  Put,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ImageUploadInterceptor } from '../media/image-upload.interceptor';
+import { UploadedImage } from '../media/media.service';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { UpdateRestaurantProfileDto } from './dto/restaurant-profile.dto';
-import { TenantsService } from './tenants.service';
+import { BrandImage, TenantsService } from './tenants.service';
+
+const BRAND_IMAGES = ['logo', 'cover'];
+const brandImagePipe = new ParseEnumPipe(Object.fromEntries(BRAND_IMAGES.map((k) => [k, k])));
 
 @ApiTags('tenants')
 @ApiBearerAuth()
@@ -37,5 +53,30 @@ export class TenantsController {
     @Body() dto: UpdateRestaurantProfileDto,
   ) {
     return this.tenantsService.updateProfile(user, dto);
+  }
+
+  @Put('current/:image')
+  @RequirePermissions('restaurant.update')
+  @UseInterceptors(ImageUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({
+    summary: 'Envia ou troca o logo (logo) ou a capa (cover): JPEG, PNG ou WebP, até 3 MB',
+  })
+  setImage(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('image', brandImagePipe) image: BrandImage,
+    @UploadedFile() file: UploadedImage | undefined,
+  ) {
+    return this.tenantsService.setImage(user, image, file ?? { buffer: Buffer.alloc(0) });
+  }
+
+  @Delete('current/:image')
+  @RequirePermissions('restaurant.update')
+  @ApiOperation({ summary: 'Remove o logo (logo) ou a capa (cover)' })
+  removeImage(
+    @CurrentUser() user: AuthenticatedRequestUser,
+    @Param('image', brandImagePipe) image: BrandImage,
+  ) {
+    return this.tenantsService.setImage(user, image, null);
   }
 }

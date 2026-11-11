@@ -82,9 +82,13 @@ export interface AdminOrderListResponse {
 export interface AdminOrderItem {
   productId: string;
   name: string;
+  // Add-ons of one unit included.
   unitPrice: number;
   quantity: number;
   subtotal: number;
+  // The customer's note and add-ons of the line (online menu). Absent on older APIs.
+  notes?: string | null;
+  options?: { group: string; name: string; unitPrice: number; quantity: number }[];
 }
 
 export interface AdminOrderDetail {

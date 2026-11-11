@@ -66,6 +66,8 @@ export interface DeliverySettings {
   enabled: boolean;
   feeCents: number;
   minOrderCents: number;
+  // Items subtotal from which the delivery is free; null = never free. Older APIs omit it.
+  freeAboveCents?: number | null;
 }
 
 export interface DeliveryFilters {

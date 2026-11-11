@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { BrandingDialog } from '@/components/restaurante/BrandingDialog';
 import { RestaurantProfileFormDialog } from '@/components/restaurante/RestaurantProfileFormDialog';
 import { RestaurantProfileView } from '@/components/restaurante/RestaurantProfileView';
 import { ErrorState, LoadingState } from '@/components/ds';
@@ -18,6 +19,7 @@ const EDITOR_ROLES = ['OWNER', 'ADMIN'];
 export default function RestaurantePage() {
   const { accessToken, user } = useAuth();
   const [editing, setEditing] = useState(false);
+  const [branding, setBranding] = useState(false);
   const data = useQuery({
     queryKey: ['restaurant-profile'],
     queryFn: () => getRestaurantProfile(accessToken as string),
@@ -60,9 +62,12 @@ export default function RestaurantePage() {
     <>
       <RestaurantProfileView
         profile={profile}
+        logoUrl={data.data.logoUrl ?? user?.tenant?.logoUrl}
+        coverUrl={data.data.coverUrl}
         editable={false}
         metricsLoading={statsLoading}
         onEdit={canEdit ? () => setEditing(true) : undefined}
+        onEditBranding={canEdit ? () => setBranding(true) : undefined}
       />
       {canEdit && (
         <RestaurantProfileFormDialog
@@ -70,6 +75,9 @@ export default function RestaurantePage() {
           profile={data.data}
           onClose={() => setEditing(false)}
         />
+      )}
+      {canEdit && (
+        <BrandingDialog open={branding} profile={data.data} onClose={() => setBranding(false)} />
       )}
     </>
   );

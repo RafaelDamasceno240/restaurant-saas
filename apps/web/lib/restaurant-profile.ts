@@ -77,6 +77,10 @@ export interface RestaurantProfileData {
   timezone: string;
   description: string | null;
   instagram: string | null;
+  // Look of the public menu: main color ("#RRGGBB", null = default), logo and cover.
+  brandColor?: string | null;
+  logoUrl?: string | null;
+  coverUrl?: string | null;
   branch: {
     id: string;
     name: string;
@@ -101,6 +105,7 @@ export interface RestaurantProfilePatch {
   legalName?: string;
   description?: string | null;
   instagram?: string | null;
+  brandColor?: string | null;
   phone?: string | null;
   whatsapp?: string | null;
   email?: string | null;
@@ -125,6 +130,34 @@ export function updateRestaurantProfile(
   return apiFetch<RestaurantProfileData>('/tenants/current/profile', {
     method: 'PATCH',
     body: patch,
+    accessToken,
+  });
+}
+
+// Logo or cover of the public menu: a JPEG, PNG or WebP of up to 3 MB (checked by the API from the
+// file's bytes). Answers with the whole profile, so the screen shows the new picture at once.
+export type BrandImageKind = 'logo' | 'cover';
+
+export function uploadBrandImage(
+  accessToken: string,
+  kind: BrandImageKind,
+  file: Blob,
+): Promise<RestaurantProfileData> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiFetch<RestaurantProfileData>(`/tenants/current/${kind}`, {
+    method: 'PUT',
+    body: form,
+    accessToken,
+  });
+}
+
+export function removeBrandImage(
+  accessToken: string,
+  kind: BrandImageKind,
+): Promise<RestaurantProfileData> {
+  return apiFetch<RestaurantProfileData>(`/tenants/current/${kind}`, {
+    method: 'DELETE',
     accessToken,
   });
 }

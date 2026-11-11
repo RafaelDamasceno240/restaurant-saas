@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DeliveryStatus, Order, OrderItem, OrderStatus, Prisma, StockMovement } from '@prisma/client';
+import { DeliveryStatus, Order, OrderItem, OrderItemOption, OrderStatus, Prisma, StockMovement } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { fromCents } from '../../common/util/money.util';
@@ -29,14 +29,17 @@ import {
 } from './dto/order-admin-response.dto';
 
 type DeliverySummary = { id: string; status: DeliveryStatus; notes: string | null } | null;
+type ItemWithOptions = OrderItem & { options: OrderItemOption[] };
 type OrderWithItemsAndCount = Order & {
-  items: OrderItem[];
+  items: ItemWithOptions[];
   _count: { items: number };
   delivery: DeliverySummary;
 };
-type OrderWithItems = Order & { items: OrderItem[]; delivery: DeliverySummary };
+type OrderWithItems = Order & { items: ItemWithOptions[]; delivery: DeliverySummary };
 
 const deliverySummarySelect = { select: { id: true, status: true, notes: true } } as const;
+// Every order line is read with its add-ons (the kitchen and the receipt need them).
+const itemsWithOptions = { include: { options: true } } as const;
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -84,7 +87,7 @@ export class OrdersService {
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { items: true, delivery: deliverySummarySelect, _count: { select: { items: true } } },
+        include: { items: itemsWithOptions, delivery: deliverySummarySelect, _count: { select: { items: true } } },
       }),
     ]);
 
@@ -124,7 +127,7 @@ export class OrdersService {
           where: { ...scope, status },
           orderBy: { createdAt: 'desc' },
           take: ORDER_BOARD_COLUMN_LIMIT,
-          include: { items: true, delivery: deliverySummarySelect, _count: { select: { items: true } } },
+          include: { items: itemsWithOptions, delivery: deliverySummarySelect, _count: { select: { items: true } } },
         }),
       ]),
     ]);
@@ -204,7 +207,7 @@ export class OrdersService {
   async findOneForTenant(tenantId: string, id: string): Promise<OrderDetailDto> {
     const order = await this.prisma.order.findFirst({
       where: { id, tenantId },
-      include: { items: true, delivery: deliverySummarySelect },
+      include: { items: itemsWithOptions, delivery: deliverySummarySelect },
     });
     if (!order) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Pedido não encontrado.' });
@@ -574,13 +577,20 @@ export class OrdersService {
   // the list response too) — one place that turns an OrderItem row into the
   // public-shaped item, always from the historical snapshot fields, never
   // re-reading Product.
-  private toItemDto(item: OrderItem) {
+  private toItemDto(item: ItemWithOptions) {
     return {
       productId: item.productId,
       name: item.productNameSnapshot,
       unitPrice: fromCents(item.unitPriceCents),
       quantity: item.quantity,
       subtotal: fromCents(item.subtotalCents),
+      notes: item.notes,
+      options: item.options.map((option) => ({
+        group: option.groupNameSnapshot,
+        name: option.optionNameSnapshot,
+        unitPrice: fromCents(option.unitPriceCents),
+        quantity: option.quantity,
+      })),
     };
   }
 }

@@ -106,6 +106,14 @@ export class UpdateRestaurantProfileDto {
   @IsInstagram()
   instagram?: string | null;
 
+  // Main color of the public menu (buttons, highlights), "#RRGGBB". null returns to the default.
+  @ApiPropertyOptional({ nullable: true, example: '#C8102E' })
+  @IsOptional()
+  @Transform(blankToNull)
+  @IsString()
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'Cor inválida: use o formato #RRGGBB (ex.: #C8102E).' })
+  brandColor?: string | null;
+
   @ApiPropertyOptional({ nullable: true, example: '(11) 3456-7890' })
   @IsOptional()
   @Transform(blankToNull)

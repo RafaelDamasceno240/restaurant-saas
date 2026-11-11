@@ -36,7 +36,13 @@ describe('New restaurant: delivery starts off (e2e)', () => {
         });
 
     const settings = await request(server).get('/v1/delivery/settings').query({ branchId: tenant.branchId }).set(auth).expect(200);
-    expect(settings.body).toEqual({ branchId: tenant.branchId, enabled: false, feeCents: 0, minOrderCents: 0 });
+    expect(settings.body).toEqual({
+      branchId: tenant.branchId,
+      enabled: false,
+      feeCents: 0,
+      minOrderCents: 0,
+      freeAboveCents: null,
+    });
     const menu = await request(server).get(`/v1/public/menu/${tenant.slug}`).expect(200);
     expect(menu.body.delivery.enabled).toBe(false);
 

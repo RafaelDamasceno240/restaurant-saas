@@ -23,6 +23,8 @@
     "platform-admin:revoke:prod": "node dist/src/cli/platform-admin.js revoke",
     "user:reset-password": "ts-node --transpile-only src/cli/reset-password.ts",
     "user:reset-password:prod": "node dist/src/cli/reset-password.js",
+    "menu:import": "ts-node --transpile-only src/cli/import-menu.ts",
+    "menu:import:prod": "node dist/src/cli/import-menu.js",
     "prisma:constraints": "prisma db execute --file prisma/sql/cash_register_constraints.sql --schema prisma/schema.prisma",
     "prisma:tabs-constraints": "prisma db execute --file prisma/sql/tabs_constraints.sql --schema prisma/schema.prisma"
   },

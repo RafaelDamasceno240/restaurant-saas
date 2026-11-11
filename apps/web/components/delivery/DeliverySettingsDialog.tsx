@@ -33,6 +33,8 @@ export function DeliverySettingsDialog({
   const [enabled, setEnabled] = useState(false);
   const [fee, setFee] = useState('0,00');
   const [minOrder, setMinOrder] = useState('0,00');
+  // Blank = the delivery is never free.
+  const [freeAbove, setFreeAbove] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const settings = useQuery({
@@ -46,6 +48,7 @@ export function DeliverySettingsDialog({
     setEnabled(settings.data.enabled);
     setFee(centsToInput(settings.data.feeCents));
     setMinOrder(centsToInput(settings.data.minOrderCents));
+    setFreeAbove(settings.data.freeAboveCents ? centsToInput(settings.data.freeAboveCents) : '');
     setError(null);
   }, [open, settings.data]);
 
@@ -53,12 +56,16 @@ export function DeliverySettingsDialog({
     mutationFn: () => {
       const feeCents = costToCents(fee);
       const minOrderCents = costToCents(minOrder);
-      if (feeCents === null || minOrderCents === null) throw new Error('Informe valores válidos, por exemplo 5,00.');
+      const freeAboveCents = freeAbove.trim() ? costToCents(freeAbove) : null;
+      if (feeCents === null || minOrderCents === null || freeAboveCents === 0 || (freeAbove.trim() && freeAboveCents === null)) {
+        throw new Error('Informe valores válidos, por exemplo 5,00.');
+      }
       return deliveryApi.updateSettings(accessToken as string, {
         branchId: branchId as string,
         enabled,
         feeCents,
         minOrderCents,
+        freeAboveCents,
       });
     },
     onSuccess: () => {
@@ -119,6 +126,14 @@ export function DeliverySettingsDialog({
               value={minOrder}
               onChange={(event) => setMinOrder(event.target.value)}
               placeholder="0,00"
+            />
+          </Field>
+          <Field label="Entrega grátis a partir de (R$)" hint="Soma dos itens. Em branco: a taxa vale sempre.">
+            <Input
+              inputMode="decimal"
+              value={freeAbove}
+              onChange={(event) => setFreeAbove(event.target.value)}
+              placeholder="Opcional"
             />
           </Field>
           {/* B11: a new restaurant starts with delivery off; turning it on with no fee or no minimum

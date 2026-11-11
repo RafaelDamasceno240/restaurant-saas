@@ -1,10 +1,10 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import clsx from 'clsx';
 import { HelpCircle, KeyRound, LifeBuoy, LogOut, Menu, PanelLeftClose, X } from 'lucide-react';
 import { Tooltip } from '@/components/ds/Tooltip';
+import { BrandMark } from './BrandMark';
 import { isItemActive, NavGroup, NavItem } from './nav';
 
 export interface SidebarUser {
@@ -24,6 +24,8 @@ export interface SidebarProps {
   brandHref: string;
   brandName: string;
   brandSubtitle?: string;
+  /** The restaurant's own logo; without one the sidebar shows its initials. */
+  brandLogoUrl?: string | null;
   user: SidebarUser;
   onChangePassword?: () => void;
   onLogout?: () => void;
@@ -36,35 +38,6 @@ function initials(name: string): string {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join('');
-}
-
-// Official logo. The supplied artwork is a circular badge on a light square
-// (JPEG, no transparency), so it is shown inside a circular frame: the frame
-// crops away the light corners without touching the art (no filters, no
-// redraw). `scale` zooms the badge so its rim fills the circle.
-const LOGO_SRC = '/brand/doce-logo.png';
-const LOGO_NAME = "Do'cê Hamburgueria";
-
-function BrandLogo({ size, decorative }: { size: 'sm' | 'md'; decorative?: boolean }) {
-  return (
-    <span
-      className={clsx(
-        'relative block shrink-0 overflow-hidden rounded-full bg-background ring-1 ring-accent/40',
-        size === 'md' ? 'h-9 w-9' : 'h-8 w-8',
-      )}
-    >
-      <Image
-        src={LOGO_SRC}
-        // The restaurant name is printed next to the logo when expanded, so
-        // there it is decorative (alt=""); on its own (collapsed) it needs the name.
-        alt={decorative ? '' : LOGO_NAME}
-        fill
-        sizes="36px"
-        priority
-        className="scale-[1.28] object-contain"
-      />
-    </span>
-  );
 }
 
 function NavRow({
@@ -132,6 +105,7 @@ export function Sidebar({
   brandHref,
   brandName,
   brandSubtitle,
+  brandLogoUrl,
   user,
   onChangePassword,
   onLogout,
@@ -149,9 +123,9 @@ export function Sidebar({
       {/* Brand */}
       <div className={clsx('flex h-14 shrink-0 items-center border-b border-line', collapsed ? 'justify-center' : 'gap-2 px-3')}>
         {collapsed ? (
-          <Tooltip label={LOGO_NAME} side="right">
-            <Link href={brandHref} aria-label={LOGO_NAME} className="flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 touch:p-1">
-              <BrandLogo size="md" />
+          <Tooltip label={brandName} side="right">
+            <Link href={brandHref} aria-label={brandName} className="flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 touch:p-1">
+              <BrandMark name={brandName} logoUrl={brandLogoUrl} className="h-9 w-9 text-sm ring-1 ring-accent/40" decorative />
             </Link>
           </Tooltip>
         ) : (
@@ -177,7 +151,7 @@ export function Sidebar({
               </button>
             )}
             <Link href={brandHref} onClick={onCloseDrawer} className="flex min-w-0 items-center gap-2.5">
-              <BrandLogo size="md" decorative />
+              <BrandMark name={brandName} logoUrl={brandLogoUrl} className="h-9 w-9 text-sm ring-1 ring-accent/40" decorative />
               <span className="min-w-0 leading-tight">
                 <span className="block truncate font-heading text-sm font-semibold text-foreground">{brandName}</span>
                 {brandSubtitle && <span className="block truncate text-2xs text-subtle">{brandSubtitle}</span>}
