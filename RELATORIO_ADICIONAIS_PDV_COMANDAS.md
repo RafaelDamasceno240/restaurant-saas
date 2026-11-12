@@ -143,7 +143,9 @@ Não foram alterados: `app/demo/*`, seed/permissões, importador Brendi, cardáp
 | Web unitários (`jest`) | **43 suítes / 461 testes — todos passaram** (antes: 444) |
 | Lint + typecheck API e web; `nest build`; `next build` | sem erros |
 | E2E novo `addons-pos-tabs` | 20/20 |
-| **E2E completa** (banco novo `rs_adic_e2e`, 22 migrations) | **NÃO CONCLUÍDA** — iniciada, mas o processo foi encerrado pelo Claude Code por falta de memória na máquina; as 15 suítes cujo resultado chegou ao log passaram, nenhuma falhou. Precisa ser executada de novo (ver pendências) |
+| E2E completa, 1ª execução (banco `rs_adic_e2e`) | 63/65 suítes, 968/972 testes. As 4 falhas são das duas CLIs (`platform-admin-cli`, `reset-password-cli`): o processo filho não chegou a iniciar (código 3221225794 = 0xC0000142, falha do Windows ao criar processo com a memória esgotada). Não é defeito do código. Detalhes na seção 13 |
+| **E2E completa, 2ª execução** (banco novo `rs_adic_e2e2`, 22 migrations, 1 processo) | **65/65 suítes, 972/972 testes — todos passaram** (504 s). Seção 13 |
+| Preservação dos dados antigos (banco na migration 21 → migration 22) | 55/55 tabelas idênticas, byte a byte, após a migration. Seção 13 |
 | Revisão de interface (Chrome headless, ambiente descartável 3800/4800) | PDV 19/19, comanda 9/9, sem erros de console |
 
 Cenários cobertos (pedido da etapa → teste):
@@ -187,9 +189,8 @@ Em `docs/capturas/adicionais-pdv-comandas/` (dados fictícios "Burger Lab Teste"
 
 ## 11. Pendências antes de integrar ao DEV
 
-0. **Rodar a suíte E2E completa até o fim** (`npx jest --config ./test/jest-e2e.json` contra um banco
-   descartável com as 22 migrations). A execução desta etapa foi interrompida por falta de memória
-   na máquina; até lá a funcionalidade não deve ser considerada concluída.
+0. ~~Rodar a suíte E2E completa até o fim~~ — **feito** em 12/11/2026: 65/65 suítes, 972/972
+   testes (seção 13).
 1. **Aprovação** desta branch para integrar à `salto-desenvolvimento` (não feito, conforme pedido).
 2. **Migration 22 no DEV**, com backup restaurável antes (procedimento das migrations 17–21). Sem
    ela, a API nova falha ao ler comandas e o quadro da cozinha. API e web devem subir juntos.
@@ -215,3 +216,107 @@ Não foram tocados: `restaurant-saas-final`, banco `restaurant_saas_final`, apre
 `master`, produção, homologação, piloto, demo, DEV (nenhuma conexão), importação Brendi e os 78
 produtos da Do'cê. Nenhum push, nenhum deploy. Tudo rodou nos containers descartáveis
 `rs-adic-pg` (55480) e `rs-adic-redis` (56480), criados para esta etapa.
+
+## 13. Validação final da suíte E2E (12/11/2026)
+
+**Resultado: 65 de 65 suítes e 972 de 972 testes aprovados, 0 falhas, 0 testes ignorados.**
+Tempo: 504 s (início 02:19:58, fim 02:28:28; código de saída 0). Nenhuma linha da implementação foi
+alterada para isso: o commit da funcionalidade continua sendo `06db2de`.
+
+### Como foi executada
+
+- Banco **novo** `rs_adic_e2e2` no container descartável `rs-adic-pg` (127.0.0.1:55480), com as 22
+  migrations (`prisma migrate status`: em dia; `prisma migrate diff` contra o `schema.prisma`: sem
+  diferença) e o seed padrão (70 permissões, 8 papéis, nenhum restaurante). Redis descartável
+  `rs-adic-redis`, base 2 (vazia no início). O script de execução se recusava a rodar se a URL não
+  fosse a desse banco.
+- Executor existente do projeto (`jest --config ./test/jest-e2e.json`, que já fixa
+  `maxWorkers: 1`), com `--runInBand --logHeapUsage --ci`: **um único processo**, uma suíte por vez.
+- Nada mais rodando da etapa: sem Next.js, sem Chrome headless, sem API avulsa. Nenhum outro
+  container foi parado, apagado ou alterado.
+- Logs (fora do repositório, na pasta temporária da sessão): `e2e-r2.log` (saída completa do Jest,
+  com o heap de cada suíte), `e2e-r2-mem.csv` (memória a cada 15 s), e `e2e-full.log` (1ª execução,
+  preservado).
+
+### Consumo de memória (2ª execução)
+
+| Medida | Valor |
+|---|---|
+| Heap do processo do Jest | de ~120 MB a **1.367 MB** no pico (cresce de forma contínua: os módulos de cada suíte ficam carregados no mesmo processo) |
+| Memória do processo do Jest (working set) | pico de **1.781 MB** |
+| RAM livre na máquina (16 GB) | de 993 MB no início a **423 MB** no pior momento |
+| Memória comprometida do Windows | de 29,0 GB a **30,3 GB**, num limite de 31,5 GB (RAM + arquivo de paginação) |
+
+Quem ocupa a máquina não é a suíte: são os aplicativos abertos (Roblox ~3,1 GB, Brave ~1,9 GB
+somando os processos, Discord, VS Code, Spotify) e o WSL do Docker (~1,6 GB) com cerca de 23
+containers dos ambientes final, piloto, demo, stack, cardápio, integração e o banco local. A
+suíte em si precisa de até ~1,8 GB.
+
+### Por que a 1ª execução falhou
+
+A 1ª execução (banco `rs_adic_e2e`) chegou ao fim, ao contrário do que o relatório dizia antes:
+63/65 suítes, 968/972 testes. O Claude Code encerrou o acompanhamento e os processos
+auxiliares por falta de memória, mas o Jest terminou. As 4 falhas foram todas nas duas suítes de
+linha de comando, que abrem um segundo Node.js (`ts-node`) por teste. Esse processo filho terminou
+com o código 3221225794 (0xC0000142, *STATUS_DLL_INIT_FAILED*): o Windows não conseguiu iniciá-lo
+porque a memória comprometida estava no limite, com a API, o web e o Chrome descartáveis ainda
+ativos ao mesmo tempo. Na 2ª execução, sem esses processos, as mesmas suítes passaram sem nenhuma
+mudança no código, o que confirma que não havia defeito.
+
+### Estratégia mais leve, se faltar memória de novo
+
+1. Fechar aplicativos pesados durante a suíte (o Roblox sozinho ocupa mais do que a suíte inteira).
+2. Rodar em lotes, cada um num processo novo, para o heap não acumular, por exemplo
+   `npx jest --config ./test/jest-e2e.json --runInBand --shard=1/3` (depois 2/3 e 3/3).
+3. Rodar as suítes de CLI isoladamente no fim (`-t` ou o nome do arquivo), pois são as únicas que
+   abrem processos filhos.
+4. Se possível, parar temporariamente stacks Docker que não estejam em uso. **Isso não foi feito
+   aqui**, pela regra de não mexer em outros ambientes.
+
+### Conferências pedidas (todas dentro da execução aprovada)
+
+| Item | Testes que cobrem |
+|---|---|
+| Totais do PDV e das comandas | `addons-pos-tabs`: "several add-ons: the quote and the sale price each unit…", "a round freezes each item with its add-ons: unit, base, extras and subtotal; the tab total includes them"; `pos`, `tabs`, `financial-chain` |
+| Grupos obrigatórios | `addons-pos-tabs`: "a required group must be satisfied", "required groups, limits, sold-out add-ons and sold-out products are refused; the round writes nothing"; `menu-options`: "the PDV enforces the required group too", "refuses: missing required choice…" |
+| Adicionais esgotados | `addons-pos-tabs`: "a sold-out add-on, an inactive group and a sold-out product are refused; nothing is written" e o teste da rodada acima; `menu-options`: "a required group whose every option is sold out makes the product sold out" |
+| Idempotência de rodadas | `addons-pos-tabs`: "a retry with the same key and add-ons is the same round; other add-ons with that key is a 409"; `tab-kitchen-flow`; `menu-options` (pedido público) |
+| Histórico de preços | `addons-pos-tabs`: "a later price change or a deleted option never rewrites a sale", "a new round keeps the earlier items and their prices, even after a price change" |
+| Checkout e caixa | `addons-pos-tabs`: "a cash sale with add-ons puts the full total in the drawer; the products report counts it…", "cancelling units takes their add-ons off the bill; the checkout charges the rest and copies add-ons and notes into the sale"; `tab-checkout`, `cash`, `cash-sale-refund`, `cash-online-orders`, `reports` |
+| KDS | `addons-pos-tabs`: "the kitchen board shows a PDV order with its add-ons and note", "the kitchen sees the table, the round, each add-on and the note"; `kds`, `orders-board`, `tab-kitchen-flow` |
+| Cancelamentos | `addons-pos-tabs`: venda cancelada mantém as linhas; unidades canceladas saem da conta com seus adicionais; `orders-cancel-reason`, `cash-sale-refund` |
+| Isolamento entre restaurantes | `addons-pos-tabs`: "an add-on of another product or of another restaurant is unavailable (no hint which)", "another restaurant's tab is not found, and its add-ons are unavailable on mine"; `menu-options` (isolamento); `tenant-isolation` |
+| Permissões | `addons-pos-tabs`: "permissions: quotes follow the permission of the screen that uses them"; `users-management`, `security-hardening` |
+| Preservação dos pedidos antigos | verificação abaixo, além de todas as suítes antigas (`tabs`, `tab-checkout`, `pos`, `orders-*`), que criam pedidos e comandas sem adicionais e passaram sem alteração |
+
+### Preservação dos pedidos antigos (migration 21 → 22)
+
+Feita num terceiro banco descartável, `rs_adic_legacy` (mesmo container):
+
+1. Banco criado só com as **21 migrations** da `salto-desenvolvimento` (`c866ff5`). Antes de
+   aplicar, conferi que os 21 arquivos são idênticos aos da branch.
+2. Carregado com todos os dados gerados pela suíte E2E (`pg_dump --data-only`, sem
+   `tab_item_options`): 992 restaurantes, 721 pedidos, 742 itens de pedido, 43 adicionais de pedido,
+   104 comandas, 106 itens de comanda, 100 rodadas, 92 movimentos de caixa, 40 pagamentos.
+3. Hash MD5 do conteúdo de **cada uma das 55 tabelas** → aplicada a migration 22 com
+   `prisma migrate deploy` → hash de novo: **55/55 tabelas idênticas**. `tab_item_options` nasce
+   vazia, `migrate diff` não mostra diferença e há 22 migrations registradas.
+4. Leitura com o client Prisma da branch: os 106 itens de comanda antigos carregam com
+   `options = []` e o mesmo `unitPriceCentsSnapshot`; os 721 pedidos carregam seus 43 adicionais
+   já existentes.
+
+### Status da migration 22 (`20261112120000_tab_item_options`)
+
+- Aplicada **somente** nos bancos descartáveis `rs_adic`, `rs_adic_e2e`, `rs_adic_e2e2` e
+  `rs_adic_legacy` (container `rs-adic-pg`).
+- **Não aplicada no DEV**, nem em qualquer outro banco. Nenhuma conexão foi feita ao DEV, ao banco
+  acadêmico (`restaurant_saas_final`) ou aos ambientes piloto e demo.
+- Puramente aditiva: 1 tabela, 2 índices, 2 chaves estrangeiras, 2 restrições CHECK. Comprovado que
+  não altera nenhuma linha existente.
+
+### Parecer
+
+Do ponto de vista dos testes, **a funcionalidade está pronta para ser aprovada para integração**:
+todos os testes unitários, a suíte E2E completa, a revisão de interface e a verificação de
+preservação passaram. Para integrar ao DEV continuam valendo as pendências 1 a 7 da seção 11, em
+especial a sua aprovação, o backup antes da migration 22 e a validação com o cardápio real da Do'cê.
