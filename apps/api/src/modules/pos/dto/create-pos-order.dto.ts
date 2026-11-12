@@ -2,7 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
-  IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -17,7 +17,7 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PaymentMethod } from '@prisma/client';
-import { CreditTermsDto } from '../../receivables/dto/receivables.dto';
+import { ON_ACCOUNT_DISABLED_MESSAGE, SALE_PAYMENT_METHODS } from '../../../common/util/payment-methods';
 import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
 
 export class PosOrderItemDto {
@@ -76,14 +76,6 @@ export class CreatePosOrderDto {
   @Max(2_147_483_647)
   cashbackToUseCents?: number;
 
-  // Fase 11 (fatia 6): terms of a sale paid ON_ACCOUNT (fiado). Needs a customerId and the
-  // receivables.sell permission; ignored for any other payment method.
-  @ApiPropertyOptional({ type: CreditTermsDto })
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => CreditTermsDto)
-  creditTerms?: CreditTermsDto;
-
   @ApiPropertyOptional({ example: 'Cliente balcão' })
   @IsOptional()
   @IsString()
@@ -97,8 +89,9 @@ export class CreatePosOrderDto {
   @Matches(/^[\d\s()+-]{8,20}$/, { message: 'Telefone em formato inválido.' })
   customerPhone?: string;
 
-  @ApiProperty({ enum: PaymentMethod })
-  @IsEnum(PaymentMethod)
+  // Money received now. Fiado (ON_ACCOUNT) is no longer sold (remocao-fiado).
+  @ApiProperty({ enum: SALE_PAYMENT_METHODS })
+  @IsIn(SALE_PAYMENT_METHODS, { message: ON_ACCOUNT_DISABLED_MESSAGE })
   paymentMethod!: PaymentMethod;
 
   @ApiPropertyOptional({ example: '6f1c2c1e-6d0e-4f4a-9a57-2f3a0a1b9c11' })

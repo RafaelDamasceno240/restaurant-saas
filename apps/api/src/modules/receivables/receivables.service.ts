@@ -1,34 +1,24 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PaymentMethod, Prisma, ReceivableEntry, ReceivableEntryType } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { CashRegisterService } from '../cash/cash-register.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
-import { addDays, dateOnlyToDate, dateToDateOnly, DEFAULT_TIME_ZONE, todayInTimeZone } from '../../common/util/timezone.util';
-import { customerInactive, customerNotFound } from '../customers/customer-errors';
+import { dateOnlyToDate, dateToDateOnly, DEFAULT_TIME_ZONE, todayInTimeZone } from '../../common/util/timezone.util';
+import { customerNotFound } from '../customers/customer-errors';
 import {
   allocatePayment,
-  availableCreditCents,
-  buildInstallmentPlan,
-  InstallmentPlanItem,
   InstallmentState,
   isInstallmentOverdue,
   MAX_RECEIVABLE_CENTS,
   openCentsOf,
   summarizeInstallments,
-  validateTerms,
 } from './receivable-calculations';
 import {
-  creditCustomerRequired,
-  creditLimitExceeded,
-  creditNotAllowed,
-  customerOverdue,
   entryAlreadyReversed,
   entryNotReversible,
   installmentNotFound,
-  invalidTerms,
-  nothingToCharge,
   orderHasReceivable,
   overpayment,
   receivableEntryNotFound,
@@ -40,19 +30,15 @@ import {
 } from './receivable-errors';
 import {
   CancelReceivableDto,
-  CreateReceivableDto,
   ListReceivablesQueryDto,
   RegisterReceivablePaymentDto,
   ReverseReceivablePaymentDto,
-  SetCreditLimitDto,
 } from './dto/receivables.dto';
 
 type Tx = Prisma.TransactionClient;
 
 const TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 const DEFAULT_PAGE_SIZE = 20;
-// A sale on account with no terms given: one installment, due in 30 days.
-const DEFAULT_DUE_IN_DAYS = 30;
 const ORDER_CANCELLED_REASON = 'Pedido cancelado';
 const CASH_CLOSED_FOR_RECEIPT = 'Não há caixa aberto nesta unidade. Abra o caixa para receber em dinheiro.';
 const CASH_CLOSED_FOR_REFUND = 'Não há caixa aberto nesta unidade. Abra o caixa para devolver o dinheiro deste pagamento.';
@@ -76,20 +62,6 @@ interface NewEntry {
   reason?: string | null;
   idempotencyKey?: string | null;
   createdByUserId: string;
-}
-
-export interface CreditTerms {
-  installments: number;
-  firstDueDate: string;
-}
-
-// A sale on account that passed every check and holds the credit-account lock, waiting for the
-// order it belongs to to exist.
-export interface CreditReservation {
-  account: LockedAccount;
-  totalCents: number;
-  plan: InstallmentPlanItem[];
-  actorUserId: string;
 }
 
 const DETAIL = {
@@ -224,38 +196,9 @@ export class ReceivablesService {
       this.tenantToday(this.prisma, user.tenantId),
     ]);
     const overdueCents = await this.overdueCentsOf(this.prisma, user.tenantId, customerId, today);
-    const creditLimitCents = account?.creditLimitCents ?? 0;
-    const balanceCents = account?.balanceCents ?? 0;
-    return {
-      customerId,
-      creditLimitCents,
-      balanceCents,
-      availableCents: availableCreditCents(creditLimitCents, balanceCents),
-      overdueCents,
-      // What a sale on account would be told right now.
-      canBuyOnAccount: creditLimitCents > 0 && overdueCents === 0 && balanceCents < creditLimitCents,
-    };
-  }
-
-  // 0 withdraws the right to buy on account; a limit below the current debt is allowed (it only
-  // blocks new sales until the debt goes down).
-  async setLimit(user: AuthenticatedRequestUser, customerId: string, dto: SetCreditLimitDto) {
-    await this.loadCustomer(user.tenantId, customerId);
-    await this.prisma.$transaction(async (tx) => {
-      const account = await this.lockAccount(tx, user.tenantId, customerId);
-      if (account.creditLimitCents === dto.creditLimitCents) return;
-      await tx.creditAccount.update({ where: { id: account.id }, data: { creditLimitCents: dto.creditLimitCents } });
-      await this.audit.recordTx(tx, {
-        tenantId: user.tenantId,
-        userId: user.userId,
-        action: 'RECEIVABLE_LIMIT_UPDATED',
-        entity: 'CreditAccount',
-        entityId: account.id,
-        beforeData: { creditLimitCents: account.creditLimitCents },
-        afterData: { customerId, creditLimitCents: dto.creditLimitCents, balanceCents: account.balanceCents },
-      });
-    }, TRANSACTION_OPTIONS);
-    return this.getAccount(user, customerId);
+    // What the customer still owes from the time fiado was sold. There is no limit or
+    // "available" any more: nothing new can be bought on account (remocao-fiado).
+    return { customerId, balanceCents: account?.balanceCents ?? 0, overdueCents };
   }
 
   // ---- reads ---------------------------------------------------------------------------------
@@ -315,46 +258,6 @@ export class ReceivablesService {
     });
     if (!receivable) throw receivableNotFound();
     return { ...toReceivableView(receivable, today), entries: receivable.entries.map(toEntryView), today };
-  }
-
-  // ---- manual charge -------------------------------------------------------------------------
-
-  // A debt that did not come from a sale of this system. Management only; it is not checked
-  // against the credit limit (the limit governs what the counter may SELL on account).
-  async create(user: AuthenticatedRequestUser, dto: CreateReceivableDto) {
-    await this.branchAccess.assertAccess(user, dto.branchId);
-    const customer = await this.loadCustomer(user.tenantId, dto.customerId);
-    const sameRequest = (entry: ReceivableEntry) =>
-      entry.type === 'CHARGE' && entry.customerId === dto.customerId && entry.amountCents === dto.totalCents;
-
-    const early = await this.findByKey(this.prisma, user.tenantId, dto.idempotencyKey);
-    if (early) {
-      if (!sameRequest(early)) throw receivableIdempotencyKeyReused();
-      return { ...(await this.findOne(user, early.receivableId)), idempotentReplay: true };
-    }
-    if (!customer.active) throw customerInactive();
-
-    const today = await this.tenantToday(this.prisma, user.tenantId);
-    const problem = validateTerms({ totalCents: dto.totalCents, installments: dto.installments, firstDueDate: dto.firstDueDate, today });
-    if (problem) throw invalidTerms(problem);
-    const plan = buildInstallmentPlan(dto.totalCents, dto.installments, dto.firstDueDate);
-
-    return this.idempotent(user, dto.idempotencyKey, async (tx) => {
-      const account = await this.lockAccount(tx, user.tenantId, dto.customerId);
-      const replay = await this.findByKey(tx, user.tenantId, dto.idempotencyKey);
-      if (replay) return this.replayOf(replay, sameRequest(replay));
-
-      const { entry } = await this.openReceivableInTx(tx, account, {
-        branchId: dto.branchId,
-        orderId: null,
-        description: dto.description,
-        totalCents: dto.totalCents,
-        plan,
-        createdByUserId: user.userId,
-        idempotencyKey: dto.idempotencyKey,
-      });
-      return { entry, replay: false };
-    });
   }
 
   // ---- payment -------------------------------------------------------------------------------
@@ -563,72 +466,6 @@ export class ReceivablesService {
 
   // ---- order integration (inside the order's transaction) --------------------------------------
 
-  // Step 1 of selling on account: lock the customer's credit account and check the rule against
-  // what it really is now - a limit, nothing overdue, room for this sale. Nothing is written
-  // yet (the order does not exist); the lock is held until the transaction ends.
-  async reserveSaleInTx(
-    tx: Tx,
-    input: { tenantId: string; customerId: string | null; totalCents: number; terms: CreditTerms | null; actorUserId: string | null },
-  ): Promise<CreditReservation> {
-    if (!input.customerId) throw creditCustomerRequired();
-    if (!input.actorUserId) {
-      // Only the staff flows sell on account, and they always know who is selling.
-      throw new InternalServerErrorException('sale on account without an acting user');
-    }
-    if (!Number.isInteger(input.totalCents) || input.totalCents < 1) throw nothingToCharge();
-
-    const today = await this.tenantToday(tx, input.tenantId);
-    const terms = input.terms ?? { installments: 1, firstDueDate: addDays(today, DEFAULT_DUE_IN_DAYS) };
-    const problem = validateTerms({ totalCents: input.totalCents, ...terms, today });
-    if (problem) throw invalidTerms(problem);
-
-    const account = await this.lockAccount(tx, input.tenantId, input.customerId);
-    if (account.creditLimitCents <= 0) throw creditNotAllowed();
-    const overdueCents = await this.overdueCentsOf(tx, input.tenantId, input.customerId, today);
-    if (overdueCents > 0) throw customerOverdue(overdueCents);
-    if (account.balanceCents + input.totalCents > account.creditLimitCents) {
-      throw creditLimitExceeded({
-        creditLimitCents: account.creditLimitCents,
-        balanceCents: account.balanceCents,
-        requestedCents: input.totalCents,
-      });
-    }
-
-    return {
-      account,
-      totalCents: input.totalCents,
-      plan: buildInstallmentPlan(input.totalCents, terms.installments, terms.firstDueDate),
-      actorUserId: input.actorUserId,
-    };
-  }
-
-  // Step 2: the order exists; open its receivable.
-  async commitSaleInTx(tx: Tx, reservation: CreditReservation, order: { id: string; orderNumber: string; branchId: string }) {
-    return this.openReceivableInTx(tx, reservation.account, {
-      branchId: order.branchId,
-      orderId: order.id,
-      description: `Pedido ${order.orderNumber}`,
-      totalCents: reservation.totalCents,
-      plan: reservation.plan,
-      createdByUserId: reservation.actorUserId,
-      idempotencyKey: null,
-    });
-  }
-
-  // Whether the debt of an order was opened with the terms a repeated request states (the
-  // idempotent replay of a sale compares them). Terms left out mean the default, which is one
-  // installment whatever its date.
-  async saleHasTerms(tenantId: string, orderId: string, terms: CreditTerms | null): Promise<boolean> {
-    const installments = await this.prisma.receivableInstallment.findMany({
-      where: { receivable: { orderId, tenantId } },
-      orderBy: { number: 'asc' },
-      select: { dueDate: true },
-    });
-    if (installments.length === 0) return false;
-    if (!terms) return installments.length === 1;
-    return installments.length === terms.installments && dateToDateOnly(installments[0].dueDate) === terms.firstDueDate;
-  }
-
   // A cancelled order takes its debt with it, in the transaction that cancels it. If money was
   // already received for it the cancellation is refused: the payments are reversed first.
   async cancelForOrderInTx(tx: Tx, input: { tenantId: string; orderId: string; actorUserId: string | null }) {
@@ -770,67 +607,6 @@ export class ReceivablesService {
     await tx.creditAccount.update({ where: { id: account.id }, data: { balanceCents: balanceAfterCents } });
     account.balanceCents = balanceAfterCents;
     return entry;
-  }
-
-  // Receivable + its installments + the CHARGE entry, and the audit row, as one unit.
-  private async openReceivableInTx(
-    tx: Tx,
-    account: LockedAccount,
-    input: {
-      branchId: string;
-      orderId: string | null;
-      description: string;
-      totalCents: number;
-      plan: InstallmentPlanItem[];
-      createdByUserId: string;
-      idempotencyKey: string | null;
-    },
-  ) {
-    const receivable = await tx.receivable.create({
-      data: {
-        tenantId: account.tenantId,
-        branchId: input.branchId,
-        customerId: account.customerId,
-        accountId: account.id,
-        orderId: input.orderId,
-        description: input.description,
-        totalCents: input.totalCents,
-        createdByUserId: input.createdByUserId,
-        installments: {
-          create: input.plan.map((item) => ({
-            tenantId: account.tenantId,
-            number: item.number,
-            dueDate: dateOnlyToDate(item.dueDate),
-            amountCents: item.amountCents,
-          })),
-        },
-      },
-    });
-    const entry = await this.append(tx, account, {
-      type: 'CHARGE',
-      amountCents: input.totalCents,
-      receivableId: receivable.id,
-      branchId: input.branchId,
-      idempotencyKey: input.idempotencyKey,
-      createdByUserId: input.createdByUserId,
-    });
-    await this.audit.recordTx(tx, {
-      tenantId: account.tenantId,
-      userId: input.createdByUserId,
-      action: 'RECEIVABLE_CREATED',
-      entity: 'Receivable',
-      entityId: receivable.id,
-      afterData: {
-        customerId: account.customerId,
-        branchId: input.branchId,
-        orderId: input.orderId,
-        totalCents: input.totalCents,
-        installments: input.plan.length,
-        firstDueDate: input.plan[0].dueDate,
-        balanceAfterCents: entry.balanceAfterCents,
-      },
-    });
-    return { receivable, entry };
   }
 
   // With the account locked: cancel one receivable that received nothing.

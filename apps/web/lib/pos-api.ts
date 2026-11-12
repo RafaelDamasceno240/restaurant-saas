@@ -1,7 +1,6 @@
 import { apiFetch } from './api-client';
 import { AdminOrderDetail } from './orders-api';
-import { StaffPaymentMethod } from './checkout-api';
-import type { CreditTerms } from './receivables-api';
+import { PaymentMethod } from './checkout-api';
 import type { CouponPreview } from './coupons-api';
 
 // Deliberately minimal — only productId + quantity per item, exactly what
@@ -21,10 +20,8 @@ export interface CreatePosOrderInput {
   // Cents of that customer's cashback balance to spend on this sale (needs cashback.use). The
   // server checks it against the real balance and against what the items cost.
   cashbackToUseCents?: number;
-  paymentMethod: StaffPaymentMethod;
-  // Only with paymentMethod ON_ACCOUNT (needs receivables.sell and a customerId): how the debt
-  // will be paid back. The server checks the customer's limit and builds the installments.
-  creditTerms?: CreditTerms;
+  // Money received now; the API refuses fiado (ON_ACCOUNT) since remocao-fiado.
+  paymentMethod: PaymentMethod;
   // Only the CODE travels (needs coupons.apply): the server decides everything about the discount.
   couponCode?: string;
   idempotencyKey?: string;

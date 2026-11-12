@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
@@ -6,16 +6,14 @@ import { AuthenticatedRequestUser } from '../../common/types/authenticated-reque
 import { ReceivablesService } from './receivables.service';
 import {
   CancelReceivableDto,
-  CreateReceivableDto,
   ListReceivablesQueryDto,
   RegisterReceivablePaymentDto,
   ReverseReceivablePaymentDto,
-  SetCreditLimitDto,
 } from './dto/receivables.dto';
 
-// tenantId always comes from the JWT (@CurrentUser). SELLING on account is not here: it happens
-// inside the order flows (PDV and table checkout, permission receivables.sell), where the
-// credit limit is checked against the locked account in the transaction that creates the order.
+// tenantId always comes from the JWT (@CurrentUser). Fiado is no longer sold (remocao-fiado,
+// 2026-11-12): no route opens a new debt or grants credit any more. What exists from before is
+// still listed, received, reversed and cancelled here, so it can be settled.
 @ApiTags('receivables')
 @ApiBearerAuth()
 @Controller('receivables')
@@ -29,30 +27,12 @@ export class ReceivablesController {
     return this.receivables.list(user, query);
   }
 
-  @Post()
-  @RequirePermissions('receivables.manage')
-  @ApiOperation({ summary: 'Lança uma dívida avulsa para um cliente (idempotente pela chave)' })
-  create(@CurrentUser() user: AuthenticatedRequestUser, @Body() dto: CreateReceivableDto) {
-    return this.receivables.create(user, dto);
-  }
-
   // Declared before ':id' so "customers" and "entries" are never taken for a receivable id.
   @Get('customers/:customerId')
   @RequirePermissions('receivables.read')
-  @ApiOperation({ summary: 'Limite, dívida em aberto, disponível e vencido do cliente' })
+  @ApiOperation({ summary: 'Dívida em aberto e vencida do cliente (fiado anterior)' })
   getAccount(@CurrentUser() user: AuthenticatedRequestUser, @Param('customerId', ParseUUIDPipe) customerId: string) {
     return this.receivables.getAccount(user, customerId);
-  }
-
-  @Put('customers/:customerId/limit')
-  @RequirePermissions('receivables.manage')
-  @ApiOperation({ summary: 'Define o limite de fiado do cliente (0 = sem fiado)' })
-  setLimit(
-    @CurrentUser() user: AuthenticatedRequestUser,
-    @Param('customerId', ParseUUIDPipe) customerId: string,
-    @Body() dto: SetCreditLimitDto,
-  ) {
-    return this.receivables.setLimit(user, customerId, dto);
   }
 
   @Post('entries/:entryId/reverse')

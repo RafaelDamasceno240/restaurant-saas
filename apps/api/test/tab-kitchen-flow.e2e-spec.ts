@@ -482,7 +482,7 @@ describe('Tab kitchen flow - rounds, stock, cancellation, checkout (e2e)', () =>
       ).rejects.toThrow();
     });
 
-    it('cash: needs an open drawer and enters it once; fiado: opens the receivable and no payment', async () => {
+    it('cash: needs an open drawer and enters it once; fiado is refused and the tab stays open; card is paid', async () => {
       const ctx = await setup();
       await send(ctx.accessToken, ctx.tab.id, [{ productId: ctx.burger.id, quantity: 1 }]).expect(201);
       expect((await checkout(ctx.accessToken, ctx.tab.id, { paymentMethod: 'CASH' }).expect(409)).body.code).toBe('CASH_REGISTER_NOT_OPEN');
@@ -496,14 +496,19 @@ describe('Tab kitchen flow - rounds, stock, cancellation, checkout (e2e)', () =>
       const customer = (
         await request(server).post('/v1/customers').set(auth(ctx.accessToken)).send({ name: 'Cliente Fiado', phone: '11912345678' }).expect(201)
       ).body;
-      await request(server).put(`/v1/receivables/customers/${customer.id}/limit`).set(auth(ctx.accessToken)).send({ creditLimitCents: 100_000 }).expect(200);
       const second = await openTab(ctx.accessToken, ctx.branchId, 6);
       await send(ctx.accessToken, second.id, [{ productId: ctx.fries.id, quantity: 2 }]).expect(201);
-      await checkout(ctx.accessToken, second.id, { paymentMethod: 'ON_ACCOUNT', customerId: customer.id }).expect(200);
-      const fiado = await prisma().order.findUniqueOrThrow({ where: { tabId: second.id }, include: { payment: true, receivable: true } });
-      expect(fiado.payment).toBeNull();
-      expect(fiado.receivable).toMatchObject({ totalCents: 2400, customerId: customer.id });
-      expect(fiado.totalCents).toBe(2400);
+      // Fiado is no longer sold (remocao-fiado): refused, nothing written, the bill still open.
+      const refused = await checkout(ctx.accessToken, second.id, { paymentMethod: 'ON_ACCOUNT', customerId: customer.id }).expect(400);
+      expect(refused.body.message).toContain('fiado');
+      await checkout(ctx.accessToken, second.id, { paymentMethod: 'ON_ACCOUNT', customerId: customer.id, creditTerms: { installments: 1, firstDueDate: '2099-01-10' } }).expect(400);
+      expect(await prisma().order.count({ where: { tabId: second.id } })).toBe(0);
+      expect((await prisma().tab.findUniqueOrThrow({ where: { id: second.id } })).status).toBe('OPEN');
+      await checkout(ctx.accessToken, second.id, { paymentMethod: 'CARD', customerId: customer.id }).expect(200);
+      const paid = await prisma().order.findUniqueOrThrow({ where: { tabId: second.id }, include: { payment: true, receivable: true } });
+      expect(paid.payment).toMatchObject({ method: 'CARD', status: 'CONFIRMED', amountCents: 2400 });
+      expect(paid.receivable).toBeNull();
+      expect(paid.totalCents).toBe(2400);
     });
 
     it('close-empty frees the table of a tab with nothing to charge, without a sale', async () => {

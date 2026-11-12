@@ -74,26 +74,12 @@ describe('PosOrdersService customer linking', () => {
     expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ cashbackToUseCents: null }));
   });
 
-  it('refuses to sell on account without receivables.sell, before any lookup or sale', async () => {
-    const { service, findFirst, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: true });
-    await expect(
-      service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1', paymentMethod: 'ON_ACCOUNT' }) as never),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(findFirst).not.toHaveBeenCalled();
-    expect(createOrder).not.toHaveBeenCalled();
-  });
-
-  it('passes the credit terms on only for a sale on account', async () => {
+  it('never passes credit terms on: fiado is not sold any more (the order refuses ON_ACCOUNT)', async () => {
     const { service, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: true });
-    const allowed = user(['pos.create', 'customers.read', 'receivables.sell']);
-    const creditTerms = { installments: 2, firstDueDate: '2026-11-05' };
-    await service.createOrder(allowed, dto({ customerId: 'c1', paymentMethod: 'ON_ACCOUNT', creditTerms }) as never);
-    expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ paymentMethod: 'ON_ACCOUNT', creditTerms }));
-    await service.createOrder(allowed, dto({ customerId: 'c1', paymentMethod: 'ON_ACCOUNT' }) as never);
-    expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ paymentMethod: 'ON_ACCOUNT', creditTerms: null }));
-    // Terms sent with a sale that is paid now are dropped, and that sale needs no extra permission.
-    await service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1', creditTerms }) as never);
-    expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ paymentMethod: 'PIX', creditTerms: null }));
+    await service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1', creditTerms: { installments: 2 } }) as never);
+    const sent = createOrder.mock.calls[createOrder.mock.calls.length - 1][0];
+    expect(sent).toMatchObject({ paymentMethod: 'PIX' });
+    expect(sent).not.toHaveProperty('creditTerms');
   });
 
   it('refuses an inactive customer', async () => {

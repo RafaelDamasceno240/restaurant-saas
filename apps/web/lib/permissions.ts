@@ -71,7 +71,6 @@ export const PERMISSIONS = [
   'cashback.adjust',
   'cashback.configure',
   'receivables.read',
-  'receivables.sell',
   'receivables.receive',
   'receivables.manage',
   'reports.read',
@@ -140,7 +139,6 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'cashback.use',
     'cashback.adjust',
     'receivables.read',
-    'receivables.sell',
     'receivables.receive',
     'receivables.manage',
     'reports.read',
@@ -167,7 +165,6 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'cashback.read',
     'cashback.use',
     'receivables.read',
-    'receivables.sell',
     'receivables.receive',
   ],
   WAITER: [
