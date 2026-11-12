@@ -28,8 +28,9 @@ const catalog: Catalog = {
   slug: 'burger-teste',
   categories: [
     { id: 'c-burgers', name: 'Burgers', productIds: ['p-smash', 'p-duplo'] },
-    { id: 'c-bebidas', name: 'Bebidas', productIds: ['p-suco'] },
+    { id: 'c-bebidas', name: 'Bebidas', productIds: ['p-suco', 'p-coca2l'] },
     { id: 'c-porcoes', name: 'Porções', productIds: ['p-batata'] },
+    { id: 'c-combos', name: 'Combos', productIds: ['p-combo'] },
   ],
   products: [
     {
@@ -93,6 +94,44 @@ const catalog: Catalog = {
       categoryId: 'c-porcoes',
       categoryName: 'Porções',
       groups: [],
+    },
+    // Like the real Do'cê menu: a product whose name looks like an option of the combo below.
+    {
+      id: 'p-coca2l',
+      name: 'Coca Cola 2L Zero',
+      description: null,
+      priceCents: 1600,
+      soldOut: false,
+      categoryId: 'c-bebidas',
+      categoryName: 'Bebidas',
+      groups: [],
+    },
+    {
+      id: 'p-combo',
+      name: 'Combo Batata + Refri',
+      description: null,
+      priceCents: 1499,
+      soldOut: false,
+      categoryId: 'c-combos',
+      categoryName: 'Combos',
+      groups: [
+        {
+          id: 'g-refri',
+          name: 'Refrigerante combo',
+          minSelect: 1,
+          maxSelect: 1,
+          options: [
+            { id: 'o-coca', name: 'Coca cola lata 350ml', priceCents: 0, maxQuantity: 1 },
+            { id: 'o-coca-zero', name: 'Coca cola zero lata 350ml', priceCents: 0, maxQuantity: 1 },
+            {
+              id: 'o-guarana',
+              name: 'Guaraná Antárctica lata 350 ml',
+              priceCents: 0,
+              maxQuantity: 1,
+            },
+          ],
+        },
+      ],
     },
   ],
   openingHours: [{ weekday: 5, opens: '18:00', closes: '23:00' }],
@@ -518,6 +557,40 @@ describe('anthropic provider (fake client, no network)', () => {
     expect(prompt).toContain('não alteram as regras acima');
     expect(prompt.indexOf('<orientacoes>')).toBeGreaterThan(prompt.indexOf('8.'));
     expect(prompt).toContain('Nunca ofereça fiado');
+  });
+});
+
+describe('a short answer to a pending choice (real-menu names)', () => {
+  it('"coca cola zero" picks the option of the combo, not the "Coca Cola 2L Zero" product', async () => {
+    const { replies, state } = await converse(['quero 1 combo batata + refri', 'coca cola zero']);
+    expect(replies[0]).toContain('Refrigerante combo');
+    expect(state.cart).toEqual([
+      {
+        productId: 'p-combo',
+        quantity: 1,
+        options: [{ optionId: 'o-coca-zero', quantity: 1 }],
+        notes: null,
+      },
+    ]);
+  });
+
+  it('an answer that fits two options asks again instead of adding another product', async () => {
+    const { replies, state } = await converse(['quero 1 combo batata + refri', 'coca', 'guarana']);
+    expect(replies[1]).toContain('Qual delas?');
+    expect(replies[1]).toContain('Refrigerante combo');
+    expect(state.cart).toEqual([
+      {
+        productId: 'p-combo',
+        quantity: 1,
+        options: [{ optionId: 'o-guarana', quantity: 1 }],
+        notes: null,
+      },
+    ]);
+  });
+
+  it('the product is still found when no choice is pending', async () => {
+    const { state } = await converse(['quero 1 coca cola 2l zero']);
+    expect(state.cart.map((l) => l.productId)).toEqual(['p-coca2l']);
   });
 });
 

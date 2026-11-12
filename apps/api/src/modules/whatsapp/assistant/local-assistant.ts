@@ -104,6 +104,17 @@ function optionsIn(
   return chosen;
 }
 
+// Options of the group that contain every word of the answer ("coca zero" -> "Coca cola zero lata
+// 350ml" but not "Coca cola lata 350ml"; "coca" -> both, so the question is asked again).
+function optionsAnswered(group: CatalogGroup, text: string) {
+  const answer = tokens(text).map(singular);
+  if (answer.length === 0) return [];
+  return group.options.filter((o) => {
+    const name = new Set(tokens(o.name).map(singular));
+    return answer.every((t) => name.has(t));
+  });
+}
+
 function noteIn(original: string, product: CatalogProduct): string | null {
   const optionNames = new Set(
     product.groups.flatMap((g) => g.options.map((o) => normalize(o.name))),
@@ -421,6 +432,14 @@ export class LocalAssistant implements AssistantProvider {
     if (chosen.length === 0 && group && /^\d{1,2}$/.test(n)) {
       const option = group.options[Number(n) - 1];
       if (option) chosen = [{ optionId: option.id, quantity: 1 }];
+    }
+    // A short answer to the question ("coca zero" for "Coca cola zero lata 350ml"): the open
+    // question wins over a product search, which could find another product of the menu with a
+    // similar name (a real menu sells "Coca Cola 2L Zero" too).
+    if (chosen.length === 0 && group) {
+      const fits = optionsAnswered(group, original);
+      if (fits.length === 1) chosen = [{ optionId: fits[0].id, quantity: 1 }];
+      else if (fits.length > 1) return `Qual delas? ${this.askChoice(product, pending.groupId)}`;
     }
     if (chosen.length === 0) {
       // Not an answer to the question: let the other intents read it, keep the question open.
