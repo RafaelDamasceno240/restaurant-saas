@@ -75,6 +75,9 @@ export const PERMISSIONS = [
   'receivables.receive',
   'receivables.manage',
   'reports.read',
+  'whatsapp.read',
+  'whatsapp.reply',
+  'whatsapp.configure',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -144,6 +147,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'receivables.receive',
     'receivables.manage',
     'reports.read',
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   CASHIER: [
     'orders.read',
@@ -169,6 +174,8 @@ export const ROLE_PERMISSIONS: Record<string, readonly Permission[]> = {
     'receivables.read',
     'receivables.sell',
     'receivables.receive',
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   WAITER: [
     'orders.read',

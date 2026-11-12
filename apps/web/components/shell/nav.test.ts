@@ -17,12 +17,12 @@ describe('dashboard menu and routes by role (B12)', () => {
     }
   });
 
-  it('what each role sees (nobody gained a screen; kitchen and courier lost Cardápio)', () => {
-    const all = ['overview', 'pedidos', 'pdv', 'mesas', 'cozinha', 'delivery', 'caixa', 'clientes', 'cupons', 'fidelidade', 'fiado', 'relatorios', 'cardapio', 'estoque', 'restaurante', 'usuarios'];
+  it('what each role sees (kitchen and courier lost Cardápio; WhatsApp for management and the counter)', () => {
+    const all = ['overview', 'pedidos', 'pdv', 'mesas', 'cozinha', 'delivery', 'caixa', 'whatsapp', 'clientes', 'cupons', 'fidelidade', 'fiado', 'relatorios', 'cardapio', 'estoque', 'restaurante', 'usuarios'];
     expect(menu('OWNER')).toEqual(all);
     expect(menu('ADMIN')).toEqual(all);
     expect(menu('MANAGER')).toEqual(all);
-    expect(menu('CASHIER')).toEqual(['overview', 'pedidos', 'pdv', 'mesas', 'caixa', 'clientes', 'fidelidade', 'fiado', 'cardapio', 'estoque']);
+    expect(menu('CASHIER')).toEqual(['overview', 'pedidos', 'pdv', 'mesas', 'caixa', 'whatsapp', 'clientes', 'fidelidade', 'fiado', 'cardapio', 'estoque']);
     expect(menu('WAITER')).toEqual(['overview', 'pedidos', 'mesas', 'cardapio']);
     expect(menu('KITCHEN')).toEqual(['overview', 'pedidos', 'cozinha', 'estoque']);
     expect(menu('DELIVERY')).toEqual(['overview', 'pedidos', 'delivery']);
@@ -36,6 +36,8 @@ describe('dashboard menu and routes by role (B12)', () => {
     expect(routeAccess('/dashboard/estoque/insumos')?.key).toBe('estoque');
     expect(routeAccess('/dashboard/estoque/compras/nova')?.key).toBe('compras');
     expect(routeAccess('/dashboard/pdvx')).toBeUndefined();
+    expect(routeAccess('/dashboard/atendimento/whatsapp')?.key).toBe('whatsapp');
+    expect(canSee(routeAccess('/dashboard/atendimento/whatsapp')!, ['WAITER'])).toBe(false);
     const kitchen = ['KITCHEN'];
     expect(canSee(routeAccess('/dashboard/cardapio')!, kitchen)).toBe(false);
     expect(canSee(routeAccess('/dashboard/pdv')!, kitchen)).toBe(false);

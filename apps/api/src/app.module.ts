@@ -41,6 +41,7 @@ import { CashbackModule } from './modules/cashback/cashback.module';
 import { ReceivablesModule } from './modules/receivables/receivables.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -80,6 +81,7 @@ import { PlatformModule } from './modules/platform/platform.module';
     ReceivablesModule,
     ReportsModule,
     PlatformModule,
+    WhatsappModule,
   ],
   providers: [
     // Order matters: auth -> roles -> permissions -> rate limit.
