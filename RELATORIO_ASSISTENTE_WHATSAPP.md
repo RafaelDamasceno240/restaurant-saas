@@ -172,6 +172,12 @@ sem mudar o resto (hoje deliberadamente inexistente).
   em massa (só existem respostas a mensagens recebidas); o webhook não guarda o payload, só o hash;
   as respostas da API não expõem tokens nem segredos; os erros do provedor são gravados sem o texto
   que poderia conter token ou número.
+- **Sem fiado:** o assistente não tem ferramenta de pagamento; o link leva ao checkout público, que
+  só aceita dinheiro, PIX ou cartão. Desde 12/11 há também uma regra fixa no provedor de IA ("nunca
+  ofereça fiado, venda a prazo ou pagar depois") e, no assistente local, uma resposta própria para
+  perguntas sobre fiado e formas de pagamento ("O pagamento é feito na hora, no checkout: dinheiro,
+  PIX ou cartão. Não trabalhamos com fiado..."), com teste. A remoção do fiado do sistema em si está
+  na branch separada `remocao-fiado`.
 
 ## 5. Telas (capturas)
 
@@ -194,15 +200,22 @@ Em `docs/capturas/assistente-whatsapp/` (restaurantes fictícios "Burger Lab Tes
 | `wa-13-pizzaria` | Outro restaurante: só o seu cardápio, nenhuma conversa do primeiro |
 | `wa-14-simulador-transferencia` | Transferência para a equipe vista no simulador |
 
+**Revisão visual organizada:** `docs/capturas/assistente-whatsapp/REVISAO_VISUAL.html` (abre no
+navegador, sem servidor) agrupa as 14 capturas em: central de atendimento, conversas, respostas
+automáticas, consulta ao cardápio, carrinho, confirmação do checkout, atendimento humano,
+configurações e interface mobile, com legendas e as observações das capturas anteriores aos ajustes.
+
 ## 6. Testes
 
 | Suíte | Resultado |
 |---|---|
-| API unitários | **48 suítes / 478 testes — todos passaram** (30 novos do WhatsApp) |
+| API unitários | **48 suítes / 479 testes — todos passaram** (31 do WhatsApp, incluindo a regra contra fiado) |
 | Web unitários | **43 suítes / 448 testes — todos passaram** (4 novos + menu atualizado) |
 | Lint e typecheck API e web; `nest build`; `next build` | sem erros |
 | E2E novo `whatsapp.e2e-spec.ts` | **17/17** |
-| E2E completa (banco novo `rs_whats_full`, 22 migrations, um processo, 464 s) | **62 de 65 suítes, 958 de 969 testes aprovados**, incluindo `whatsapp` e todas as suítes de pedidos, PDV, comandas, caixa, cardápio e isolamento. As **11 falhas** são todas das três suítes de linha de comando (`provision-tenant-cli`, `platform-admin-cli`, `reset-password-cli`), com o mesmo código: o processo filho que elas abrem não chegou a iniciar (3221225794 = 0xC0000142, o Windows sem memória para criar o processo). Ver abaixo |
+| E2E completa (banco novo `rs_whats_full`, 22 migrations, um processo, 464 s) | 62 de 65 suítes, 958 de 969 testes aprovados. As 11 falhas eram só das três suítes de linha de comando, que não conseguiram iniciar o processo filho por falta de memória (0xC0000142) |
+| **As três suítes de CLI, repetidas individualmente** (mesmo banco, 12/11) | **`provision-tenant-cli` 11/11, `platform-admin-cli` 2/2, `reset-password-cli` 2/2 — todos passaram** |
+| **Resultado consolidado** | **65 de 65 suítes e 969 de 969 testes aprovados**, em duas execuções: 62 suítes na completa e as 3 de CLI depois, isoladas |
 | Revisão no navegador (Chrome headless, ambiente descartável 3900/4900) | 1ª passada 14/16, ajustes feitos; 2ª passada sem erros de console (detalhes abaixo) |
 
 **Sobre a E2E completa e a memória.** Durante a execução, o Claude Code encerrou o monitor de
@@ -214,9 +227,11 @@ registrado na etapa dos adicionais, onde as mesmas suítes passaram ao repetir c
 Nenhum arquivo de CLI foi alterado nesta branch. Conferência feita depois, com 4,4 GB livres: a
 CLI `tenant:provision` iniciou normalmente contra o banco descartável, fez as perguntas e recusou a
 entrada incompleta sem criar nada ("Faltou: Razão social... Nada foi criado.", saída 2, a saída
-de validação esperada). **Pendente:** repetir só as três suítes de CLI (ou a suíte completa) com
-memória livre, para fechar 65/65. Estratégia mais leve: fechar aplicativos pesados e rodar
-`npx jest --config ./test/jest-e2e.json --runInBand test/provision-tenant-cli test/platform-admin-cli test/reset-password-cli`.
+de validação esperada). **Repetição (12/11):** com 4,3 GB livres e nada mais rodando, as três
+suítes foram executadas uma por vez no mesmo banco descartável e passaram (15 de 15 testes). Assim,
+todas as 65 suítes têm aprovação registrada, ainda que não numa única execução: a completa (62) e
+as de CLI isoladas (3). A regra contra fiado (seção 4) foi acrescentada depois e verificada com os
+testes unitários do WhatsApp (31/31) e o E2E do WhatsApp (17/17).
 
 **Cobertura pedida → testes:**
 
@@ -327,7 +342,7 @@ E2E completa.
 
 ## 12. Pendências (decisões suas)
 
-0. Repetir as três suítes de CLI da E2E com memória livre (seção 6) para fechar 65/65.
+0. ~~Repetir as três suítes de CLI da E2E~~ — feito em 12/11: 15/15 testes (seção 6).
 1. Aprovar a integração desta branch à `salto-desenvolvimento`.
 2. Migration 22 do WhatsApp no DEV (com backup antes, como as anteriores).
 3. Conexão real com a Meta (seção 7) e o fluxo de cadastro da conexão CLOUD.

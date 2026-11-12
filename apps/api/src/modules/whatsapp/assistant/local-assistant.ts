@@ -168,6 +168,10 @@ const HELP =
   'Posso te mostrar o *cardápio*, montar seu pedido (ex.: "quero 2 X-Burger sem cebola"), ' +
   'informar *horário* e *taxa de entrega*, ver o *status do pedido* ou chamar um *atendente*.';
 
+export const PAYMENT_TEXT =
+  'O pagamento é feito na hora, no checkout: *dinheiro*, *PIX* ou *cartão*. Não trabalhamos com fiado nem pagamento depois. ' +
+  'Quando terminar o pedido, diga *fechar* que eu te mando o link.';
+
 export class LocalAssistant implements AssistantProvider {
   readonly name = 'local';
 
@@ -212,6 +216,32 @@ export class LocalAssistant implements AssistantProvider {
     }
 
     if (GREETINGS.includes(text)) return `Olá! 😊 ${HELP}`;
+
+    // How to pay: always now, in the checkout. Fiado / paying later is never offered.
+    if (
+      has(text, [
+        'fiado',
+        'pagar depois',
+        'pago depois',
+        'anota',
+        'anotar',
+        'a prazo',
+        'pendura',
+        'pendurar',
+      ]) ||
+      has(text, [
+        'forma de pagamento',
+        'formas de pagamento',
+        'aceita pix',
+        'aceitam pix',
+        'aceita cartao',
+        'aceitam cartao',
+        'como pago',
+        'como pagar',
+      ])
+    ) {
+      return PAYMENT_TEXT;
+    }
 
     if (
       has(text, [
