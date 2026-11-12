@@ -431,6 +431,7 @@ model OptionItem {
   group      OptionGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
   imageMedia MediaAsset?       @relation("OptionImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
   orderLines OrderItemOption[]
+  tabLines   TabItemOption[]
 
   @@unique([tenantId, externalId])
   @@index([groupId])
@@ -884,11 +885,32 @@ model TabItem {
   sentBy        User?                 @relation("TabItemSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
   cancellations TabItemCancellation[]
   orderItem     OrderItem?
+  options       TabItemOption[]
 
   @@index([tabId])
   @@index([productId])
   @@index([roundId])
   @@map("tab_items")
+}
+
+// The add-ons chosen for ONE unit of a tab item, frozen when its round was sent (migration 22).
+// Same rule as OrderItemOption: unitPriceCentsSnapshot of the item already includes them, and the
+// table checkout copies them to the sale's order lines.
+model TabItemOption {
+  id                 String  @id @default(uuid())
+  tabItemId          String
+  optionItemId       String?
+  groupNameSnapshot  String
+  optionNameSnapshot String
+  unitPriceCents     Int
+  quantity           Int
+
+  tabItem    TabItem     @relation(fields: [tabItemId], references: [id], onDelete: Cascade)
+  optionItem OptionItem? @relation(fields: [optionItemId], references: [id], onDelete: SetNull)
+
+  @@index([tabItemId])
+  @@index([optionItemId])
+  @@map("tab_item_options")
 }
 
 // B9: one cancellation of some units of a tab item - who, when, why, how many, in which state

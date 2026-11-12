@@ -118,7 +118,11 @@ export class OrdersService {
         take: ORDER_BOARD_COLUMN_LIMIT * ROUND_STATUS_ORDER.length,
         include: {
           tab: { select: { table: { select: { number: true, name: true } } } },
-          items: { where: { status: { in: [...ROUND_STATUS_ORDER] } }, orderBy: { createdAt: 'asc' } },
+          items: {
+            where: { status: { in: [...ROUND_STATUS_ORDER] } },
+            orderBy: { createdAt: 'asc' },
+            include: { options: true },
+          },
         },
       }),
       ...ORDER_BOARD_STATUSES.flatMap((status) => [
@@ -147,6 +151,12 @@ export class OrdersService {
           quantity: item.quantity - item.cancelledQuantity,
           notes: item.notes,
           status: item.status,
+          // What goes on EACH unit, as on an order card (no prices: the kitchen makes, not charges).
+          options: item.options.map((option) => ({
+            group: option.groupNameSnapshot,
+            name: option.optionNameSnapshot,
+            quantity: option.quantity,
+          })),
         })),
       };
     });

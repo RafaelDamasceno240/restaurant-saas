@@ -52,10 +52,33 @@ export interface OrderCreationItemInput {
   notes?: string | null;
 }
 
-// How priceItems treats the add-ons. The public checkout offers them and must satisfy every
-// required group; the PDV does not offer them yet (the product is sold at its base price).
+// How priceItems treats the add-ons. Every channel offers them now (public checkout, PDV, table
+// rounds), so every sale must satisfy each required group of its products.
 export interface PriceItemsOptions {
   enforceRequiredOptions: boolean;
+  // The table rounds check the 50-units limit themselves, over the whole tab, under the tab lock.
+  skipUnitLimit?: boolean;
+  // The single "unavailable" answer, worded for the caller ("do pedido" / "da rodada").
+  unavailableMessage?: string;
+}
+
+// What a basket costs right now, line by line, as the server prices it (POST /pos/orders/quote
+// and /tabs/:id/rounds/quote). Read-only: nothing is reserved, and the sale prices it all again.
+export interface QuotedLine {
+  productId: string;
+  name: string;
+  quantity: number;
+  basePriceCents: number;
+  extrasCents: number;
+  unitPriceCents: number;
+  subtotalCents: number;
+  notes: string | null;
+  options: { optionId: string | null; group: string; name: string; unitPriceCents: number; quantity: number }[];
+}
+
+export interface ItemsQuote {
+  items: QuotedLine[];
+  subtotalCents: number;
 }
 
 export interface OrderCreationAddressInput {
@@ -200,7 +223,7 @@ export class OrderCreationService {
     }
 
     const pricedItems = await this.priceItems(input.tenantId, input.items, {
-      enforceRequiredOptions: input.source === 'ONLINE',
+      enforceRequiredOptions: true,
     });
 
     let result: OrderCreationResult;
@@ -244,7 +267,7 @@ export class OrderCreationService {
   async priceItems(
     tenantId: string,
     items: OrderCreationItemInput[],
-    { enforceRequiredOptions }: PriceItemsOptions = { enforceRequiredOptions: false },
+    { enforceRequiredOptions, skipUnitLimit, unavailableMessage }: PriceItemsOptions = { enforceRequiredOptions: true },
   ): Promise<PricedOrderItem[]> {
     const productIds = [...new Set(items.map((i) => i.productId))];
     const products = await this.prisma.product.findMany({
@@ -272,12 +295,12 @@ export class OrderCreationService {
     if (unavailable) {
       throw new BadRequestException({
         code: 'PRODUCT_UNAVAILABLE',
-        message: 'Um ou mais produtos do pedido não estão mais disponíveis.',
+        message: unavailableMessage ?? 'Um ou mais produtos do pedido não estão mais disponíveis.',
       });
     }
 
     // B7: the DTO caps each line; the same product repeated over several lines is added up here.
-    const overLimit = productOverUnitLimit(items);
+    const overLimit = skipUnitLimit ? null : productOverUnitLimit(items);
     if (overLimit) {
       throw new BadRequestException({
         code: 'QUANTITY_LIMIT',
@@ -317,7 +340,7 @@ export class OrderCreationService {
     enforceRequiredOptions?: boolean;
   }) {
     const priced = await this.priceItems(input.tenantId, input.items, {
-      enforceRequiredOptions: input.enforceRequiredOptions ?? false,
+      enforceRequiredOptions: input.enforceRequiredOptions ?? true,
     });
     const subtotalCents = priced.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
     const applied = await this.coupons.preview({
@@ -334,6 +357,38 @@ export class OrderCreationService {
       discountCents: applied.discountCents,
       subtotalAfterDiscountCents: subtotalCents - applied.discountCents,
     };
+  }
+
+  // Read-only: the price of each line (base, add-ons, unit, subtotal) and of the basket, with the
+  // same pricing and the same refusals as the sale (unavailable product or add-on, required group,
+  // limits). The screens show THIS, not their own sums; the sale re-prices everything anyway.
+  async quoteItems(
+    tenantId: string,
+    items: OrderCreationItemInput[],
+    options: Omit<PriceItemsOptions, 'enforceRequiredOptions'> = {},
+  ): Promise<ItemsQuote> {
+    const priced = await this.priceItems(tenantId, items, { ...options, enforceRequiredOptions: true });
+    const lines = priced.map((item): QuotedLine => {
+      const extrasCents = (item.options ?? []).reduce((sum, o) => sum + o.unitPriceCents * o.quantity, 0);
+      return {
+        productId: item.productId,
+        name: item.productNameSnapshot,
+        quantity: item.quantity,
+        basePriceCents: item.unitPriceCents - extrasCents,
+        extrasCents,
+        unitPriceCents: item.unitPriceCents,
+        subtotalCents: item.unitPriceCents * item.quantity,
+        notes: item.notes ?? null,
+        options: (item.options ?? []).map((o) => ({
+          optionId: o.optionItemId,
+          group: o.groupNameSnapshot,
+          name: o.optionNameSnapshot,
+          unitPriceCents: o.unitPriceCents,
+          quantity: o.quantity,
+        })),
+      };
+    });
+    return { items: lines, subtotalCents: lines.reduce((sum, line) => sum + line.subtotalCents, 0) };
   }
 
   private isIdempotencyKeyViolation(error: unknown): boolean {

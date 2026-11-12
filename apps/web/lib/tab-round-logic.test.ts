@@ -7,6 +7,7 @@ import {
   draftUnits,
   itemsNotDelivered,
   parseDraft,
+  replaceDraftLine,
   setDraftNotes,
   setDraftQuantity,
   TAB_ITEM_STATUS_LABEL,
@@ -124,8 +125,9 @@ describe('tab-round-logic (B9)', () => {
         { productId: 3 },
         null,
       ]);
+      // A draft saved before add-ons existed comes back with none.
       expect(parseDraft(saved)).toEqual([
-        { key: 'a', productId: 'p1', name: 'X-Burger', unitPriceCents: 2500, quantity: 2, notes: 'sem cebola' },
+        { key: 'a', productId: 'p1', name: 'X-Burger', unitPriceCents: 2500, quantity: 2, notes: 'sem cebola', options: [] },
       ]);
     });
 
@@ -136,5 +138,59 @@ describe('tab-round-logic (B9)', () => {
       expect(parseDraft(null)).toEqual([]);
       expect(parseDraft('{"a":1}')).toEqual([]);
     });
+  });
+});
+
+describe('tab-round-logic: add-ons in the draft', () => {
+  const ponto = { optionId: 'o-ponto', groupName: 'Ponto', name: 'Ao ponto', priceCents: 0, quantity: 1 };
+  const bacon = { optionId: 'o-bacon', groupName: 'Adicionais', name: 'Bacon', priceCents: 500, quantity: 2 };
+  const custom = { id: 'p1', name: 'X-Burger', priceCents: 3500 };
+
+  it('a personalized product is its own line; the same personalization adds up', () => {
+    let draft = addToDraft([], burger);
+    draft = addToDraft(draft, custom, { options: [ponto, bacon], notes: 'sem cebola', quantity: 2 });
+    draft = addToDraft(draft, custom, { options: [bacon, ponto], notes: ' sem cebola ' });
+    draft = addToDraft(draft, burger);
+    expect(draft.map((l) => [l.quantity, l.options.length, l.notes])).toEqual([
+      [2, 0, ''],
+      [3, 2, 'sem cebola'],
+    ]);
+    expect(draftTotalCents(draft)).toBe(2 * 2500 + 3 * 3500);
+  });
+
+  it('sends the add-ons as ids and quantities only, never a price or a name', () => {
+    const draft = addToDraft([], custom, { options: [ponto, bacon], notes: 'bem passado' });
+    expect(toRoundItems(draft)).toEqual([
+      { productId: 'p1', quantity: 1, options: [{ optionId: 'o-ponto', quantity: 1 }, { optionId: 'o-bacon', quantity: 2 }], notes: 'bem passado' },
+    ]);
+  });
+
+  it('editing a line keeps its place, or joins the line that now has the same choice', () => {
+    let draft = addToDraft([], custom, { options: [ponto] });
+    draft = addToDraft(draft, fries);
+    draft = replaceDraftLine(draft, draft[0].key, { name: 'X-Burger', priceCents: 3500, options: [ponto, bacon], notes: null, quantity: 3 });
+    expect(draft.map((l) => [l.name, l.quantity, l.options.length])).toEqual([
+      ['X-Burger', 3, 2],
+      ['Batata', 1, 0],
+    ]);
+    draft = addToDraft(draft, custom, { options: [ponto] });
+    draft = replaceDraftLine(draft, draft[2].key, { name: 'X-Burger', priceCents: 3500, options: [bacon, ponto], notes: '', quantity: 1 });
+    expect(draft.map((l) => [l.name, l.quantity])).toEqual([
+      ['X-Burger', 4],
+      ['Batata', 1],
+    ]);
+  });
+
+  it('a saved draft keeps its add-ons and drops malformed ones', () => {
+    const saved = JSON.stringify([
+      { key: 'a', productId: 'p1', name: 'X', unitPriceCents: 3500, quantity: 1, notes: '', options: [bacon, { optionId: 1 }, null] },
+    ]);
+    expect(parseDraft(saved)[0].options).toEqual([bacon]);
+  });
+
+  it('the 50 units count every line of the product, personalized or not', () => {
+    let draft = addToDraft([], custom, { options: [ponto], quantity: 30 });
+    draft = addToDraft(draft, burger);
+    expect(tabUnitsOfProduct([{ productId: 'p1', activeQuantity: 10 }], draft, 'p1')).toBe(41);
   });
 });

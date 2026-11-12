@@ -10,10 +10,13 @@ import { tablesApi } from '@/lib/tables-api';
 import { Tab, TabItem, tabsApi } from '@/lib/tabs-api';
 import { StaffPaymentMethod } from '@/lib/checkout-api';
 import { checkoutBlockReason, TAB_PAYMENT_OPTIONS, tabPaymentOptions } from '@/lib/tab-checkout-logic';
-import { categoriesApi, productsApi } from '@/lib/cardapio-api';
+import { Product, categoriesApi, optionGroupsApi, productsApi } from '@/lib/cardapio-api';
+import { needsPersonalization, productSaleGroups, selectionFromOptions } from '@/lib/staff-addons';
+import { useServerQuote } from '@/lib/use-server-quote';
+import { ProductOptionsDialog, ProductOptionsInitial } from '@/components/sales/ProductOptionsDialog';
 import { filterPosProducts } from '@/lib/pos-logic';
 import { formatCentsAsBRL } from '@/lib/money';
-import { MAX_UNITS_HINT, atUnitLimit } from '@/lib/cart-logic';
+import { MAX_UNITS_HINT, MAX_UNITS_PER_PRODUCT, atUnitLimit } from '@/lib/cart-logic';
 import {
   addToDraft,
   cancelNeedsManager,
@@ -22,6 +25,7 @@ import {
   draftUnits,
   itemsNotDelivered,
   loadDraft,
+  replaceDraftLine,
   RoundDraft,
   saveDraft,
   setDraftNotes,
@@ -36,7 +40,7 @@ import { Button } from '@/components/ds/Button';
 import { Input } from '@/components/ds/Input';
 import { Page } from '@/components/ds/PageHeader';
 import { Alert, LoadingState } from '@/components/ds/States';
-import { ArrowLeft, CheckCircle2, ChefHat, Send } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChefHat, Pencil, Send } from 'lucide-react';
 import { TabItemCancelDialog } from '@/components/tabs/TabItemCancelDialog';
 import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
 import { CashbackUseField } from '@/components/cashback/CashbackUseField';
@@ -122,6 +126,12 @@ export default function MesaDetailPage() {
     queryFn: () => productsApi.list(accessToken as string),
     enabled: !!accessToken && !!tab,
   });
+  // Add-on groups of the menu (products.read), joined to each product by its optionGroupIds.
+  const optionGroupsQuery = useQuery({
+    queryKey: ['mesas-option-groups'],
+    queryFn: () => optionGroupsApi.list(accessToken as string),
+    enabled: !!accessToken && !!tab,
+  });
   const products = productsQuery.data ?? [];
   const visibleProducts = filterPosProducts(products, search, categoryId);
 
@@ -177,10 +187,42 @@ export default function MesaDetailPage() {
     if (draftTabId) saveDraft(draftTabId, next);
   }
 
-  function handleAddProduct(product: { id: string; name: string; price: number }) {
+  // The product being personalized (a new draft line, or `editKey` = the draft line being edited).
+  const [personalizing, setPersonalizing] = useState<{
+    product: Product;
+    editKey: string | null;
+    initial: ProductOptionsInitial | null;
+  } | null>(null);
+  const personalizingGroups = personalizing ? productSaleGroups(personalizing.product, optionGroupsQuery.data) : [];
+
+  // What the server says the draft costs right now (add-ons included): shown instead of this
+  // screen's own sums whenever it matches the draft. Sending the round prices it again anyway.
+  const draftItems = toRoundItems(draft);
+  const draftQuote = useServerQuote(
+    draftItems,
+    accessToken && tab && canEditTab ? (lines) => tabsApi.quoteRound(accessToken, tab.id, lines) : null,
+  );
+
+  // A product with add-ons opens its personalization; one without goes straight to the draft.
+  function handleAddProduct(product: Product) {
     if (!tab) return;
     setError(null);
+    const hasGroups = optionGroupsQuery.data
+      ? needsPersonalization(productSaleGroups(product, optionGroupsQuery.data))
+      : product.optionGroupIds.length > 0;
+    if (hasGroups) {
+      setPersonalizing({ product, editKey: null, initial: null });
+      return;
+    }
     updateDraft(addToDraft(draft, { id: product.id, name: product.name, priceCents: Math.round(product.price * 100) }));
+  }
+
+  function editDraftLine(key: string) {
+    const line = draft.find((l) => l.key === key);
+    const product = products.find((p) => p.id === line?.productId);
+    if (!line || !product) return;
+    const { selection, dropped } = selectionFromOptions(productSaleGroups(product, optionGroupsQuery.data), line.options);
+    setPersonalizing({ product, editKey: key, initial: { selection, notes: line.notes, quantity: line.quantity, droppedCount: dropped.length } });
   }
 
   async function handleSendRound() {
@@ -190,7 +232,7 @@ export default function MesaDetailPage() {
     setError(null);
     sendKeyRef.current ??= crypto.randomUUID();
     try {
-      await tabsApi.sendRound(accessToken, tab.id, { idempotencyKey: sendKeyRef.current, items: toRoundItems(draft) });
+      await tabsApi.sendRound(accessToken, tab.id, { idempotencyKey: sendKeyRef.current, items: draftItems });
       updateDraft([]);
       await invalidateAfterChange();
     } catch (err) {
@@ -441,6 +483,9 @@ export default function MesaDetailPage() {
                       >
                         <span className="font-medium">{product.name}</span>
                         <span className="text-sm font-bold">{formatCentsAsBRL(Math.round(product.price * 100))}</span>
+                        {product.optionGroupIds.length > 0 && !full && (
+                          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-2xs font-semibold text-accent">Personalizar</span>
+                        )}
                         {full && <span className="text-xs text-muted-foreground">{MAX_UNITS_HINT}</span>}
                       </button>
                     );
@@ -462,10 +507,38 @@ export default function MesaDetailPage() {
                   {unsentLabel(draftUnits(draft))}
                 </p>
                 <ul className="space-y-2">
-                  {draft.map((line) => (
+                  {draft.map((line, index) => (
                     <li key={line.key} className="rounded-ctl border border-line bg-surface p-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-foreground">{line.name}</span>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-sm font-medium text-foreground">{line.name}</span>
+                          {line.options.length > 0 && (
+                            <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground" aria-label={`Adicionais de ${line.name}`}>
+                              {line.options.map((option) => (
+                                <li key={option.optionId}>
+                                  + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                                  {option.name}
+                                  {option.priceCents > 0 && (
+                                    <span className="text-subtle"> ({formatCentsAsBRL(option.priceCents * option.quantity)})</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {products.some((p) => p.id === line.productId && p.optionGroupIds.length > 0) && (
+                            <button
+                              type="button"
+                              onClick={() => editDraftLine(line.key)}
+                              disabled={isSending}
+                              aria-label={`Editar ${line.name}`}
+                              className="inline-flex items-center gap-1 text-xs text-accent underline touch:min-h-10 touch:px-2"
+                            >
+                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                              Editar
+                            </button>
+                          )}
                         <button
                           type="button"
                           onClick={() => updateDraft(setDraftQuantity(draft, line.key, 0))}
@@ -474,6 +547,7 @@ export default function MesaDetailPage() {
                         >
                           Remover
                         </button>
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -508,11 +582,14 @@ export default function MesaDetailPage() {
                             +
                           </button>
                         </div>
-                        <span className="text-sm font-semibold">{formatCentsAsBRL(line.unitPriceCents * line.quantity)}</span>
+                        <span className="text-sm font-semibold tabular-nums">
+                          {formatCentsAsBRL(draftQuote.quote?.items[index]?.subtotalCents ?? line.unitPriceCents * line.quantity)}
+                        </span>
                       </div>
                     </li>
                   ))}
                 </ul>
+                {draftQuote.error && <Alert>{draftQuote.error}</Alert>}
                 <Button size="lg" fullWidth loading={isSending} onClick={handleSendRound} icon={<Send className="h-4 w-4" />}>
                   {isSending ? 'Enviando...' : 'Enviar para a cozinha'}
                 </Button>
@@ -548,6 +625,19 @@ export default function MesaDetailPage() {
                             {item.roundNumber ? `Rodada ${item.roundNumber}` : 'Lançado antes das rodadas'}
                             {item.cancelledQuantity > 0 && !cancelled ? ` · ${item.cancelledQuantity} cancelado(s)` : ''}
                           </p>
+                          {(item.options ?? []).length > 0 && (
+                            <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground" aria-label={`Adicionais de ${item.name}`}>
+                              {item.options.map((option, i) => (
+                                <li key={`${option.optionId ?? option.name}-${i}`}>
+                                  + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                                  {option.name}
+                                  {option.unitPriceCents > 0 && (
+                                    <span className="text-subtle"> ({formatCentsAsBRL(option.unitPriceCents * option.quantity)})</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                           {item.notes && <p className="mt-0.5 text-xs text-warning">{item.notes}</p>}
                         </div>
                         <span
@@ -584,7 +674,17 @@ export default function MesaDetailPage() {
                             </Button>
                           )}
                         </div>
-                        <span className="text-sm font-semibold">{formatCentsAsBRL(item.subtotalCents)}</span>
+                        <span className="shrink-0 text-right text-sm font-semibold tabular-nums">
+                          {formatCentsAsBRL(item.subtotalCents)}
+                          <span className="block whitespace-nowrap text-2xs font-normal text-subtle">
+                            {formatCentsAsBRL(item.unitPriceCents)} un.
+                          </span>
+                          {(item.extrasCents ?? 0) > 0 && (
+                            <span className="block whitespace-nowrap text-2xs font-normal text-subtle">
+                              {formatCentsAsBRL(item.basePriceCents)} + {formatCentsAsBRL(item.extrasCents)} adic.
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </li>
                   );
@@ -598,7 +698,8 @@ export default function MesaDetailPage() {
             </div>
             {draft.length > 0 && (
               <p className="-mt-2 text-right text-xs text-muted-foreground">
-                + {formatCentsAsBRL(draftTotalCents(draft))} no rascunho (ainda não enviado)
+                + {formatCentsAsBRL(draftQuote.quote?.subtotalCents ?? draftTotalCents(draft))} no rascunho (ainda não enviado
+                {draftQuote.quote ? '' : draftQuote.pending ? ', conferindo valores...' : ', valor estimado'})
               </p>
             )}
             {itemsNotDelivered(tab.items) > 0 && (
@@ -692,6 +793,49 @@ export default function MesaDetailPage() {
           )}
         </div>
       )}
+      <ProductOptionsDialog
+        open={personalizing !== null}
+        product={personalizing?.product ?? null}
+        groups={personalizingGroups}
+        loading={optionGroupsQuery.isLoading}
+        initial={personalizing?.initial}
+        // 50 active units per product on the tab, the draft included (the edited line gives its own back).
+        maxQuantity={
+          personalizing && tab
+            ? MAX_UNITS_PER_PRODUCT -
+              tabUnitsOfProduct(
+                tab.items,
+                draft.filter((l) => l.key !== personalizing.editKey),
+                personalizing.product.id,
+              )
+            : 0
+        }
+        noteMax={300}
+        confirmLabel={personalizing?.editKey ? 'Salvar alterações' : 'Adicionar à rodada'}
+        onClose={() => setPersonalizing(null)}
+        onConfirm={(line) => {
+          if (personalizing?.editKey) {
+            updateDraft(
+              replaceDraftLine(draft, personalizing.editKey, {
+                name: line.name,
+                priceCents: line.unitPriceCents,
+                options: line.options,
+                notes: line.notes,
+                quantity: line.quantity,
+              }),
+            );
+          } else {
+            updateDraft(
+              addToDraft(
+                draft,
+                { id: line.productId, name: line.name, priceCents: line.unitPriceCents },
+                { options: line.options, notes: line.notes, quantity: line.quantity },
+              ),
+            );
+          }
+          setPersonalizing(null);
+        }}
+      />
       <TabItemCancelDialog
         item={cancelTarget}
         error={cancelError}

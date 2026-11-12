@@ -81,6 +81,13 @@ export function KdsTableRoundCard({
                 {ITEM_STATUS_LABEL[item.status]}
               </span>
             )}
+            {/* The add-ons of each unit, as on an order card. */}
+            {(item.options ?? []).map((option, i) => (
+              <span key={`${option.name}-${i}`} className="block pl-7 text-base text-muted-foreground">
+                + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                {option.name}
+              </span>
+            ))}
             {item.notes && (
               <span className="mt-1 flex items-start gap-1.5 rounded-ctl border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-sm text-warning">
                 <StickyNote className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />

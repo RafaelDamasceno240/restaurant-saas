@@ -15,7 +15,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { CustomerLookupService, LinkableCustomer } from '../customers/customer-lookup.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
-import { activeUnits, computeTabTotals } from './tab-calculations';
+import { activeUnits, computeTabTotals, optionsExtraCents } from './tab-calculations';
 import { buildPricedItemsFromTab, classifyExistingCheckout } from './tab-checkout';
 import { CreateTabDto } from './dto/create-tab.dto';
 import { ListTabsQueryDto } from './dto/list-tabs-query.dto';
@@ -25,7 +25,11 @@ type Tx = Prisma.TransactionClient;
 
 const tabDetailInclude = {
   table: { select: { id: true, number: true, name: true } },
-  items: { orderBy: { createdAt: 'asc' as const }, include: { round: { select: { number: true } } } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    // Add-ons in the order they were written (the product's group/option order), like an order line.
+    include: { round: { select: { number: true } }, options: true },
+  },
   order: {
     select: {
       id: true,
@@ -285,7 +289,11 @@ export class TabsService {
     // B9: only the units still due are billed; cancellations take the tab lock too, so nothing
     // changes what is due while this runs. The kitchen may still be working on some items: that
     // is production, not billing, and it goes on after the bill is paid.
-    const items = await tx.tabItem.findMany({ where: { tabId: tab.id }, orderBy: { createdAt: 'asc' } });
+    const items = await tx.tabItem.findMany({
+      where: { tabId: tab.id },
+      orderBy: { createdAt: 'asc' },
+      include: { options: true },
+    });
     const billed = buildPricedItemsFromTab(items);
     if (billed.length === 0) {
       throw new ConflictException({
@@ -462,7 +470,17 @@ export class TabsService {
         id: item.id,
         productId: item.productId,
         name: item.productNameSnapshot,
+        // Price of ONE unit as sent (add-ons included), and its two parts.
         unitPriceCents: item.unitPriceCentsSnapshot,
+        basePriceCents: item.unitPriceCentsSnapshot - optionsExtraCents(item.options),
+        extrasCents: optionsExtraCents(item.options),
+        options: item.options.map((option) => ({
+          optionId: option.optionItemId,
+          group: option.groupNameSnapshot,
+          name: option.optionNameSnapshot,
+          unitPriceCents: option.unitPriceCents,
+          quantity: option.quantity,
+        })),
         quantity: item.quantity,
         // B9: units cancelled so far and units still due; the subtotal charges only the latter.
         cancelledQuantity: item.cancelledQuantity,
