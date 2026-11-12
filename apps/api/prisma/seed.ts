@@ -73,6 +73,9 @@ const PERMISSIONS: string[] = [
   'receivables.receive',
   'receivables.manage',
   'reports.read',
+  'whatsapp.read',
+  'whatsapp.reply',
+  'whatsapp.configure',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -146,6 +149,9 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'receivables.manage',
     // Sales, products, customers, stock, delivery and cash figures of the branches they run.
     'reports.read',
+    // Reads and answers the WhatsApp conversations; the assistant's settings stay with OWNER/ADMIN.
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   CASHIER: [
     'orders.read',
@@ -176,6 +182,9 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'receivables.read',
     'receivables.sell',
     'receivables.receive',
+    // Answers WhatsApp at the counter and takes a conversation over from the assistant.
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   WAITER: [
     'orders.read',

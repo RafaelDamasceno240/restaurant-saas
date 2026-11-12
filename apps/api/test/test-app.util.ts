@@ -24,7 +24,8 @@ export async function createTestApp(): Promise<INestApplication> {
   // (security-hardening, trust-proxy) lower it themselves after the app is up.
   process.env.AUTH_RATE_LIMIT_PER_MINUTE = '10000';
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  const app = moduleRef.createNestApplication();
+  // rawBody as in main.ts (the WhatsApp webhook signature is computed over the raw bytes).
+  const app = moduleRef.createNestApplication({ rawBody: true });
   app.use(cookieParser());
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   // Validation is provided by AppModule itself (StrictValidationPipe via
