@@ -197,7 +197,9 @@ export class AssistantEngineService {
         unitPriceCents: p.unitPriceCents,
         subtotalCents: p.unitPriceCents * p.quantity,
         options: (p.options ?? []).map((o) => ({
-          optionId: o.optionItemId,
+          // Freshly priced options always carry their id: it is null only on snapshots copied
+          // from older table rounds whose option was deleted since, never on this path.
+          optionId: o.optionItemId ?? missingOptionId(),
           name: o.optionNameSnapshot,
           group: o.groupNameSnapshot,
           quantity: o.quantity,
@@ -245,4 +247,8 @@ export class AssistantEngineService {
         createdAt: o.createdAt,
       }));
   }
+}
+
+function missingOptionId(): never {
+  throw new Error('priced option without id');
 }

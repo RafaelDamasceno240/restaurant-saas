@@ -28,7 +28,6 @@ describe('OrderCreationService.quoteItems / priceItems (adicionais no PDV e nas 
       {} as never,
       {} as never,
       {} as never,
-      {} as never,
     );
     return { service, findMany };
   }
