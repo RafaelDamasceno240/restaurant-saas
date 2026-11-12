@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisão do assistente</title>
+<style>
+  :root {
+    --bg: #f6f4f1; --surface: #ffffff; --text: #1d1a17; --muted: #6b635b; --line: #e3ddd6;
+    --accent: #a8641a; --ok: #1f7a4d; --warn: #9a6a00; --chip: #f1ebe3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121010; --surface: #1c1917; --text: #f2ede8; --muted: #a59c93; --line: #332d28;
+      --accent: #e0a55c; --ok: #5cc493; --warn: #e5b94e; --chip: #2a2420; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 32px 16px 8px; max-width: 1180px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .sub { color: var(--muted); margin: 0; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+  .facts li { background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+  nav { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(6px); border-bottom: 1px solid var(--line); }
+  nav ul { display: flex; gap: 6px; overflow-x: auto; max-width: 1180px; margin: 0 auto; padding: 10px 16px; list-style: none; }
+  nav a { white-space: nowrap; color: var(--text); text-decoration: none; font-size: 13px; padding: 6px 12px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--surface); }
+  nav a:hover, nav a:focus-visible { border-color: var(--accent); outline: none; }
+  main { max-width: 1180px; margin: 0 auto; padding: 8px 16px 64px; }
+  section { padding-top: 28px; scroll-margin-top: 56px; }
+  h2 { font-size: 19px; margin: 0 0 4px; }
+  h2 small { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 6px; }
+  .lead { color: var(--muted); margin: 0 0 14px; max-width: 820px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); }
+  .grid.phones { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  figure a { display: block; background: #000; }
+  figure img { display: block; width: 100%; height: auto; }
+  .phones figure img { max-height: 620px; width: auto; margin: 0 auto; }
+  figcaption { padding: 10px 14px 12px; font-size: 14px; }
+  figcaption b { display: block; margin-bottom: 2px; }
+  figcaption code { font-size: 12px; color: var(--muted); }
+  .check { color: var(--ok); }
+  .note { color: var(--warn); }
+  footer { max-width: 1180px; margin: 0 auto; padding: 0 16px 40px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Assistente de WhatsApp — revisão visual</h1>
+  <p class="sub">Branch <code>assistente-whatsapp</code> · restaurantes fictícios "Burger Lab Teste" e "Pizzaria Forno Teste" · banco descartável · número simulado (nada enviado à Meta) · assistente local, sem IA paga.</p>
+  <ul class="facts">
+    <li>14 capturas</li><li>1366×900 e celular 390×844</li><li>Nenhum pedido criado pelo WhatsApp</li><li>Clique numa imagem para ampliar</li>
+  </ul>
+</header>
+
+<nav aria-label="Seções">
+  <ul>
+    <li><a href="#central">Central de atendimento</a></li>
+    <li><a href="#conversas">Conversas</a></li>
+    <li><a href="#respostas">Respostas automáticas</a></li>
+    <li><a href="#cardapio">Consulta ao cardápio</a></li>
+    <li><a href="#carrinho">Carrinho</a></li>
+    <li><a href="#checkout">Confirmação do checkout</a></li>
+    <li><a href="#humano">Atendimento humano</a></li>
+    <li><a href="#configuracoes">Configurações</a></li>
+    <li><a href="#mobile">Interface mobile</a></li>
+  </ul>
+</nav>
+
+<main>
+  <section id="central">
+    <h2>Central de atendimento <small>Atendimento › WhatsApp</small></h2>
+    <p class="lead">Novo grupo "Atendimento" no menu, visível para dono, administrador, gerente e caixa. Três abas: Conversas, Simulador (só quem configura) e Configurações.</p>
+    <div class="grid">
+      <figure><a href="wa-01-painel.png" target="_blank" rel="noopener"><img src="wa-01-painel.png" alt="Central de atendimento sem conversas" loading="lazy"></a>
+        <figcaption><b>Primeiro acesso</b>Selo "Assistente ativado", filtros Todas / Assistente / Equipe e a dica para usar o simulador. <code>wa-01-painel.png</code></figcaption></figure>
+      <figure><a href="wa-02-simulador.png" target="_blank" rel="noopener"><img src="wa-02-simulador.png" alt="Simulador de conversas" loading="lazy"></a>
+        <figcaption><b>Simulador</b>Clientes fictícios, mensagens prontas e um celular. Cada mensagem passa pelo mesmo caminho de uma mensagem da Meta. <code>wa-02-simulador.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="conversas">
+    <h2>Conversas</h2>
+    <p class="lead">Lista com última mensagem, horário, selo IA/Equipe e não lidas; conversa com autor, horário e status de entrega (✓ enviada, ✓✓ entregue/lida).</p>
+    <div class="grid">
+      <figure><a href="wa-07-conversa-pedido.png" target="_blank" rel="noopener"><img src="wa-07-conversa-pedido.png" alt="Conversa com pedido montado" loading="lazy"></a>
+        <figcaption><b>Conversa conduzida pelo assistente</b>Selo "2 itens no carrinho", botão "Assumir atendimento" e o aviso de que responder assume a conversa. <code>wa-07-conversa-pedido.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="respostas">
+    <h2>Respostas automáticas</h2>
+    <p class="lead">Saudação configurada na primeira resposta; quando falta uma escolha obrigatória, o assistente pergunta com as opções numeradas e aceita o nome ou o número.</p>
+    <div class="grid">
+      <figure><a href="wa-03-escolha-obrigatoria.png" target="_blank" rel="noopener"><img src="wa-03-escolha-obrigatoria.png" alt="Saudação e grupo obrigatório" loading="lazy"></a>
+        <figcaption><b>Saudação e grupo obrigatório</b>"quero 2 smash com bacon extra sem cebola" → pede o "Ponto da carne". <code>wa-03-escolha-obrigatoria.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="cardapio">
+    <h2>Consulta ao cardápio</h2>
+    <p class="lead">Cada restaurante responde só com o próprio cardápio público. Na pizzaria, um pedido de produto da hamburgueria não é reconhecido, e a pizza pede a borda com o preço do servidor.</p>
+    <div class="grid">
+      <figure><a href="wa-13-pizzaria.png" target="_blank" rel="noopener"><img src="wa-13-pizzaria.png" alt="Pizzaria: cardápio próprio" loading="lazy"></a>
+        <figcaption><b>Outro restaurante, outro cardápio</b><span class="check">✓</span> "quero 1 smash com bacon" não é atendido; "Pizza Margherita" pede "Borda" (+R$ 8,00). Nenhuma conversa do Burger aparece aqui. <code>wa-13-pizzaria.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="carrinho">
+    <h2>Carrinho</h2>
+    <p class="lead">Os valores vêm da mesma regra de preço do checkout: 2 × (26,00 + 5,00 de bacon) + 9,50 = R$ 71,50.</p>
+    <div class="grid">
+      <figure><a href="wa-04-carrinho.png" target="_blank" rel="noopener"><img src="wa-04-carrinho.png" alt="Carrinho no WhatsApp" loading="lazy"></a>
+        <figcaption><b>Carrinho na conversa</b>Adicionais com preço, observação "sem cebola" e subtotal. <code>wa-04-carrinho.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="checkout">
+    <h2>Confirmação do checkout</h2>
+    <p class="lead">Resumo → o cliente responde "sim" → link seguro (2 h). O link abre o checkout existente com o carrinho recalculado; o pedido só nasce quando o cliente confirma lá.</p>
+    <div class="grid">
+      <figure><a href="wa-05-link-checkout.png" target="_blank" rel="noopener"><img src="wa-05-link-checkout.png" alt="Link de checkout enviado" loading="lazy"></a>
+        <figcaption><b>Resumo, "sim" e link</b><code>wa-05-link-checkout.png</code></figcaption></figure>
+    </div>
+    <div class="grid phones" style="margin-top:16px">
+      <figure><a href="wa-09-link-celular.png" target="_blank" rel="noopener"><img src="wa-09-link-celular.png" alt="Página do link no celular" loading="lazy"></a>
+        <figcaption><b>Página do link</b>"Revisar e finalizar"; subtotal com valores de agora. <code>wa-09-link-celular.png</code></figcaption></figure>
+      <figure><a href="wa-10-carrinho-publico.png" target="_blank" rel="noopener"><img src="wa-10-carrinho-publico.png" alt="Carrinho público preenchido" loading="lazy"></a>
+        <figcaption><b>Carrinho público preenchido</b>Segue o fluxo normal de entrega, pagamento e confirmação. <code>wa-10-carrinho-publico.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="humano">
+    <h2>Atendimento humano</h2>
+    <p class="lead">"atendente" passa a conversa para a equipe; o assistente fica quieto até alguém devolver.</p>
+    <div class="grid">
+      <figure><a href="wa-14-simulador-transferencia.png" target="_blank" rel="noopener"><img src="wa-14-simulador-transferencia.png" alt="Transferência no simulador" loading="lazy"></a>
+        <figcaption><b>Transferência vista pelo cliente</b>Selo do celular muda para "Atendente". <code>wa-14-simulador-transferencia.png</code></figcaption></figure>
+      <figure><a href="wa-06-atendente-responde.png" target="_blank" rel="noopener"><img src="wa-06-atendente-responde.png" alt="Atendente responde" loading="lazy"></a>
+        <figcaption><b>A equipe responde</b>Resposta com o nome de quem atendeu e o botão "Devolver ao assistente". <span class="note">Os contadores das abas desta captura estavam atrasados; corrigido depois.</span> <code>wa-06-atendente-responde.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="configuracoes">
+    <h2>Configurações</h2>
+    <p class="lead">Ligar/desligar, saudação, comportamento (tom, sem mexer em preço), limite diário, conexão simulada e uso do dia.</p>
+    <div class="grid">
+      <figure><a href="wa-08-configuracoes.png" target="_blank" rel="noopener"><img src="wa-08-configuracoes.png" alt="Configurações do assistente" loading="lazy"></a>
+        <figcaption><b>Assistente, conexão e uso de hoje</b>"Envio real: desativado neste ambiente". <code>wa-08-configuracoes.png</code></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="mobile">
+    <h2>Interface mobile</h2>
+    <p class="lead">No celular, a lista e a conversa ficam em telas separadas, com "← Conversas" para voltar.</p>
+    <div class="grid phones">
+      <figure><a href="wa-11-painel-celular.png" target="_blank" rel="noopener"><img src="wa-11-painel-celular.png" alt="Lista de conversas no celular" loading="lazy"></a>
+        <figcaption><b>Lista</b><span class="note">Captura anterior ao ajuste de largura: os selos à direita ficaram cortados; corrigido depois.</span> <code>wa-11-painel-celular.png</code></figcaption></figure>
+      <figure><a href="wa-12-conversa-celular.png" target="_blank" rel="noopener"><img src="wa-12-conversa-celular.png" alt="Conversa no celular" loading="lazy"></a>
+        <figcaption><b>Conversa</b>Cabeçalho em duas linhas e link longo quebrando dentro do balão (após o ajuste). <code>wa-12-conversa-celular.png</code></figcaption></figure>
+      <figure><a href="wa-09-link-celular.png" target="_blank" rel="noopener"><img src="wa-09-link-celular.png" alt="Link no celular" loading="lazy"></a>
+        <figcaption><b>Link do checkout</b><code>wa-09-link-celular.png</code></figcaption></figure>
+    </div>
+  </section>
+</main>
+<footer>Gerado em 12/11/2026 a partir de <code>docs/capturas/assistente-whatsapp/</code>. Relatório: <code>RELATORIO_ASSISTENTE_WHATSAPP.md</code>.</footer>
+</body>
+</html>

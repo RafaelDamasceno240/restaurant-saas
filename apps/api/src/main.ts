@@ -12,7 +12,8 @@ import { AppConfig } from './config/configuration';
 import { applyTrustProxy } from './common/http/trust-proxy';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
+  // rawBody: the WhatsApp webhook checks the signature Meta computes over the exact bytes sent.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true, rawBody: true });
   app.useLogger(app.get(PinoLogger));
 
   const config = app.get(ConfigService<AppConfig, true>);

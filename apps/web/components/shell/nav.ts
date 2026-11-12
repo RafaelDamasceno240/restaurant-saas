@@ -10,6 +10,7 @@ import {
   Gift,
   LayoutDashboard,
   LayoutGrid,
+  MessageCircle,
   NotebookPen,
   Package,
   Settings,
@@ -68,13 +69,27 @@ export const DASHBOARD_NAV: NavGroup[] = [
     ],
   },
   {
+    key: 'atendimento',
+    label: 'Atendimento',
+    items: [
+      {
+        key: 'whatsapp',
+        label: 'WhatsApp',
+        icon: MessageCircle,
+        href: '/dashboard/atendimento/whatsapp',
+        roles: [...MANAGEMENT, 'CASHIER'],
+        permission: 'whatsapp.read',
+      },
+    ],
+  },
+  {
     key: 'gestao',
     label: 'Gestão',
     items: [
       { key: 'clientes', label: 'Clientes', icon: Contact, href: '/dashboard/clientes', roles: [...MANAGEMENT, 'CASHIER'], permission: 'customers.read' },
       { key: 'cupons', label: 'Cupons', icon: Ticket, href: '/dashboard/cupons', roles: MANAGEMENT, permission: 'coupons.read' },
       { key: 'fidelidade', label: 'Fidelidade', icon: Gift, href: '/dashboard/fidelidade', roles: [...MANAGEMENT, 'CASHIER'], permission: 'loyalty.read' },
-      { key: 'fiado', label: 'Fiado', icon: NotebookPen, href: '/dashboard/fiado', roles: [...MANAGEMENT, 'CASHIER'], permission: 'receivables.read' },
+      { key: 'fiado', label: 'Contas a receber', icon: NotebookPen, href: '/dashboard/fiado', roles: [...MANAGEMENT, 'CASHIER'], permission: 'receivables.read' },
       { key: 'relatorios', label: 'Relatórios', icon: BarChart3, href: '/dashboard/relatorios', roles: MANAGEMENT, permission: 'reports.read' },
       // B12: was open to every role; KITCHEN and DELIVERY cannot read the catalogue (products.read).
       {

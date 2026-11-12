@@ -1,4 +1,4 @@
-import { activeUnits, computeTabTotals, productOverTabUnitLimit, roundSignature } from './tab-calculations';
+import { activeUnits, computeTabTotals, mergeRoundOptions, optionsExtraCents, productOverTabUnitLimit, roundSignature } from './tab-calculations';
 
 describe('computeTabTotals', () => {
   it('returns zeroes for an empty tab', () => {
@@ -39,16 +39,16 @@ describe('activeUnits', () => {
 
 describe('roundSignature', () => {
   it('ignores the order of the lines', () => {
-    const a = { productId: 'p1', quantity: 2, notes: 'sem cebola' };
-    const b = { productId: 'p2', quantity: 1, notes: null };
+    const a = { productId: 'p1', quantity: 2, notes: 'sem cebola', options: [] };
+    const b = { productId: 'p2', quantity: 1, notes: null, options: [] };
     expect(roundSignature([a, b])).toBe(roundSignature([b, a]));
   });
 
   it('tells apart a different quantity, product or note', () => {
-    const base = roundSignature([{ productId: 'p1', quantity: 2, notes: null }]);
-    expect(roundSignature([{ productId: 'p1', quantity: 3, notes: null }])).not.toBe(base);
-    expect(roundSignature([{ productId: 'p2', quantity: 2, notes: null }])).not.toBe(base);
-    expect(roundSignature([{ productId: 'p1', quantity: 2, notes: 'bem passado' }])).not.toBe(base);
+    const base = roundSignature([{ productId: 'p1', quantity: 2, notes: null, options: [] }]);
+    expect(roundSignature([{ productId: 'p1', quantity: 3, notes: null, options: [] }])).not.toBe(base);
+    expect(roundSignature([{ productId: 'p2', quantity: 2, notes: null, options: [] }])).not.toBe(base);
+    expect(roundSignature([{ productId: 'p1', quantity: 2, notes: 'bem passado', options: [] }])).not.toBe(base);
   });
 });
 
@@ -72,5 +72,38 @@ describe('productOverTabUnitLimit', () => {
       { productId: 'p1', quantity: 21 },
     ];
     expect(productOverTabUnitLimit([], round, 50)).toBe('p1');
+  });
+});
+
+describe('add-ons of a round (adicionais na comanda)', () => {
+  it('a retry with the same add-ons in another order is the same round', () => {
+    const a = { productId: 'p1', quantity: 1, notes: null, options: [{ optionItemId: 'o1', quantity: 2 }, { optionItemId: 'o2', quantity: 1 }] };
+    const b = { productId: 'p1', quantity: 1, notes: null, options: [{ optionItemId: 'o2', quantity: 1 }, { optionItemId: 'o1', quantity: 2 }] };
+    expect(roundSignature([a])).toBe(roundSignature([b]));
+  });
+
+  it('other add-ons or other add-on quantities are another round', () => {
+    const base = roundSignature([{ productId: 'p1', quantity: 1, notes: null, options: [{ optionItemId: 'o1', quantity: 1 }] }]);
+    expect(roundSignature([{ productId: 'p1', quantity: 1, notes: null, options: [{ optionItemId: 'o1', quantity: 2 }] }])).not.toBe(base);
+    expect(roundSignature([{ productId: 'p1', quantity: 1, notes: null, options: [{ optionItemId: 'o2', quantity: 1 }] }])).not.toBe(base);
+    expect(roundSignature([{ productId: 'p1', quantity: 1, notes: null, options: [] }])).not.toBe(base);
+  });
+
+  it('the same option sent twice is added up, as it is stored', () => {
+    expect(mergeRoundOptions([{ optionId: 'o1', quantity: 1 }, { optionId: 'o2', quantity: 1 }, { optionId: 'o1', quantity: 2 }])).toEqual([
+      { optionItemId: 'o1', quantity: 3 },
+      { optionItemId: 'o2', quantity: 1 },
+    ]);
+    expect(mergeRoundOptions(undefined)).toEqual([]);
+  });
+
+  it('the extras of one unit are price x quantity of each add-on, in cents', () => {
+    expect(optionsExtraCents([])).toBe(0);
+    expect(optionsExtraCents([{ unitPriceCents: 500, quantity: 2 }, { unitPriceCents: 0, quantity: 1 }, { unitPriceCents: 350, quantity: 1 }])).toBe(1350);
+  });
+
+  it('the tab total charges the add-ons of every unit still due (they are in the unit snapshot)', () => {
+    // X-Burger 25,00 + 2x bacon 5,00 = 35,00 per unit; 3 units, 1 cancelled.
+    expect(computeTabTotals([{ unitPriceCentsSnapshot: 3500, quantity: 3, cancelledQuantity: 1 }]).totalCents).toBe(7000);
   });
 });

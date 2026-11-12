@@ -30,6 +30,8 @@ interface CartContextValue {
   decrement: (lineId: string) => void;
   removeItem: (lineId: string) => void;
   clearCart: () => void;
+  // Puts a whole cart in place (the cart of a WhatsApp checkout link, already priced by the API).
+  replaceCart: (next: CartState) => void;
 }
 
 const CartContext = createContext<CartContextValue | undefined>(undefined);
@@ -84,6 +86,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     decrement: (lineId) => setState((prev) => decrementItem(prev, lineId)),
     removeItem: (lineId) => setState((prev) => removeItemPure(prev, lineId)),
     clearCart: () => setState(clearCartPure()),
+    replaceCart: (next) => setState(next),
   };
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

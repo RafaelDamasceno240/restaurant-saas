@@ -468,9 +468,9 @@ describe('Public menu with add-ons and images (e2e)', () => {
     expect(res.body).toMatchObject({ subtotalCents: 4200, discountCents: 420 });
   });
 
-  it('the PDV still sells a product with a required group at its base price (no add-ons at the counter yet)', async () => {
+  it('the PDV enforces the required group too (add-ons are sold at the counter now)', async () => {
     const t = await setup();
-    const res = await request(server)
+    const missing = await request(server)
       .post('/v1/pos/orders')
       .set('Authorization', `Bearer ${t.accessToken}`)
       .send({
@@ -478,9 +478,21 @@ describe('Public menu with add-ons and images (e2e)', () => {
         items: [{ productId: t.combo.id, quantity: 1 }],
         paymentMethod: 'PIX',
       })
+      .expect(400);
+    expect(missing.body.code).toBe('OPTION_REQUIRED');
+    const res = await request(server)
+      .post('/v1/pos/orders')
+      .set('Authorization', `Bearer ${t.accessToken}`)
+      .send({
+        branchId: t.branchId,
+        items: [{ productId: t.combo.id, quantity: 1, options: [{ optionId: t.coca.id, quantity: 1 }] }],
+        paymentMethod: 'PIX',
+      })
       .expect(201);
     expect(res.body.total).toBeCloseTo(14.99);
-    expect(res.body.items[0].options).toEqual([]);
+    expect(res.body.items[0].options).toEqual([
+      expect.objectContaining({ group: 'Refri', name: 'Coca lata', quantity: 1 }),
+    ]);
     // ...but not a sold-out one.
     await request(server)
       .post('/v1/pos/orders')

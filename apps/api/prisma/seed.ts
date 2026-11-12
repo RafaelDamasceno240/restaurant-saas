@@ -69,10 +69,12 @@ const PERMISSIONS: string[] = [
   'cashback.adjust',
   'cashback.configure',
   'receivables.read',
-  'receivables.sell',
   'receivables.receive',
   'receivables.manage',
   'reports.read',
+  'whatsapp.read',
+  'whatsapp.reply',
+  'whatsapp.configure',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -139,13 +141,16 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'cashback.read',
     'cashback.use',
     'cashback.adjust',
-    // Fiado: sets customer limits, enters manual charges, reverses payments and cancels.
+    // Fiado that already exists (no new fiado is sold since remocao-fiado): receives, reverses a
+    // payment and cancels a debt.
     'receivables.read',
-    'receivables.sell',
     'receivables.receive',
     'receivables.manage',
     // Sales, products, customers, stock, delivery and cash figures of the branches they run.
     'reports.read',
+    // Reads and answers the WhatsApp conversations; the assistant's settings stay with OWNER/ADMIN.
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   CASHIER: [
     'orders.read',
@@ -171,11 +176,12 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     // Sees the balance and spends it on a sale; never adjusts it by hand.
     'cashback.read',
     'cashback.use',
-    // Sells on account within the limit management set, and receives payments at the counter;
-    // never changes a limit, reverses a payment or cancels a debt.
+    // Receives payments of fiado that already exists at the counter; never reverses or cancels.
     'receivables.read',
-    'receivables.sell',
     'receivables.receive',
+    // Answers WhatsApp at the counter and takes a conversation over from the assistant.
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   WAITER: [
     'orders.read',

@@ -7,5 +7,7 @@ import { PublicMenuService } from './public-menu.service';
   imports: [BranchesModule],
   controllers: [PublicMenuController],
   providers: [PublicMenuService],
+  // The WhatsApp assistant answers from exactly the public menu.
+  exports: [PublicMenuService],
 })
 export class PublicMenuModule {}

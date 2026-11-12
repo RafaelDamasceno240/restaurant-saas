@@ -8,12 +8,15 @@ import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
 import { tablesApi } from '@/lib/tables-api';
 import { Tab, TabItem, tabsApi } from '@/lib/tabs-api';
-import { StaffPaymentMethod } from '@/lib/checkout-api';
-import { checkoutBlockReason, TAB_PAYMENT_OPTIONS, tabPaymentOptions } from '@/lib/tab-checkout-logic';
-import { categoriesApi, productsApi } from '@/lib/cardapio-api';
+import { PaymentMethod } from '@/lib/checkout-api';
+import { checkoutBlockReason, paidWithLabel, TAB_PAYMENT_OPTIONS } from '@/lib/tab-checkout-logic';
+import { Product, categoriesApi, optionGroupsApi, productsApi } from '@/lib/cardapio-api';
+import { needsPersonalization, productSaleGroups, selectionFromOptions } from '@/lib/staff-addons';
+import { useServerQuote } from '@/lib/use-server-quote';
+import { ProductOptionsDialog, ProductOptionsInitial } from '@/components/sales/ProductOptionsDialog';
 import { filterPosProducts } from '@/lib/pos-logic';
 import { formatCentsAsBRL } from '@/lib/money';
-import { MAX_UNITS_HINT, atUnitLimit } from '@/lib/cart-logic';
+import { MAX_UNITS_HINT, MAX_UNITS_PER_PRODUCT, atUnitLimit } from '@/lib/cart-logic';
 import {
   addToDraft,
   cancelNeedsManager,
@@ -22,6 +25,7 @@ import {
   draftUnits,
   itemsNotDelivered,
   loadDraft,
+  replaceDraftLine,
   RoundDraft,
   saveDraft,
   setDraftNotes,
@@ -36,13 +40,12 @@ import { Button } from '@/components/ds/Button';
 import { Input } from '@/components/ds/Input';
 import { Page } from '@/components/ds/PageHeader';
 import { Alert, LoadingState } from '@/components/ds/States';
-import { ArrowLeft, CheckCircle2, ChefHat, Send } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChefHat, Pencil, Send } from 'lucide-react';
 import { TabItemCancelDialog } from '@/components/tabs/TabItemCancelDialog';
 import { CustomerPicker, PickedCustomer } from '@/components/customers/CustomerPicker';
 import { CashbackUseField } from '@/components/cashback/CashbackUseField';
 import { parseCashbackToUse, validateCashbackToUse } from '@/lib/cashback-logic';
-import { CreditTermsField } from '@/components/receivables/CreditTermsField';
-import { defaultTerms, localDateOnly, receivableErrorMessage, TermsDraft, toCreditTerms } from '@/lib/receivables-logic';
+import { receivableErrorMessage } from '@/lib/receivables-logic';
 
 // B9: the waiter builds a ROUND here (a draft on this device: add, remove, change quantities and
 // notes freely) and sends it whole with "Enviar para a cozinha". Sent items come from the API
@@ -61,11 +64,7 @@ export default function MesaDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<StaffPaymentMethod | null>(null);
-  // Fiado: how the debt will be paid back, and why the picked customer cannot take this bill
-  // on account right now (reported by CreditTermsField; null = may). Only the terms are sent.
-  const [creditTerms, setCreditTerms] = useState<TermsDraft>(() => defaultTerms(localDateOnly()));
-  const [creditBlock, setCreditBlock] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   // Optional customer of the registry for this sale. Waiters close tabs but cannot see the
   // customer registry (the API refuses a customerId from them), so the picker is hidden.
   const [saleCustomer, setSaleCustomer] = useState<PickedCustomer | null>(null);
@@ -120,6 +119,12 @@ export default function MesaDetailPage() {
   const productsQuery = useQuery({
     queryKey: ['mesas-products'],
     queryFn: () => productsApi.list(accessToken as string),
+    enabled: !!accessToken && !!tab,
+  });
+  // Add-on groups of the menu (products.read), joined to each product by its optionGroupIds.
+  const optionGroupsQuery = useQuery({
+    queryKey: ['mesas-option-groups'],
+    queryFn: () => optionGroupsApi.list(accessToken as string),
     enabled: !!accessToken && !!tab,
   });
   const products = productsQuery.data ?? [];
@@ -177,10 +182,42 @@ export default function MesaDetailPage() {
     if (draftTabId) saveDraft(draftTabId, next);
   }
 
-  function handleAddProduct(product: { id: string; name: string; price: number }) {
+  // The product being personalized (a new draft line, or `editKey` = the draft line being edited).
+  const [personalizing, setPersonalizing] = useState<{
+    product: Product;
+    editKey: string | null;
+    initial: ProductOptionsInitial | null;
+  } | null>(null);
+  const personalizingGroups = personalizing ? productSaleGroups(personalizing.product, optionGroupsQuery.data) : [];
+
+  // What the server says the draft costs right now (add-ons included): shown instead of this
+  // screen's own sums whenever it matches the draft. Sending the round prices it again anyway.
+  const draftItems = toRoundItems(draft);
+  const draftQuote = useServerQuote(
+    draftItems,
+    accessToken && tab && canEditTab ? (lines) => tabsApi.quoteRound(accessToken, tab.id, lines) : null,
+  );
+
+  // A product with add-ons opens its personalization; one without goes straight to the draft.
+  function handleAddProduct(product: Product) {
     if (!tab) return;
     setError(null);
+    const hasGroups = optionGroupsQuery.data
+      ? needsPersonalization(productSaleGroups(product, optionGroupsQuery.data))
+      : product.optionGroupIds.length > 0;
+    if (hasGroups) {
+      setPersonalizing({ product, editKey: null, initial: null });
+      return;
+    }
     updateDraft(addToDraft(draft, { id: product.id, name: product.name, priceCents: Math.round(product.price * 100) }));
+  }
+
+  function editDraftLine(key: string) {
+    const line = draft.find((l) => l.key === key);
+    const product = products.find((p) => p.id === line?.productId);
+    if (!line || !product) return;
+    const { selection, dropped } = selectionFromOptions(productSaleGroups(product, optionGroupsQuery.data), line.options);
+    setPersonalizing({ product, editKey: key, initial: { selection, notes: line.notes, quantity: line.quantity, droppedCount: dropped.length } });
   }
 
   async function handleSendRound() {
@@ -190,7 +227,7 @@ export default function MesaDetailPage() {
     setError(null);
     sendKeyRef.current ??= crypto.randomUUID();
     try {
-      await tabsApi.sendRound(accessToken, tab.id, { idempotencyKey: sendKeyRef.current, items: toRoundItems(draft) });
+      await tabsApi.sendRound(accessToken, tab.id, { idempotencyKey: sendKeyRef.current, items: draftItems });
       updateDraft([]);
       await invalidateAfterChange();
     } catch (err) {
@@ -254,8 +291,6 @@ export default function MesaDetailPage() {
     setSaleCustomer(null);
     setCashbackInput('');
     setCashbackMaxCents(0);
-    setCreditTerms(defaultTerms(localDateOnly()));
-    setCreditBlock(null);
     checkoutKeyRef.current = crypto.randomUUID();
     setCheckoutOpen(true);
   }
@@ -266,7 +301,6 @@ export default function MesaDetailPage() {
     setSaleCustomer(null);
     setCashbackInput('');
     setCashbackMaxCents(0);
-    setCreditBlock(null);
     checkoutKeyRef.current = null;
   }
 
@@ -287,10 +321,7 @@ export default function MesaDetailPage() {
         idempotencyKey: checkoutKeyRef.current ?? crypto.randomUUID(),
         ...(saleCustomer ? { customerId: saleCustomer.id } : {}),
         ...(cashbackCents > 0 ? { cashbackToUseCents: cashbackCents } : {}),
-        ...(paymentMethod === 'ON_ACCOUNT' ? { creditTerms: toCreditTerms(creditTerms) } : {}),
       });
-      // A bill put on account opens a debt and uses the customer's limit.
-      if (paymentMethod === 'ON_ACCOUNT') void queryClient.invalidateQueries({ queryKey: ['receivables'] });
       setSale(result);
       setCheckoutOpen(false);
       await invalidateAfterChange();
@@ -298,9 +329,8 @@ export default function MesaDetailPage() {
       if (err instanceof ApiError && err.code === 'CASH_REGISTER_NOT_OPEN') {
         setError(`${err.message} Escolha PIX/Cartão ou abra o caixa (Menu: Caixa).`);
       } else {
-        // The fiado refusals get a friendlier text; other codes keep the API message.
+        // Known codes get a friendlier text; other codes keep the API message.
         setError(err instanceof ApiError ? receivableErrorMessage(err.code, err.message) : 'Não foi possível fechar a conta.');
-        if (paymentMethod === 'ON_ACCOUNT') void queryClient.invalidateQueries({ queryKey: ['receivables'] });
       }
       // Refresh branchCashRegisterOpen / tab status after a rejection.
       await invalidateAfterChange();
@@ -316,8 +346,7 @@ export default function MesaDetailPage() {
     );
   }
   if (sale?.order) {
-    const methodLabel =
-      TAB_PAYMENT_OPTIONS.find((o) => o.value === sale.order!.paymentMethod)?.label ?? sale.order.paymentMethod;
+    const methodLabel = paidWithLabel(sale.order.paymentMethod);
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="w-full max-w-sm animate-pop-in space-y-4 rounded-card border border-line bg-surface p-8 text-center">
@@ -330,9 +359,7 @@ export default function MesaDetailPage() {
           </p>
           <p className="text-3xl font-bold tracking-tight text-foreground">{formatCentsAsBRL(sale.order.totalCents)}</p>
           <p className="inline-block rounded-full bg-success/10 px-3 py-1 text-xs font-medium text-success">
-            {sale.order.paymentMethod === 'ON_ACCOUNT'
-              ? 'Lançado no fiado do cliente'
-              : `${sale.order.payment?.status === 'CONFIRMED' ? 'Pagamento confirmado' : 'Pagamento pendente'} · ${methodLabel}`}
+            {`${sale.order.payment?.status === 'CONFIRMED' ? 'Pagamento confirmado' : 'Pagamento pendente'} · ${methodLabel}`}
           </p>
           <Link href="/dashboard/mesas" className="block">
             <Button size="lg" fullWidth>
@@ -441,6 +468,9 @@ export default function MesaDetailPage() {
                       >
                         <span className="font-medium">{product.name}</span>
                         <span className="text-sm font-bold">{formatCentsAsBRL(Math.round(product.price * 100))}</span>
+                        {product.optionGroupIds.length > 0 && !full && (
+                          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-2xs font-semibold text-accent">Personalizar</span>
+                        )}
                         {full && <span className="text-xs text-muted-foreground">{MAX_UNITS_HINT}</span>}
                       </button>
                     );
@@ -462,10 +492,38 @@ export default function MesaDetailPage() {
                   {unsentLabel(draftUnits(draft))}
                 </p>
                 <ul className="space-y-2">
-                  {draft.map((line) => (
+                  {draft.map((line, index) => (
                     <li key={line.key} className="rounded-ctl border border-line bg-surface p-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium text-foreground">{line.name}</span>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-sm font-medium text-foreground">{line.name}</span>
+                          {line.options.length > 0 && (
+                            <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground" aria-label={`Adicionais de ${line.name}`}>
+                              {line.options.map((option) => (
+                                <li key={option.optionId}>
+                                  + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                                  {option.name}
+                                  {option.priceCents > 0 && (
+                                    <span className="text-subtle"> ({formatCentsAsBRL(option.priceCents * option.quantity)})</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {products.some((p) => p.id === line.productId && p.optionGroupIds.length > 0) && (
+                            <button
+                              type="button"
+                              onClick={() => editDraftLine(line.key)}
+                              disabled={isSending}
+                              aria-label={`Editar ${line.name}`}
+                              className="inline-flex items-center gap-1 text-xs text-accent underline touch:min-h-10 touch:px-2"
+                            >
+                              <Pencil className="h-3.5 w-3.5" aria-hidden />
+                              Editar
+                            </button>
+                          )}
                         <button
                           type="button"
                           onClick={() => updateDraft(setDraftQuantity(draft, line.key, 0))}
@@ -474,6 +532,7 @@ export default function MesaDetailPage() {
                         >
                           Remover
                         </button>
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -508,11 +567,14 @@ export default function MesaDetailPage() {
                             +
                           </button>
                         </div>
-                        <span className="text-sm font-semibold">{formatCentsAsBRL(line.unitPriceCents * line.quantity)}</span>
+                        <span className="text-sm font-semibold tabular-nums">
+                          {formatCentsAsBRL(draftQuote.quote?.items[index]?.subtotalCents ?? line.unitPriceCents * line.quantity)}
+                        </span>
                       </div>
                     </li>
                   ))}
                 </ul>
+                {draftQuote.error && <Alert>{draftQuote.error}</Alert>}
                 <Button size="lg" fullWidth loading={isSending} onClick={handleSendRound} icon={<Send className="h-4 w-4" />}>
                   {isSending ? 'Enviando...' : 'Enviar para a cozinha'}
                 </Button>
@@ -548,6 +610,19 @@ export default function MesaDetailPage() {
                             {item.roundNumber ? `Rodada ${item.roundNumber}` : 'Lançado antes das rodadas'}
                             {item.cancelledQuantity > 0 && !cancelled ? ` · ${item.cancelledQuantity} cancelado(s)` : ''}
                           </p>
+                          {(item.options ?? []).length > 0 && (
+                            <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground" aria-label={`Adicionais de ${item.name}`}>
+                              {item.options.map((option, i) => (
+                                <li key={`${option.optionId ?? option.name}-${i}`}>
+                                  + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                                  {option.name}
+                                  {option.unitPriceCents > 0 && (
+                                    <span className="text-subtle"> ({formatCentsAsBRL(option.unitPriceCents * option.quantity)})</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                           {item.notes && <p className="mt-0.5 text-xs text-warning">{item.notes}</p>}
                         </div>
                         <span
@@ -584,7 +659,17 @@ export default function MesaDetailPage() {
                             </Button>
                           )}
                         </div>
-                        <span className="text-sm font-semibold">{formatCentsAsBRL(item.subtotalCents)}</span>
+                        <span className="shrink-0 text-right text-sm font-semibold tabular-nums">
+                          {formatCentsAsBRL(item.subtotalCents)}
+                          <span className="block whitespace-nowrap text-2xs font-normal text-subtle">
+                            {formatCentsAsBRL(item.unitPriceCents)} un.
+                          </span>
+                          {(item.extrasCents ?? 0) > 0 && (
+                            <span className="block whitespace-nowrap text-2xs font-normal text-subtle">
+                              {formatCentsAsBRL(item.basePriceCents)} + {formatCentsAsBRL(item.extrasCents)} adic.
+                            </span>
+                          )}
+                        </span>
                       </div>
                     </li>
                   );
@@ -598,7 +683,8 @@ export default function MesaDetailPage() {
             </div>
             {draft.length > 0 && (
               <p className="-mt-2 text-right text-xs text-muted-foreground">
-                + {formatCentsAsBRL(draftTotalCents(draft))} no rascunho (ainda não enviado)
+                + {formatCentsAsBRL(draftQuote.quote?.subtotalCents ?? draftTotalCents(draft))} no rascunho (ainda não enviado
+                {draftQuote.quote ? '' : draftQuote.pending ? ', conferindo valores...' : ', valor estimado'})
               </p>
             )}
             {itemsNotDelivered(tab.items) > 0 && (
@@ -631,25 +717,7 @@ export default function MesaDetailPage() {
                 paymentMethod={paymentMethod}
                 onPaymentMethod={setPaymentMethod}
                 cashRegisterOpen={tab.branchCashRegisterOpen ?? false}
-                options={tabPaymentOptions(canLinkCustomer)}
-                customerPicked={saleCustomer !== null}
-                creditBlock={creditBlock}
-                creditSlot={
-                  paymentMethod === 'ON_ACCOUNT' && saleCustomer ? (
-                    <CreditTermsField
-                      customerId={saleCustomer.id}
-                      // What goes on account: the bill minus the cashback being used on it.
-                      totalCents={
-                        tab.totalCents -
-                        (validateCashbackToUse(cashbackInput, cashbackMaxCents) ? 0 : (parseCashbackToUse(cashbackInput) ?? 0))
-                      }
-                      value={creditTerms}
-                      onChange={setCreditTerms}
-                      onBlockChange={setCreditBlock}
-                      disabled={isSubmitting}
-                    />
-                  ) : null
-                }
+                options={TAB_PAYMENT_OPTIONS}
                 isSubmitting={isSubmitting}
                 onConfirm={handleCheckout}
                 onCancel={cancelCheckout}
@@ -692,6 +760,49 @@ export default function MesaDetailPage() {
           )}
         </div>
       )}
+      <ProductOptionsDialog
+        open={personalizing !== null}
+        product={personalizing?.product ?? null}
+        groups={personalizingGroups}
+        loading={optionGroupsQuery.isLoading}
+        initial={personalizing?.initial}
+        // 50 active units per product on the tab, the draft included (the edited line gives its own back).
+        maxQuantity={
+          personalizing && tab
+            ? MAX_UNITS_PER_PRODUCT -
+              tabUnitsOfProduct(
+                tab.items,
+                draft.filter((l) => l.key !== personalizing.editKey),
+                personalizing.product.id,
+              )
+            : 0
+        }
+        noteMax={300}
+        confirmLabel={personalizing?.editKey ? 'Salvar alterações' : 'Adicionar à rodada'}
+        onClose={() => setPersonalizing(null)}
+        onConfirm={(line) => {
+          if (personalizing?.editKey) {
+            updateDraft(
+              replaceDraftLine(draft, personalizing.editKey, {
+                name: line.name,
+                priceCents: line.unitPriceCents,
+                options: line.options,
+                notes: line.notes,
+                quantity: line.quantity,
+              }),
+            );
+          } else {
+            updateDraft(
+              addToDraft(
+                draft,
+                { id: line.productId, name: line.name, priceCents: line.unitPriceCents },
+                { options: line.options, notes: line.notes, quantity: line.quantity },
+              ),
+            );
+          }
+          setPersonalizing(null);
+        }}
+      />
       <TabItemCancelDialog
         item={cancelTarget}
         error={cancelError}
@@ -712,9 +823,6 @@ function CheckoutPanel({
   onPaymentMethod,
   cashRegisterOpen,
   options,
-  customerPicked,
-  creditBlock,
-  creditSlot,
   isSubmitting,
   onConfirm,
   onCancel,
@@ -723,21 +831,17 @@ function CheckoutPanel({
   itemCount: number;
   subtotalCents: number;
   totalCents: number;
-  paymentMethod: StaffPaymentMethod | null;
-  onPaymentMethod: (method: StaffPaymentMethod) => void;
+  paymentMethod: PaymentMethod | null;
+  onPaymentMethod: (method: PaymentMethod) => void;
   cashRegisterOpen: boolean;
-  // The ways of paying this user may offer (fiado only for who may sell on account).
-  options: { value: StaffPaymentMethod; label: string }[];
-  customerPicked: boolean;
-  creditBlock: string | null;
-  // Terms of the fiado, shown when that is the chosen way of paying.
-  creditSlot?: React.ReactNode;
+  // Money received now (cash, PIX, card): fiado is not offered any more.
+  options: { value: PaymentMethod; label: string }[];
   isSubmitting: boolean;
   onConfirm: () => void;
   onCancel: () => void;
   customerSlot?: React.ReactNode;
 }) {
-  const blockReason = checkoutBlockReason({ itemCount, paymentMethod, cashRegisterOpen, customerPicked, creditBlock });
+  const blockReason = checkoutBlockReason({ itemCount, paymentMethod, cashRegisterOpen });
   return (
     <div className="space-y-3 rounded-ctl border border-line bg-surface-2 p-3">
       <p className="text-sm font-semibold">Fechar conta</p>
@@ -783,14 +887,11 @@ function CheckoutPanel({
         ))}
       </fieldset>
 
-      {creditSlot}
-
-      {/* The credit reasons are already shown inside the fiado box. */}
-      {blockReason && paymentMethod && !(creditSlot && blockReason === creditBlock) && <p className="text-xs text-warning">{blockReason}</p>}
+      {blockReason && paymentMethod && <p className="text-xs text-warning">{blockReason}</p>}
 
       <div className="flex gap-2">
         <Button className="flex-1" loading={isSubmitting} disabled={blockReason !== null} onClick={onConfirm}>
-          {isSubmitting ? 'Processando...' : paymentMethod === 'ON_ACCOUNT' ? 'Lançar no fiado' : 'Confirmar pagamento'}
+          {isSubmitting ? 'Processando...' : 'Confirmar pagamento'}
         </Button>
         <Button variant="outline" disabled={isSubmitting} onClick={onCancel}>
           Cancelar

@@ -7,6 +7,7 @@ import { OrderDetailDto } from '../orders/dto/order-admin-response.dto';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { CreatePosOrderDto } from './dto/create-pos-order.dto';
 import { PosCouponPreviewDto } from '../coupons/dto/coupons.dto';
+import { QuoteItemsDto } from '../order-creation/dto/order-line.dto';
 
 @Injectable()
 export class PosOrdersService {
@@ -25,7 +26,6 @@ export class PosOrdersService {
     await this.branchAccess.assertAccess(user, dto.branchId);
     if (dto.couponCode) this.assertCanApplyCoupon(user);
     if (dto.cashbackToUseCents) this.assertCanUseCashback(user);
-    if (dto.paymentMethod === 'ON_ACCOUNT') this.assertCanSellOnAccount(user);
     const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
 
     const order = await this.orderCreation.createOrder({
@@ -41,7 +41,6 @@ export class PosOrdersService {
       customerId: customer?.id ?? null,
       couponCode: dto.couponCode ?? null,
       cashbackToUseCents: dto.cashbackToUseCents ?? null,
-      creditTerms: dto.paymentMethod === 'ON_ACCOUNT' ? (dto.creditTerms ?? null) : null,
       fulfillmentType: 'PICKUP',
       address: null,
       paymentMethod: dto.paymentMethod,
@@ -50,6 +49,12 @@ export class PosOrdersService {
     });
 
     return this.ordersService.findOneForTenant(user.tenantId, order.id);
+  }
+
+  // Read-only: what the basket costs right now, line by line (add-ons included), priced by the
+  // same code as the sale. The PDV shows this instead of its own sums; the sale prices it again.
+  quote(user: AuthenticatedRequestUser, dto: QuoteItemsDto) {
+    return this.orderCreation.quoteItems(user.tenantId, dto.items);
   }
 
   // Read-only: the same pricing and the same rules as createOrder(), nothing consumed or locked.
@@ -65,14 +70,6 @@ export class PosOrdersService {
       couponCode: dto.code,
       customerId: customer?.id ?? null,
     });
-  }
-
-  // Selling on account (fiado) is a permission of its own (receivables.sell): it puts the
-  // restaurant's money at risk, which a plain sale does not.
-  private assertCanSellOnAccount(user: AuthenticatedRequestUser) {
-    if (!user.permissions.includes('receivables.sell')) {
-      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para vender fiado.' });
-    }
   }
 
   // Spending a customer's cashback is a permission of its own (cashback.use).

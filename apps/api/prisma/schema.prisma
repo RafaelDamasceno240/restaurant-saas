@@ -60,48 +60,54 @@ model Tenant {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
-  branches             Branch[]
-  users                User[]
-  userRoles            UserRole[]
-  auditLogs            AuditLog[]
-  categories           Category[]
-  products             Product[]
-  orders               Order[]
-  deliveries           Delivery[]
-  cashSessions         CashRegisterSession[]
-  cashMovements        CashMovement[]
-  diningTables         DiningTable[]
-  tabs                 Tab[]
-  tabRounds            TabRound[]
-  tabItemCancellations TabItemCancellation[]
-  payments             Payment[]
-  inventoryItems       InventoryItem[]
-  inventoryBalances    InventoryBalance[]
-  stockMovements       StockMovement[]
-  suppliers            Supplier[]
-  customers            Customer[]
-  coupons              Coupon[]
-  couponRedemptions    CouponRedemption[]
-  purchases            Purchase[]
-  purchaseSequence     PurchaseSequence?
-  productRecipes       ProductRecipe[]
-  inventoryCounts      InventoryCount[]
-  loyaltyProgram       LoyaltyProgram?
-  loyaltyRewards       LoyaltyReward[]
-  loyaltyAccounts      LoyaltyAccount[]
-  loyaltyEntries       LoyaltyEntry[]
-  cashbackProgram      CashbackProgram?
-  cashbackAccounts     CashbackAccount[]
-  cashbackEntries      CashbackEntry[]
-  creditAccounts       CreditAccount[]
-  receivables          Receivable[]
-  receivableEntries    ReceivableEntry[]
-  mediaAssets          MediaAsset[]
-  optionGroups         OptionGroup[]
-  optionItems          OptionItem[]
-  productOptionGroups  ProductOptionGroup[]
-  logoMedia            MediaAsset?           @relation("TenantLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
-  coverMedia           MediaAsset?           @relation("TenantCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
+  branches              Branch[]
+  users                 User[]
+  userRoles             UserRole[]
+  auditLogs             AuditLog[]
+  categories            Category[]
+  products              Product[]
+  orders                Order[]
+  deliveries            Delivery[]
+  cashSessions          CashRegisterSession[]
+  cashMovements         CashMovement[]
+  diningTables          DiningTable[]
+  tabs                  Tab[]
+  tabRounds             TabRound[]
+  tabItemCancellations  TabItemCancellation[]
+  payments              Payment[]
+  inventoryItems        InventoryItem[]
+  inventoryBalances     InventoryBalance[]
+  stockMovements        StockMovement[]
+  suppliers             Supplier[]
+  customers             Customer[]
+  coupons               Coupon[]
+  couponRedemptions     CouponRedemption[]
+  purchases             Purchase[]
+  purchaseSequence      PurchaseSequence?
+  productRecipes        ProductRecipe[]
+  inventoryCounts       InventoryCount[]
+  loyaltyProgram        LoyaltyProgram?
+  loyaltyRewards        LoyaltyReward[]
+  loyaltyAccounts       LoyaltyAccount[]
+  loyaltyEntries        LoyaltyEntry[]
+  cashbackProgram       CashbackProgram?
+  cashbackAccounts      CashbackAccount[]
+  cashbackEntries       CashbackEntry[]
+  creditAccounts        CreditAccount[]
+  receivables           Receivable[]
+  receivableEntries     ReceivableEntry[]
+  mediaAssets           MediaAsset[]
+  optionGroups          OptionGroup[]
+  optionItems           OptionItem[]
+  productOptionGroups   ProductOptionGroup[]
+  whatsappConnection    WhatsappConnection?
+  whatsappContacts      WhatsappContact[]
+  whatsappConversations WhatsappConversation[]
+  whatsappMessages      WhatsappMessage[]
+  whatsappJobs          WhatsappJob[]
+  whatsappCheckoutLinks WhatsappCheckoutLink[]
+  logoMedia             MediaAsset?            @relation("TenantLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+  coverMedia            MediaAsset?            @relation("TenantCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
 
   @@map("tenants")
 }
@@ -176,30 +182,32 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userRoles            UserRole[]
-  userBranches         UserBranch[]
-  refreshTokens        RefreshToken[]
-  auditLogs            AuditLog[]
-  dispatchedDeliveries Delivery[]            @relation("DeliveryDispatchedBy")
-  completedDeliveries  Delivery[]            @relation("DeliveryCompletedBy")
-  courierDeliveries    Delivery[]            @relation("DeliveryCourier")
-  openedCashSessions   CashRegisterSession[] @relation("CashSessionOpenedBy")
-  closedCashSessions   CashRegisterSession[] @relation("CashSessionClosedBy")
-  cashMovements        CashMovement[]
-  stockMovements       StockMovement[]
-  inventoryCounts      InventoryCount[]
-  createdPurchases     Purchase[]            @relation("PurchaseCreatedBy")
-  receivedPurchases    Purchase[]            @relation("PurchaseReceivedBy")
-  cancelledPurchases   Purchase[]            @relation("PurchaseCancelledBy")
-  loyaltyEntries       LoyaltyEntry[]
-  cashbackEntries      CashbackEntry[]
-  createdReceivables   Receivable[]
-  receivableEntries    ReceivableEntry[]
-  sentTabRounds        TabRound[]            @relation("TabRoundSentBy")
-  sentTabItems         TabItem[]             @relation("TabItemSentBy")
-  tabItemCancellations TabItemCancellation[] @relation("TabItemCancelledBy")
-  platformAdmin        PlatformAdmin?
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userRoles             UserRole[]
+  userBranches          UserBranch[]
+  refreshTokens         RefreshToken[]
+  auditLogs             AuditLog[]
+  dispatchedDeliveries  Delivery[]             @relation("DeliveryDispatchedBy")
+  completedDeliveries   Delivery[]             @relation("DeliveryCompletedBy")
+  courierDeliveries     Delivery[]             @relation("DeliveryCourier")
+  openedCashSessions    CashRegisterSession[]  @relation("CashSessionOpenedBy")
+  closedCashSessions    CashRegisterSession[]  @relation("CashSessionClosedBy")
+  cashMovements         CashMovement[]
+  stockMovements        StockMovement[]
+  inventoryCounts       InventoryCount[]
+  createdPurchases      Purchase[]             @relation("PurchaseCreatedBy")
+  receivedPurchases     Purchase[]             @relation("PurchaseReceivedBy")
+  cancelledPurchases    Purchase[]             @relation("PurchaseCancelledBy")
+  loyaltyEntries        LoyaltyEntry[]
+  cashbackEntries       CashbackEntry[]
+  createdReceivables    Receivable[]
+  receivableEntries     ReceivableEntry[]
+  sentTabRounds         TabRound[]             @relation("TabRoundSentBy")
+  sentTabItems          TabItem[]              @relation("TabItemSentBy")
+  tabItemCancellations  TabItemCancellation[]  @relation("TabItemCancelledBy")
+  platformAdmin         PlatformAdmin?
+  whatsappConversations WhatsappConversation[] @relation("WhatsappAssignedUser")
+  whatsappMessages      WhatsappMessage[]      @relation("WhatsappMessageAuthorUser")
 
   @@index([tenantId])
   @@map("users")
@@ -431,6 +439,7 @@ model OptionItem {
   group      OptionGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
   imageMedia MediaAsset?       @relation("OptionImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
   orderLines OrderItemOption[]
+  tabLines   TabItemOption[]
 
   @@unique([tenantId, externalId])
   @@index([groupId])
@@ -884,11 +893,32 @@ model TabItem {
   sentBy        User?                 @relation("TabItemSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
   cancellations TabItemCancellation[]
   orderItem     OrderItem?
+  options       TabItemOption[]
 
   @@index([tabId])
   @@index([productId])
   @@index([roundId])
   @@map("tab_items")
+}
+
+// The add-ons chosen for ONE unit of a tab item, frozen when its round was sent (migration 22).
+// Same rule as OrderItemOption: unitPriceCentsSnapshot of the item already includes them, and the
+// table checkout copies them to the sale's order lines.
+model TabItemOption {
+  id                 String  @id @default(uuid())
+  tabItemId          String
+  optionItemId       String?
+  groupNameSnapshot  String
+  optionNameSnapshot String
+  unitPriceCents     Int
+  quantity           Int
+
+  tabItem    TabItem     @relation(fields: [tabItemId], references: [id], onDelete: Cascade)
+  optionItem OptionItem? @relation(fields: [optionItemId], references: [id], onDelete: SetNull)
+
+  @@index([tabItemId])
+  @@index([optionItemId])
+  @@map("tab_item_options")
 }
 
 // B9: one cancellation of some units of a tab item - who, when, why, how many, in which state
@@ -1682,4 +1712,240 @@ model ReceivablePaymentAllocation {
   @@unique([entryId, installmentId])
   @@index([installmentId])
   @@map("receivable_payment_allocations")
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp assistant (assistente-whatsapp, 2026-11-12). One connection per restaurant, in the
+// shape of the WhatsApp Business Platform Cloud API (a phone number id of a WhatsApp Business
+// Account). SIMULATED connections never leave this server: the panel's simulator feeds them and
+// their replies are only stored. Sending through the Cloud API also needs WHATSAPP_CLOUD_ENABLED.
+// ---------------------------------------------------------------------------
+
+enum WhatsappConnectionMode {
+  SIMULATED
+  CLOUD
+}
+
+enum WhatsappConversationStatus {
+  // The assistant answers.
+  AI
+  // A person of the restaurant answers; the assistant stays quiet until it is given back.
+  HUMAN
+}
+
+enum WhatsappMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WhatsappMessageAuthor {
+  CUSTOMER
+  ASSISTANT
+  AGENT
+  SYSTEM
+}
+
+enum WhatsappMessageStatus {
+  RECEIVED
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum WhatsappJobType {
+  // Answer what a conversation has not been answered yet (assistant).
+  REPLY
+  // Hand one outbound message to the provider.
+  SEND
+}
+
+enum WhatsappJobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+model WhatsappConnection {
+  id                   String                 @id @default(uuid())
+  tenantId             String                 @unique
+  mode                 WhatsappConnectionMode @default(SIMULATED)
+  // Cloud API "phone_number_id": how a webhook finds its restaurant. Unique across the platform.
+  phoneNumberId        String                 @unique
+  displayPhoneNumber   String
+  wabaId               String?
+  // Cloud API access token, AES-256-GCM with WHATSAPP_TOKEN_ENCRYPTION_KEY. NULL when simulated.
+  accessTokenEncrypted String?
+  assistantEnabled     Boolean                @default(false)
+  greetingMessage      String?
+  // What the restaurant tells the assistant about its tone and rules (never prices: those come
+  // only from the catalogue).
+  behaviorInstructions String?
+  // Cost control: assistant replies per restaurant per day (restaurant time zone).
+  aiDailyReplyLimit    Int                    @default(300)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contacts WhatsappContact[]
+
+  @@map("whatsapp_connections")
+}
+
+model WhatsappContact {
+  id            String    @id @default(uuid())
+  tenantId      String
+  connectionId  String
+  // The customer's WhatsApp id (digits of the number, country code included).
+  waId          String
+  profileName   String?
+  // The customer asked not to receive messages ("parar"): nothing is sent to them any more.
+  optedOutAt    DateTime?
+  lastInboundAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection   WhatsappConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation?
+
+  @@unique([connectionId, waId])
+  @@index([tenantId])
+  @@map("whatsapp_contacts")
+}
+
+model WhatsappConversation {
+  id                          String                     @id @default(uuid())
+  tenantId                    String
+  contactId                   String                     @unique
+  status                      WhatsappConversationStatus @default(AI)
+  assignedUserId              String?
+  // The cart being put together: product and add-on ids with quantities only. Prices are always
+  // asked again from OrderCreationService.priceItems, never stored here.
+  cart                        Json?
+  cartVersion                 Int                        @default(0)
+  // Version of the cart whose summary was shown and waits for the customer's "sim".
+  awaitingConfirmationVersion Int?
+  // The local assistant's dialogue state (e.g. a product waiting for a required choice).
+  dialogState                 Json?
+  // Lease of the worker answering it, so one conversation is never answered twice at once.
+  processingUntil             DateTime?
+  lastInboundAt               DateTime?
+  lastMessageAt               DateTime?
+  unreadCount                 Int                        @default(0)
+  aiFailures                  Int                        @default(0)
+  createdAt                   DateTime                   @default(now())
+  updatedAt                   DateTime                   @updatedAt
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact       WhatsappContact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedUser  User?                  @relation("WhatsappAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  messages      WhatsappMessage[]
+  jobs          WhatsappJob[]
+  checkoutLinks WhatsappCheckoutLink[]
+
+  @@index([tenantId, lastMessageAt])
+  @@map("whatsapp_conversations")
+}
+
+model WhatsappMessage {
+  id                String                   @id @default(uuid())
+  tenantId          String
+  conversationId    String
+  direction         WhatsappMessageDirection
+  author            WhatsappMessageAuthor
+  authorUserId      String?
+  // Cloud API message id (wamid). Unique per restaurant: a webhook delivered twice stores once.
+  providerMessageId String?
+  type              String                   @default("text")
+  body              String
+  status            WhatsappMessageStatus
+  // When the customer sent it (webhook timestamp) or when we created it. Orders the thread, so a
+  // message delivered late still lands in its place.
+  providerTimestamp DateTime
+  // An assistant reply points at the last customer message it answers: UNIQUE, so the same
+  // messages are never answered twice, even when a job runs again.
+  inReplyToId       String?                  @unique
+  // When a customer message was answered (or left to a person).
+  handledAt         DateTime?
+  errorCode         String?
+  errorMessage      String?
+  aiProvider        String?
+  aiModel           String?
+  inputTokens       Int?
+  outputTokens      Int?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorUser   User?                @relation("WhatsappMessageAuthorUser", fields: [authorUserId], references: [id], onDelete: SetNull)
+  inReplyTo    WhatsappMessage?     @relation("WhatsappReply", fields: [inReplyToId], references: [id], onDelete: SetNull)
+  reply        WhatsappMessage?     @relation("WhatsappReply")
+
+  @@unique([tenantId, providerMessageId])
+  @@index([conversationId, providerTimestamp])
+  @@index([tenantId, author, createdAt])
+  @@map("whatsapp_messages")
+}
+
+// A webhook delivery as received. The payload itself is not kept: only its hash and what it
+// carried (LGPD: the messages live in whatsapp_messages, nowhere else).
+model WhatsappWebhookEvent {
+  id            String    @id @default(uuid())
+  payloadHash   String    @unique
+  messagesCount Int       @default(0)
+  statusesCount Int       @default(0)
+  duplicates    Int       @default(0)
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
+  error         String?
+
+  @@map("whatsapp_webhook_events")
+}
+
+// The queue: durable rows claimed with FOR UPDATE SKIP LOCKED and retried with backoff.
+model WhatsappJob {
+  id             String            @id @default(uuid())
+  tenantId       String
+  conversationId String
+  messageId      String?
+  type           WhatsappJobType
+  status         WhatsappJobStatus @default(PENDING)
+  attempts       Int               @default(0)
+  maxAttempts    Int               @default(5)
+  runAt          DateTime          @default(now())
+  lockedAt       DateTime?
+  lastError      String?
+  // The same work is queued once ("reply:<message id>", "send:<message id>").
+  dedupeKey      String            @unique
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@map("whatsapp_jobs")
+}
+
+// A link that opens the existing public checkout with the cart put together on WhatsApp. Only the
+// SHA-256 of the token is stored. Nothing is ordered until the customer confirms in the checkout.
+model WhatsappCheckoutLink {
+  id             String    @id @default(uuid())
+  tenantId       String
+  conversationId String
+  tokenHash      String    @unique
+  cart           Json
+  expiresAt      DateTime
+  openedAt       DateTime?
+  createdAt      DateTime  @default(now())
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("whatsapp_checkout_links")
 }

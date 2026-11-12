@@ -1,6 +1,6 @@
 import { apiFetch } from './api-client';
 import { PaymentMethod, StaffPaymentMethod } from './checkout-api';
-import type { CreditTerms } from './receivables-api';
+import type { ItemsQuote } from './staff-addons';
 
 export type TabStatus = 'OPEN' | 'CLOSED';
 
@@ -8,11 +8,24 @@ export type TabStatus = 'OPEN' | 'CLOSED';
 // CANCELLED = every unit cancelled.
 export type TabItemStatus = 'SENT' | 'PREPARING' | 'READY' | 'SERVED' | 'CANCELLED';
 
+// An add-on of ONE unit of a tab item, frozen when its round was sent.
+export interface TabItemOption {
+  optionId: string | null;
+  group: string;
+  name: string;
+  unitPriceCents: number;
+  quantity: number;
+}
+
 export interface TabItem {
   id: string;
   productId: string;
   name: string;
+  // One unit as sent, add-ons included, and its two parts (the product, the add-ons).
   unitPriceCents: number;
+  basePriceCents: number;
+  extrasCents: number;
+  options: TabItemOption[];
   quantity: number;
   // B9: units cancelled so far, and the ones still due (what subtotalCents charges).
   cancelledQuantity: number;
@@ -60,7 +73,7 @@ export interface TabSale {
   status: string;
   paymentMethod: StaffPaymentMethod;
   totalCents: number;
-  // null for a bill put on account (fiado): nothing was received, the debt is in contas a receber.
+  // null only for a fiado bill from before remocao-fiado: nothing was received then.
   payment: {
     status: 'PENDING' | 'CONFIRMED' | 'FAILED';
     method: PaymentMethod;
@@ -71,10 +84,9 @@ export interface TabSale {
 
 // No amount field: the backend always charges the sum of the tab's snapshots.
 export interface CheckoutTabInput {
-  paymentMethod: StaffPaymentMethod;
+  // Money received now; the API refuses fiado (ON_ACCOUNT) since remocao-fiado.
+  paymentMethod: PaymentMethod;
   idempotencyKey: string;
-  // Only with paymentMethod ON_ACCOUNT (needs receivables.sell and a customerId).
-  creditTerms?: CreditTerms;
   // A customer of the registry the sale belongs to (needs customers.read). Only the id travels.
   customerId?: string;
   // Cents of that customer's cashback balance to spend on this sale (needs cashback.use).
@@ -92,7 +104,15 @@ export interface OpenTabInput {
 // and re-sent on retries: the API then returns the round it already made.
 export interface SendRoundInput {
   idempotencyKey: string;
-  items: { productId: string; quantity: number; notes?: string }[];
+  items: RoundItemInput[];
+}
+
+// One line of a round: product, quantity, the add-ons of each unit (ids and quantities) and the note.
+export interface RoundItemInput {
+  productId: string;
+  quantity: number;
+  options?: { optionId: string; quantity: number }[];
+  notes?: string;
 }
 
 // B9: cancelling units of a sent item. returnToStock only matters for an item in preparation or
@@ -113,6 +133,9 @@ export const tabsApi = {
     apiFetch<Tab>('/tabs', { method: 'POST', body: input, accessToken: token }),
   sendRound: (token: string, tabId: string, input: SendRoundInput) =>
     apiFetch<Tab>(`/tabs/${tabId}/rounds`, { method: 'POST', body: input, accessToken: token }),
+  // Read-only: what the draft costs right now, add-ons included, priced by the server.
+  quoteRound: (token: string, tabId: string, items: RoundItemInput[]) =>
+    apiFetch<ItemsQuote>(`/tabs/${tabId}/rounds/quote`, { method: 'POST', body: { items }, accessToken: token }),
   cancelItem: (token: string, tabId: string, itemId: string, input: CancelTabItemInput) =>
     apiFetch<Tab>(`/tabs/${tabId}/items/${itemId}/cancel`, { method: 'POST', body: input, accessToken: token }),
   serveItem: (token: string, tabId: string, itemId: string) =>

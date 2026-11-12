@@ -1,8 +1,9 @@
 import { apiFetch } from './api-client';
 
-// Fiado / contas a receber. Money is integer cents; dates of installments are calendar days
-// ('YYYY-MM-DD') in the restaurant's time zone. Limits, what is overdue and what a payment
-// settles are all decided by the API: nothing here is computed on the client.
+// Contas a receber of the fiado sold BEFORE remocao-fiado (2026-11-12): fiado is no longer sold and
+// no screen grants credit or opens a debt. What exists is listed, received, reversed and cancelled
+// here. Money is integer cents; installment dates are calendar days ('YYYY-MM-DD') in the
+// restaurant's time zone. What is overdue and what a payment settles are decided by the API.
 
 export type ReceivableStatus = 'OPEN' | 'PAID' | 'CANCELLED';
 export type ReceivableStatusFilter = 'open' | 'overdue' | 'paid' | 'cancelled' | 'all';
@@ -12,13 +13,9 @@ export type ReceivableEntryType = 'CHARGE' | 'PAYMENT' | 'REVERSAL';
 
 export interface CreditAccount {
   customerId: string;
-  // 0 = this customer does not buy on account.
-  creditLimitCents: number;
-  // What the customer owes now.
+  // What the customer still owes from before.
   balanceCents: number;
-  availableCents: number;
   overdueCents: number;
-  canBuyOnAccount: boolean;
 }
 
 export interface ReceivableInstallment {
@@ -91,11 +88,6 @@ export interface ReceivablesPage {
   today: string;
 }
 
-export interface CreditTerms {
-  installments: number;
-  firstDueDate: string;
-}
-
 export interface ListReceivablesParams {
   status?: ReceivableStatusFilter;
   customerId?: string;
@@ -121,17 +113,6 @@ export const receivablesApi = {
 
   getAccount: (token: string, customerId: string) =>
     apiFetch<CreditAccount>(`/receivables/customers/${customerId}`, { accessToken: token }),
-  setLimit: (token: string, customerId: string, creditLimitCents: number) =>
-    apiFetch<CreditAccount>(`/receivables/customers/${customerId}/limit`, {
-      method: 'PUT',
-      body: { creditLimitCents },
-      accessToken: token,
-    }),
-
-  create: (
-    token: string,
-    input: { customerId: string; branchId: string; description: string; totalCents: number; idempotencyKey: string } & CreditTerms,
-  ) => apiFetch<ReceivableDetail>('/receivables', { method: 'POST', body: input, accessToken: token }),
 
   pay: (
     token: string,

@@ -25,8 +25,7 @@ import { isCouponError } from '../coupons/coupon-errors';
 import { OrderEffectsService } from '../order-effects/order-effects.service';
 import { CashbackService } from '../cashback/cashback.service';
 import { isCashbackError } from '../cashback/cashback-errors';
-import { CreditTerms, ReceivablesService } from '../receivables/receivables.service';
-import { isReceivableError } from '../receivables/receivable-errors';
+import { onAccountDisabled } from '../../common/util/payment-methods';
 import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import { MAX_UNITS_PER_PRODUCT, productOverUnitLimit } from '../../common/util/item-quantity.util';
 import {
@@ -52,10 +51,33 @@ export interface OrderCreationItemInput {
   notes?: string | null;
 }
 
-// How priceItems treats the add-ons. The public checkout offers them and must satisfy every
-// required group; the PDV does not offer them yet (the product is sold at its base price).
+// How priceItems treats the add-ons. Every channel offers them now (public checkout, PDV, table
+// rounds), so every sale must satisfy each required group of its products.
 export interface PriceItemsOptions {
   enforceRequiredOptions: boolean;
+  // The table rounds check the 50-units limit themselves, over the whole tab, under the tab lock.
+  skipUnitLimit?: boolean;
+  // The single "unavailable" answer, worded for the caller ("do pedido" / "da rodada").
+  unavailableMessage?: string;
+}
+
+// What a basket costs right now, line by line, as the server prices it (POST /pos/orders/quote
+// and /tabs/:id/rounds/quote). Read-only: nothing is reserved, and the sale prices it all again.
+export interface QuotedLine {
+  productId: string;
+  name: string;
+  quantity: number;
+  basePriceCents: number;
+  extrasCents: number;
+  unitPriceCents: number;
+  subtotalCents: number;
+  notes: string | null;
+  options: { optionId: string | null; group: string; name: string; unitPriceCents: number; quantity: number }[];
+}
+
+export interface ItemsQuote {
+  items: QuotedLine[];
+  subtotalCents: number;
 }
 
 export interface OrderCreationAddressInput {
@@ -107,11 +129,6 @@ export interface OrderCreationInput {
   // LOCKED balance, inside the order transaction: asking for more than the balance or more than
   // the items cost refuses the whole order.
   cashbackToUseCents?: number | null;
-  // Fase 11 (fatia 6): how a sale ON_ACCOUNT (fiado) is to be paid back - installments and
-  // first due date. Ignored for any other payment method; when absent, one installment due in
-  // 30 days. Only the staff flows (PDV, table checkout) sell on account, after checking
-  // receivables.sell; the customer's limit is checked here, on the locked credit account.
-  creditTerms?: CreditTerms | null;
   idempotencyKey?: string;
 }
 
@@ -178,10 +195,11 @@ export class OrderCreationService {
     private readonly coupons: CouponRedemptionService,
     private readonly effects: OrderEffectsService,
     private readonly cashback: CashbackService,
-    private readonly receivables: ReceivablesService,
   ) {}
 
   async createOrder(rawInput: OrderCreationInput): Promise<OrderWithItems> {
+    // Selling on account (fiado) is off for every channel, whatever a caller sends.
+    if (rawInput.paymentMethod === 'ON_ACCOUNT') throw onAccountDisabled();
     // One canonical spelling from here on: the replay comparison, the lock and the snapshot all
     // see "PROMO10" whatever was typed. An empty code means no coupon.
     const couponCode = rawInput.couponCode ? normalizeCouponCode(rawInput.couponCode) || null : null;
@@ -200,7 +218,7 @@ export class OrderCreationService {
     }
 
     const pricedItems = await this.priceItems(input.tenantId, input.items, {
-      enforceRequiredOptions: input.source === 'ONLINE',
+      enforceRequiredOptions: true,
     });
 
     let result: OrderCreationResult;
@@ -218,10 +236,7 @@ export class OrderCreationService {
       // it really is the same request) and never a spurious "coupon used up".
       if (
         input.idempotencyKey &&
-        (this.isIdempotencyKeyViolation(error) ||
-          isCouponError(error) ||
-          isCashbackError(error) ||
-          isReceivableError(error))
+        (this.isIdempotencyKeyViolation(error) || isCouponError(error) || isCashbackError(error))
       ) {
         const replay = await this.findReplay(input);
         if (replay) return replay;
@@ -244,7 +259,7 @@ export class OrderCreationService {
   async priceItems(
     tenantId: string,
     items: OrderCreationItemInput[],
-    { enforceRequiredOptions }: PriceItemsOptions = { enforceRequiredOptions: false },
+    { enforceRequiredOptions, skipUnitLimit, unavailableMessage }: PriceItemsOptions = { enforceRequiredOptions: true },
   ): Promise<PricedOrderItem[]> {
     const productIds = [...new Set(items.map((i) => i.productId))];
     const products = await this.prisma.product.findMany({
@@ -272,12 +287,12 @@ export class OrderCreationService {
     if (unavailable) {
       throw new BadRequestException({
         code: 'PRODUCT_UNAVAILABLE',
-        message: 'Um ou mais produtos do pedido não estão mais disponíveis.',
+        message: unavailableMessage ?? 'Um ou mais produtos do pedido não estão mais disponíveis.',
       });
     }
 
     // B7: the DTO caps each line; the same product repeated over several lines is added up here.
-    const overLimit = productOverUnitLimit(items);
+    const overLimit = skipUnitLimit ? null : productOverUnitLimit(items);
     if (overLimit) {
       throw new BadRequestException({
         code: 'QUANTITY_LIMIT',
@@ -317,7 +332,7 @@ export class OrderCreationService {
     enforceRequiredOptions?: boolean;
   }) {
     const priced = await this.priceItems(input.tenantId, input.items, {
-      enforceRequiredOptions: input.enforceRequiredOptions ?? false,
+      enforceRequiredOptions: input.enforceRequiredOptions ?? true,
     });
     const subtotalCents = priced.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
     const applied = await this.coupons.preview({
@@ -334,6 +349,38 @@ export class OrderCreationService {
       discountCents: applied.discountCents,
       subtotalAfterDiscountCents: subtotalCents - applied.discountCents,
     };
+  }
+
+  // Read-only: the price of each line (base, add-ons, unit, subtotal) and of the basket, with the
+  // same pricing and the same refusals as the sale (unavailable product or add-on, required group,
+  // limits). The screens show THIS, not their own sums; the sale re-prices everything anyway.
+  async quoteItems(
+    tenantId: string,
+    items: OrderCreationItemInput[],
+    options: Omit<PriceItemsOptions, 'enforceRequiredOptions'> = {},
+  ): Promise<ItemsQuote> {
+    const priced = await this.priceItems(tenantId, items, { ...options, enforceRequiredOptions: true });
+    const lines = priced.map((item): QuotedLine => {
+      const extrasCents = (item.options ?? []).reduce((sum, o) => sum + o.unitPriceCents * o.quantity, 0);
+      return {
+        productId: item.productId,
+        name: item.productNameSnapshot,
+        quantity: item.quantity,
+        basePriceCents: item.unitPriceCents - extrasCents,
+        extrasCents,
+        unitPriceCents: item.unitPriceCents,
+        subtotalCents: item.unitPriceCents * item.quantity,
+        notes: item.notes ?? null,
+        options: (item.options ?? []).map((o) => ({
+          optionId: o.optionItemId,
+          group: o.groupNameSnapshot,
+          name: o.optionNameSnapshot,
+          unitPriceCents: o.unitPriceCents,
+          quantity: o.quantity,
+        })),
+      };
+    });
+    return { items: lines, subtotalCents: lines.reduce((sum, line) => sum + line.subtotalCents, 0) };
   }
 
   private isIdempotencyKeyViolation(error: unknown): boolean {
@@ -389,13 +436,7 @@ export class OrderCreationService {
       existing.couponCode === (input.couponCode ?? null) &&
       existing.cashbackUsedCents === (input.cashbackToUseCents ?? 0) &&
       signature(existing.items) === signature(requested);
-    // A sale on account is also defined by how it is to be paid back: the same key with other
-    // installments or another due date is another request, not a repetition.
-    const sameTerms =
-      !sameRequest ||
-      existing.paymentMethod !== 'ON_ACCOUNT' ||
-      (await this.receivables.saleHasTerms(input.tenantId, existing.id, input.creditTerms ?? null));
-    if (!sameRequest || !sameTerms) {
+    if (!sameRequest) {
       throw new ConflictException({
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: 'Esta chave de idempotência já foi usada em outro pedido.',
@@ -405,6 +446,8 @@ export class OrderCreationService {
   }
 
   async createPricedOrderInTx(tx: Prisma.TransactionClient, input: PricedOrderInput): Promise<OrderCreationResult> {
+    // Same rule as createOrder, for the callers that come straight here (table checkout).
+    if (input.paymentMethod === 'ON_ACCOUNT') throw onAccountDisabled();
     const orderItemsData = input.items.map((item) => ({
       productId: item.productId,
       productNameSnapshot: item.productNameSnapshot,
@@ -475,22 +518,6 @@ export class OrderCreationService {
       throw orderTotalTooLarge();
     }
 
-    // Fase 11 (fatia 6): a sale on account is reserved AFTER the cashback (fixed lock order:
-    // cash -> coupon -> cashback account -> credit account) and BEFORE the order exists: the
-    // customer's credit account is locked FOR UPDATE and the total is checked against the limit
-    // it really has left. The receivable itself is opened right after the order is created,
-    // below, in this same transaction.
-    const creditReservation =
-      input.paymentMethod === 'ON_ACCOUNT'
-        ? await this.receivables.reserveSaleInTx(tx, {
-            tenantId: input.tenantId,
-            customerId: input.customerId ?? null,
-            totalCents,
-            terms: input.creditTerms ?? null,
-            actorUserId: input.recordCashSaleByUserId ?? null,
-          })
-        : null;
-
     const order = await tx.order.create({
       data: {
         tenantId: input.tenantId,
@@ -537,11 +564,6 @@ export class OrderCreationService {
     // without its order.
     if (reservation) {
       await this.cashback.commitUseInTx(tx, reservation, order.id);
-    }
-
-    // The debt points at the sale that created it: no sale on account without its receivable.
-    if (creditReservation) {
-      await this.receivables.commitSaleInTx(tx, creditReservation, order);
     }
 
     // A DELIVERY order always has its operational record, created in the same
