@@ -34,7 +34,6 @@ const FIELD_LABELS: Record<string, string> = {
   courierUserId: 'entregador',
   cpf: 'CPF',
   creditLimitCents: 'limite de crédito',
-  creditTerms: 'condições do fiado',
   currentPassword: 'senha atual',
   customer: 'cliente',
   customerId: 'cliente',
@@ -132,7 +131,6 @@ const FIELD_LABELS: Record<string, string> = {
 const PARENT_LABELS: Record<string, string> = {
   customer: 'do cliente',
   address: 'do endereço',
-  creditTerms: 'do fiado',
 };
 
 // class-validator's own messages read "<property> must ...", "property x should not exist",

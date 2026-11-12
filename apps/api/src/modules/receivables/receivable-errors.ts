@@ -1,5 +1,4 @@
 import { BadRequestException, ConflictException, HttpException, NotFoundException } from '@nestjs/common';
-import { TermsProblem } from './receivable-calculations';
 
 // Another tenant's (or another branch's) receivable is "not found": nothing leaks.
 export function receivableNotFound() {
@@ -8,55 +7,6 @@ export function receivableNotFound() {
 
 export function receivableEntryNotFound() {
   return new NotFoundException({ code: 'RECEIVABLE_ENTRY_NOT_FOUND', message: 'Movimentação não encontrada.' });
-}
-
-export function creditCustomerRequired() {
-  return new BadRequestException({
-    code: 'RECEIVABLE_CUSTOMER_REQUIRED',
-    message: 'Venda fiado exige um cliente cadastrado vinculado ao pedido.',
-  });
-}
-
-export function creditNotAllowed() {
-  return new ConflictException({
-    code: 'RECEIVABLE_CREDIT_NOT_ALLOWED',
-    message: 'Este cliente não tem limite de fiado. Defina um limite no cadastro do cliente.',
-  });
-}
-
-export function creditLimitExceeded(details: { creditLimitCents: number; balanceCents: number; requestedCents: number }) {
-  return new ConflictException({
-    code: 'RECEIVABLE_LIMIT_EXCEEDED',
-    message: 'Esta venda ultrapassa o limite de fiado do cliente.',
-    details: { ...details, availableCents: Math.max(0, details.creditLimitCents - details.balanceCents) },
-  });
-}
-
-export function customerOverdue(overdueCents: number) {
-  return new ConflictException({
-    code: 'RECEIVABLE_CUSTOMER_OVERDUE',
-    message: 'Este cliente tem fiado vencido. Regularize antes de vender fiado novamente.',
-    details: { overdueCents },
-  });
-}
-
-export function nothingToCharge() {
-  return new BadRequestException({
-    code: 'RECEIVABLE_NOTHING_TO_CHARGE',
-    message: 'Não há valor a receber nesta venda. Escolha outra forma de pagamento.',
-  });
-}
-
-const TERMS_MESSAGE: Record<TermsProblem, string> = {
-  INSTALLMENTS_RANGE: 'O número de parcelas deve ser de 1 a 12.',
-  DUE_DATE_INVALID: 'Data de vencimento inválida.',
-  DUE_DATE_PAST: 'O primeiro vencimento não pode ser anterior a hoje.',
-  DUE_DATE_TOO_FAR: 'O primeiro vencimento deve ser em até um ano.',
-  AMOUNT_TOO_SMALL: 'O valor é pequeno demais para esse número de parcelas.',
-};
-
-export function invalidTerms(problem: TermsProblem) {
-  return new BadRequestException({ code: `RECEIVABLE_${problem}`, message: TERMS_MESSAGE[problem] });
 }
 
 export function receivableNotOpen() {

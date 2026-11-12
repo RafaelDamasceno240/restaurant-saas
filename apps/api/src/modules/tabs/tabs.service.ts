@@ -195,9 +195,6 @@ export class TabsService {
     if (dto.cashbackToUseCents && !user.permissions.includes('cashback.use')) {
       throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para usar cashback.' });
     }
-    if (dto.paymentMethod === 'ON_ACCOUNT' && !user.permissions.includes('receivables.sell')) {
-      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para vender fiado.' });
-    }
 
     const auditBase = {
       tenantId: user.tenantId,
@@ -320,7 +317,6 @@ export class TabsService {
       customerPhone: customer?.phone ?? null,
       customerId: customer?.id ?? null,
       cashbackToUseCents: dto.cashbackToUseCents ?? null,
-      creditTerms: dto.paymentMethod === 'ON_ACCOUNT' ? (dto.creditTerms ?? null) : null,
       address: null,
       notes: null,
       items: billed,
@@ -349,17 +345,13 @@ export class TabsService {
         )
       : [];
 
-    // A Payment row is money actually received. A bill put on account received nothing: its
-    // receivable (opened inside createPricedOrderInTx) is what tracks it from here on.
-    const payment =
-      dto.paymentMethod === 'ON_ACCOUNT'
-        ? null
-        : await this.payments.recordInternalConfirmed(tx, {
-            tenantId: user.tenantId,
-            orderId: created.order.id,
-            method: dto.paymentMethod,
-            amountCents: created.order.totalCents,
-          });
+    // A Payment row is money actually received: every bill is paid now (fiado is no longer sold).
+    const payment = await this.payments.recordInternalConfirmed(tx, {
+      tenantId: user.tenantId,
+      orderId: created.order.id,
+      method: dto.paymentMethod,
+      amountCents: created.order.totalCents,
+    });
 
     await tx.tab.update({
       where: { id: tab.id },

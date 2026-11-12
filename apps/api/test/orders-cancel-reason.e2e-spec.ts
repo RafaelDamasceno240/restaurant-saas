@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { createActiveProductE2E, createTestApp, getPrisma, registerTenantE2E } from './test-app.util';
+import { makeLegacyFiadoSaleE2E } from './legacy-fiado.util';
 
 // B5 (piloto 2026-10-23): cancelling an order needs a reason, enforced by the API, recorded in the
 // audit log with the cancellation; everything else a cancellation does stays as it was.
@@ -99,7 +100,7 @@ describe('Order cancellation with a reason (e2e)', () => {
     expect(s.expectedBalanceCents).toBe(10000);
   });
 
-  it('keeps returning cashback and cancelling the fiado debt', async () => {
+  it('keeps returning cashback and cancelling the debt of a fiado sale from before', async () => {
     const ctx = await setup();
     const t = ctx.accessToken;
     const customer = await request(server).post('/v1/customers').set(auth(t)).send({ name: 'Cliente Cancelamento', phone: '11988887777' }).expect(201);
@@ -109,7 +110,6 @@ describe('Order cancellation with a reason (e2e)', () => {
       .set(auth(t))
       .send({ amountCents: 1000, reason: 'Saldo de teste', idempotencyKey: `adj-${customer.body.id}` })
       .expect(200);
-    await request(server).put(`/v1/receivables/customers/${customer.body.id}/limit`).set(auth(t)).send({ creditLimitCents: 10000 }).expect(200);
 
     const cashbackSale = await sell(ctx, {
       items: [{ productId: ctx.burger.id, quantity: 1 }],
@@ -117,7 +117,9 @@ describe('Order cancellation with a reason (e2e)', () => {
       customerId: customer.body.id,
       cashbackToUseCents: 1000,
     });
-    const fiadoSale = await sell(ctx, { items: [{ productId: ctx.burger.id, quantity: 1 }], paymentMethod: 'ON_ACCOUNT', customerId: customer.body.id });
+    // Fiado is no longer sold: this one comes from before the change (remocao-fiado).
+    const fiadoSale = await sell(ctx, { items: [{ productId: ctx.burger.id, quantity: 1 }], paymentMethod: 'PIX', customerId: customer.body.id });
+    await makeLegacyFiadoSaleE2E(app, { orderId: fiadoSale.body.id, customerId: customer.body.id, firstDueDate: '2099-01-10' });
     const balance = async () => (await request(server).get(`/v1/cashback/customers/${customer.body.id}`).set(auth(t)).expect(200)).body.balanceCents;
     expect(await balance()).toBe(0);
 

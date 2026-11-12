@@ -10,13 +10,15 @@ import {
   removeAuditFailure,
   uniqueSuffix,
 } from './test-app.util';
+import { seedLegacyReceivableE2E } from './legacy-fiado.util';
 
 type Json = Record<string, unknown>;
 
-// Fase 11, fatia 6 (1/2): contas a receber by themselves - credit limit, manual charge,
-// installments, payments (total and partial), reversal, cancellation, overdue, cash drawer,
-// idempotency, concurrency, atomic audit, isolation and permissions. Selling on account in the
-// order flows is in receivables-orders.e2e-spec.ts.
+// Fase 11, fatia 6 (1/2), after remocao-fiado (2026-11-12): fiado is no longer sold and no route
+// grants credit or opens a debt. What exists from before stays settleable: payments (total and
+// partial), reversal, cancellation, overdue, cash drawer, idempotency, concurrency, atomic audit,
+// isolation and permissions. The debts are written by seedLegacyReceivableE2E (test code), with
+// the rows the removed code wrote. The order side is in fiado-disabled.e2e-spec.ts.
 describe('Receivables ledger (e2e)', () => {
   let app: INestApplication;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,28 +57,32 @@ describe('Receivables ledger (e2e)', () => {
   const newCustomer = async (ctx: Ctx, name = 'Maria Souza') =>
     (await post(ctx.accessToken, '/v1/customers', { name, phone: phone() }).expect(201)).body as { id: string };
 
-  const charge = (token: string, ctx: Ctx, customerId: string, totalCents: number, extra: Json = {}) =>
-    post(token, '/v1/receivables', {
-      customerId,
-      branchId: ctx.branchId,
-      description: 'Saldo anterior do caderno',
-      totalCents,
-      installments: 1,
-      firstDueDate: shift(today(), 30),
-      idempotencyKey: key(),
-      ...extra,
-    });
+  // A debt from before the change, with the call shape the tests always used: charge(...).expect(201)
+  // gives the receivable as GET /v1/receivables/:id shows it.
+  const charge = (_token: string, ctx: Ctx, customerId: string, totalCents: number, extra: Json = {}) => ({
+    expect: async (status: number) => {
+      if (status !== 201) throw new Error('a legacy debt is always written');
+      const id = await seedLegacyReceivableE2E(app, {
+        tenantId: ctx.tenantId,
+        branchId: (extra.branchId as string | undefined) ?? ctx.branchId,
+        customerId,
+        totalCents,
+        installments: (extra.installments as number | undefined) ?? 1,
+        firstDueDate: (extra.firstDueDate as string | undefined) ?? shift(today(), 30),
+        description: extra.description as string | undefined,
+      });
+      return get(ctx.accessToken, `/v1/receivables/${id}`).expect(200);
+    },
+  });
   const pay = (token: string, ctx: Ctx, receivableId: string, amountCents: number, extra: Json = {}) =>
     post(token, `/v1/receivables/${receivableId}/payments`, { amountCents, method: 'PIX', branchId: ctx.branchId, idempotencyKey: key(), ...extra });
   const reverse = (token: string, entryId: string, extra: Json = {}) =>
     post(token, `/v1/receivables/entries/${entryId}/reverse`, { reason: 'Estorno de teste', idempotencyKey: key(), ...extra });
   const account = async (ctx: Ctx, customerId: string) =>
     (await get(ctx.accessToken, `/v1/receivables/customers/${customerId}`).expect(200)).body as {
-      creditLimitCents: number;
+      customerId: string;
       balanceCents: number;
-      availableCents: number;
       overdueCents: number;
-      canBuyOnAccount: boolean;
     };
   const openCash = (ctx: Ctx, openingBalanceCents = 0) =>
     post(ctx.accessToken, '/v1/cash/sessions', { branchId: ctx.branchId, openingBalanceCents }).expect(201).then((res) => res.body as { id: string });
@@ -109,94 +115,34 @@ describe('Receivables ledger (e2e)', () => {
     expect(stored?.balanceCents ?? 0).toBe(debt);
   }
 
-  describe('credit limit', () => {
-    it('starts at zero (no fiado), is set and changed by management and audited on each change', async () => {
+  describe('no new fiado', () => {
+    it('the account shows only what is owed; no route grants credit or opens a debt', async () => {
       const ctx = await setup();
       const c = await newCustomer(ctx);
-      expect(await account(ctx, c.id)).toEqual({ customerId: c.id, creditLimitCents: 0, balanceCents: 0, availableCents: 0, overdueCents: 0, canBuyOnAccount: false });
-
-      const set = await put(ctx.accessToken, `/v1/receivables/customers/${c.id}/limit`, { creditLimitCents: 50_000 }).expect(200);
-      expect(set.body).toMatchObject({ creditLimitCents: 50_000, availableCents: 50_000, canBuyOnAccount: true });
-      await put(ctx.accessToken, `/v1/receivables/customers/${c.id}/limit`, { creditLimitCents: 50_000 }).expect(200);
-      await put(ctx.accessToken, `/v1/receivables/customers/${c.id}/limit`, { creditLimitCents: 0 }).expect(200);
-      expect((await account(ctx, c.id)).canBuyOnAccount).toBe(false);
-
-      const audits = await prisma().auditLog.findMany({ where: { tenantId: ctx.tenantId, action: 'RECEIVABLE_LIMIT_UPDATED' }, orderBy: { createdAt: 'asc' } });
-      expect(audits.map((a) => [a.beforeData, (a.afterData as Json).creditLimitCents])).toEqual([
-        [{ creditLimitCents: 0 }, 50_000],
-        [{ creditLimitCents: 50_000 }, 0],
-      ]);
-    });
-
-    it('rejects invalid limits and fields the client must not send', async () => {
-      const ctx = await setup();
-      const c = await newCustomer(ctx);
-      for (const body of [{ creditLimitCents: -1 }, { creditLimitCents: 10.5 }, { creditLimitCents: '100' }, {}, { creditLimitCents: 100, balanceCents: 0 }, { creditLimitCents: 100, tenantId: ctx.tenantId }]) {
-        await put(ctx.accessToken, `/v1/receivables/customers/${c.id}/limit`, body as Json).expect(400);
-      }
+      expect(await account(ctx, c.id)).toEqual({ customerId: c.id, balanceCents: 0, overdueCents: 0 });
+      await put(ctx.accessToken, `/v1/receivables/customers/${c.id}/limit`, { creditLimitCents: 50_000 }).expect(404);
+      await post(ctx.accessToken, '/v1/receivables', {
+        customerId: c.id,
+        branchId: ctx.branchId,
+        description: 'Saldo anterior do caderno',
+        totalCents: 12_000,
+        installments: 1,
+        firstDueDate: shift(today(), 30),
+        idempotencyKey: key(),
+      }).expect(404);
+      expect(await prisma().receivable.count({ where: { tenantId: ctx.tenantId } })).toBe(0);
       expect(await prisma().creditAccount.count({ where: { customerId: c.id } })).toBe(0);
     });
-  });
 
-  describe('manual charge and installments', () => {
-    it('opens a debt in one installment, owed in full', async () => {
+    it('a debt from before keeps its installments and is owed in full', async () => {
       const ctx = await setup();
       const c = await newCustomer(ctx);
-      const due = shift(today(), 10);
-      const created = await charge(ctx.accessToken, ctx, c.id, 12_000, { firstDueDate: due }).expect(201);
-      expect(created.body).toMatchObject({
-        status: 'OPEN',
-        totalCents: 12_000,
-        paidCents: 0,
-        openCents: 12_000,
-        overdueCents: 0,
-        overdue: false,
-        nextDueDate: due,
-        description: 'Saldo anterior do caderno',
-        order: null,
-        idempotentReplay: false,
-      });
-      expect(created.body.installments).toEqual([expect.objectContaining({ number: 1, dueDate: due, amountCents: 12_000, paidCents: 0, openCents: 12_000, overdue: false })]);
-      expect(created.body.entries).toEqual([expect.objectContaining({ type: 'CHARGE', amountCents: 12_000, balanceAfterCents: 12_000, reversed: false })]);
-      expect(created.body.customer).toMatchObject({ id: c.id, name: 'Maria Souza' });
-      expect(await account(ctx, c.id)).toMatchObject({ balanceCents: 12_000 });
-      await expectLedgerConsistent(c.id);
-    });
-
-    it('splits in monthly installments that add up to the total, the leftover cents first', async () => {
-      const ctx = await setup();
-      const c = await newCustomer(ctx);
-      const created = await charge(ctx.accessToken, ctx, c.id, 10_000, { installments: 3, firstDueDate: '2099-01-31' }).expect(400);
-      expect(created.body.code).toBe('RECEIVABLE_DUE_DATE_TOO_FAR');
-
       const first = shift(today(), 5);
-      const ok = await charge(ctx.accessToken, ctx, c.id, 10_000, { installments: 3, firstDueDate: first }).expect(201);
-      expect(ok.body.installments.map((i: { amountCents: number }) => i.amountCents)).toEqual([3_334, 3_333, 3_333]);
-      const dueDates = ok.body.installments.map((i: { dueDate: string }) => i.dueDate) as string[];
-      expect(dueDates[0]).toBe(first);
-      expect(dueDates[0] < dueDates[1] && dueDates[1] < dueDates[2]).toBe(true);
+      const r = (await charge(ctx.accessToken, ctx, c.id, 10_000, { installments: 3, firstDueDate: first }).expect(201)).body;
+      expect(r).toMatchObject({ totalCents: 10_000, paidCents: 0, status: 'OPEN' });
+      expect(r.installments.map((i: { amountCents: number }) => i.amountCents)).toEqual([3_334, 3_333, 3_333]);
+      expect(await account(ctx, c.id)).toMatchObject({ balanceCents: 10_000, overdueCents: 0 });
       await expectLedgerConsistent(c.id);
-    });
-
-    it('rejects invalid terms, amounts and customers', async () => {
-      const ctx = await setup();
-      const c = await newCustomer(ctx);
-      const code = async (extra: Json, status = 400) => (await charge(ctx.accessToken, ctx, c.id, 10_000, extra).expect(status)).body.code;
-      expect(await code({ firstDueDate: shift(today(), -1) })).toBe('RECEIVABLE_DUE_DATE_PAST');
-      expect(await code({ firstDueDate: '2026-02-30' })).toBe('RECEIVABLE_DUE_DATE_INVALID');
-      await charge(ctx.accessToken, ctx, c.id, 10_000, { firstDueDate: '05/11/2026' }).expect(400);
-      await charge(ctx.accessToken, ctx, c.id, 10_000, { installments: 0 }).expect(400);
-      await charge(ctx.accessToken, ctx, c.id, 10_000, { installments: 13 }).expect(400);
-      await charge(ctx.accessToken, ctx, c.id, 0).expect(400);
-      await charge(ctx.accessToken, ctx, c.id, 10.5).expect(400);
-      await charge(ctx.accessToken, ctx, c.id, 10_000, { description: 'x' }).expect(400);
-      await charge(ctx.accessToken, ctx, c.id, 10_000, { paidCents: 5_000 }).expect(400);
-      await charge(ctx.accessToken, ctx, c.id, 10_000, { tenantId: ctx.tenantId }).expect(400);
-      expect((await charge(ctx.accessToken, ctx, c.id, 5, { installments: 6 }).expect(400)).body.code).toBe('RECEIVABLE_AMOUNT_TOO_SMALL');
-
-      await patch(ctx.accessToken, `/v1/customers/${c.id}`, { active: false }).expect(200);
-      expect(await code({}, 409)).toBe('CUSTOMER_INACTIVE');
-      expect(await prisma().receivable.count({ where: { tenantId: ctx.tenantId } })).toBe(0);
     });
   });
 
@@ -385,7 +331,7 @@ describe('Receivables ledger (e2e)', () => {
       const late = (await get(ctx.accessToken, `/v1/receivables/${r.id}`).expect(200)).body;
       expect(late).toMatchObject({ overdue: true, overdueCents: 3_000, openCents: 6_000, daysOverdue: 10, nextDueDate: shift(today(), -10) });
       expect(late.installments.map((i: { overdue: boolean }) => i.overdue)).toEqual([true, false]);
-      expect(await account(ctx, c.id)).toMatchObject({ overdueCents: 3_000, canBuyOnAccount: false });
+      expect(await account(ctx, c.id)).toMatchObject({ overdueCents: 3_000 });
 
       await pay(ctx.accessToken, ctx, r.id, 1_000).expect(200);
       expect((await get(ctx.accessToken, `/v1/receivables/${r.id}`).expect(200)).body.overdueCents).toBe(2_000);
@@ -488,18 +434,6 @@ describe('Receivables ledger (e2e)', () => {
       await expectLedgerConsistent(c.id);
     });
 
-    it('a manual charge repeated with the same key is created once', async () => {
-      const ctx = await setup();
-      const c = await newCustomer(ctx);
-      const k = key();
-      const first = await charge(ctx.accessToken, ctx, c.id, 7_000, { idempotencyKey: k }).expect(201);
-      const again = await charge(ctx.accessToken, ctx, c.id, 7_000, { idempotencyKey: k }).expect(201);
-      expect(again.body).toMatchObject({ id: first.body.id, idempotentReplay: true });
-      expect(await prisma().receivable.count({ where: { tenantId: ctx.tenantId } })).toBe(1);
-      expect((await charge(ctx.accessToken, ctx, c.id, 7_001, { idempotencyKey: k }).expect(409)).body.code).toBe('IDEMPOTENCY_KEY_REUSED');
-      expect(await account(ctx, c.id)).toMatchObject({ balanceCents: 7_000 });
-    });
-
     it('six simultaneous reversals of one payment reverse it once', async () => {
       const ctx = await setup();
       const c = await newCustomer(ctx);
@@ -549,7 +483,6 @@ describe('Receivables ledger (e2e)', () => {
     afterEach(() => removeAuditFailure(app, 'fail_audit_receivables_test'));
 
     it.each([
-      ['RECEIVABLE_CREATED', 'charge'],
       ['RECEIVABLE_PAYMENT_RECORDED', 'pay'],
       ['RECEIVABLE_PAYMENT_REVERSED', 'reverse'],
       ['RECEIVABLE_CANCELLED', 'cancel'],
@@ -568,13 +501,11 @@ describe('Receivables ledger (e2e)', () => {
 
       await injectAuditFailure(app, 'fail_audit_receivables_test', ctx.tenantId, action);
       const run = () =>
-        operation === 'charge'
-          ? charge(ctx.accessToken, ctx, c.id, 500)
-          : operation === 'pay'
-            ? pay(ctx.accessToken, ctx, paidOne.id, 500, { method: 'CASH' })
-            : operation === 'reverse'
-              ? reverse(ctx.accessToken, payment.body.entryId, { branchId: ctx.branchId })
-              : post(ctx.accessToken, `/v1/receivables/${clean.id}/cancel`, { reason: 'Engano' });
+        operation === 'pay'
+          ? pay(ctx.accessToken, ctx, paidOne.id, 500, { method: 'CASH' })
+          : operation === 'reverse'
+            ? reverse(ctx.accessToken, payment.body.entryId, { branchId: ctx.branchId })
+            : post(ctx.accessToken, `/v1/receivables/${clean.id}/cancel`, { reason: 'Engano' });
       await run().expect(500);
 
       expect({
@@ -593,7 +524,7 @@ describe('Receivables ledger (e2e)', () => {
   });
 
   describe('isolation', () => {
-    it('tenant A cannot see, pay, reverse, cancel or charge anything of tenant B', async () => {
+    it('tenant A cannot see, pay, reverse or cancel anything of tenant B', async () => {
       const a = await setup();
       const b = await setup();
       const theirs = await newCustomer(b);
@@ -602,11 +533,9 @@ describe('Receivables ledger (e2e)', () => {
 
       await get(a.accessToken, `/v1/receivables/${r.id}`).expect(404);
       await get(a.accessToken, `/v1/receivables/customers/${theirs.id}`).expect(404);
-      await put(a.accessToken, `/v1/receivables/customers/${theirs.id}/limit`, { creditLimitCents: 1 }).expect(404);
       await pay(a.accessToken, a, r.id, 100).expect(404);
       await reverse(a.accessToken, payment.body.entryId).expect(404);
       await post(a.accessToken, `/v1/receivables/${r.id}/cancel`, { reason: 'Tentativa' }).expect(404);
-      await charge(a.accessToken, a, theirs.id, 100).expect(404);
       // ...nor register a payment of my receivable at their branch.
       const mine = await newCustomer(a);
       const myReceivable = (await charge(a.accessToken, a, mine.id, 1_000).expect(201)).body;
@@ -632,16 +561,15 @@ describe('Receivables ledger (e2e)', () => {
       await get(manager, `/v1/receivables/${matriz.id}`).expect(404);
       await pay(manager, ctx, matriz.id, 100, { branchId: second.id }).expect(404);
       await get(manager, `/v1/receivables?branchId=${ctx.branchId}`).expect(403);
-      await charge(manager, ctx, c.id, 100).expect(403); // at a branch they do not work at
       await pay(manager, ctx, filial.id, 500, { branchId: second.id }).expect(200);
-      // The customer's limit and debt are the customer's, whatever the branch.
+      // The customer's debt is the customer's, whatever the branch.
       expect((await get(manager, `/v1/receivables/customers/${c.id}`).expect(200)).body.balanceCents).toBe(5_500);
     });
   });
 
   describe('permissions (backend)', () => {
     it.each([
-      // role, read, receive payment, manage (limit, charge, reverse, cancel)
+      // role, read, receive payment, manage (reverse, cancel)
       ['OWNER', 200, 200, 200],
       ['ADMIN', 200, 200, 200],
       ['MANAGER', 200, 200, 200],
@@ -662,8 +590,6 @@ describe('Receivables ledger (e2e)', () => {
       await get(token, `/v1/receivables/${r.id}`).expect(read);
       await get(token, `/v1/receivables/customers/${c.id}`).expect(read);
       await pay(token, ctx, r.id, 100).expect(receive);
-      await put(token, `/v1/receivables/customers/${c.id}/limit`, { creditLimitCents: 10_000 }).expect(manage);
-      await charge(token, ctx, c.id, 300).expect(manage === 200 ? 201 : 403);
       await reverse(token, seedPayment.body.entryId).expect(manage);
       await post(token, `/v1/receivables/${spare.id}/cancel`, { reason: 'Teste de permissão' }).expect(manage);
     });
@@ -671,10 +597,8 @@ describe('Receivables ledger (e2e)', () => {
     it('every route needs a session', async () => {
       const id = '00000000-0000-4000-8000-000000000000';
       await request(server).get('/v1/receivables').expect(401);
-      await request(server).post('/v1/receivables').send({}).expect(401);
       await request(server).get(`/v1/receivables/${id}`).expect(401);
       await request(server).get(`/v1/receivables/customers/${id}`).expect(401);
-      await request(server).put(`/v1/receivables/customers/${id}/limit`).send({ creditLimitCents: 1 }).expect(401);
       await request(server).post(`/v1/receivables/${id}/payments`).send({}).expect(401);
       await request(server).post(`/v1/receivables/${id}/cancel`).send({}).expect(401);
       await request(server).post(`/v1/receivables/entries/${id}/reverse`).send({}).expect(401);
@@ -688,8 +612,9 @@ describe('Receivables ledger (e2e)', () => {
       const byRole: Record<string, string[]> = {};
       for (const row of rows) (byRole[row.role.name] ??= []).push(row.permission.key);
       for (const role of Object.keys(byRole)) byRole[role].sort();
-      const all = ['receivables.manage', 'receivables.read', 'receivables.receive', 'receivables.sell'];
-      expect(byRole).toEqual({ OWNER: all, ADMIN: all, MANAGER: all, CASHIER: ['receivables.read', 'receivables.receive', 'receivables.sell'] });
+      // receivables.sell (selling on account) is gone from the matrix (remocao-fiado).
+      const all = ['receivables.manage', 'receivables.read', 'receivables.receive'];
+      expect(byRole).toEqual({ OWNER: all, ADMIN: all, MANAGER: all, CASHIER: ['receivables.read', 'receivables.receive'] });
     });
   });
 });

@@ -1,8 +1,8 @@
 'use client';
 
 import { useDeferredValue, useEffect, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { NotebookPen, Plus, Search, X } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { NotebookPen, Search, X } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { formatPhone } from '@/lib/customers-logic';
 import { ReceivableStatusFilter, receivablesApi } from '@/lib/receivables-api';
@@ -13,11 +13,9 @@ import { Card } from '@/components/ds/Card';
 import { SearchInput } from '@/components/ds/Input';
 import { Page, PageHeader } from '@/components/ds/PageHeader';
 import { StatCard } from '@/components/ds/StatCard';
-import { EmptyState, ErrorState, LoadingState } from '@/components/ds/States';
+import { Alert, EmptyState, ErrorState, LoadingState } from '@/components/ds/States';
 import { Table, TableWrap, TBody, Td, Th, THead, Tr } from '@/components/ds/Table';
 import { Tabs } from '@/components/ds/Tabs';
-import { useToast } from '@/components/ds/Toast';
-import { NewChargeDialog } from '@/components/receivables/NewChargeDialog';
 import { ReceivableDetailDialog } from '@/components/receivables/ReceivableDetailDialog';
 
 // The API decides who may do what (receivables.read/receive/manage); these only hide controls
@@ -28,8 +26,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 
 export default function ReceivablesPage() {
   const { user, accessToken } = useAuth();
-  const toast = useToast();
-  const queryClient = useQueryClient();
   const roles = user?.roles ?? [];
   const canRead = roles.some((role) => CAN_READ.includes(role));
   const canManage = roles.some((role) => MANAGEMENT.includes(role));
@@ -39,7 +35,6 @@ export default function ReceivablesPage() {
   const [page, setPage] = useState(1);
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const search = useDeferredValue(searchText.trim());
 
   // Deep links from the customer's dialog: ?conta=<id> opens one account, ?cliente=<id> lists
@@ -97,15 +92,13 @@ export default function ReceivablesPage() {
     <Page wide>
       <PageHeader
         title="Contas a receber"
-        description="Fiado: o que os clientes devem, parcelas, vencimentos e recebimentos."
-        actions={
-          canManage ? (
-            <Button icon={<Plus className="h-4 w-4" aria-hidden />} onClick={() => setCreating(true)}>
-              Lançar dívida
-            </Button>
-          ) : undefined
-        }
+        description="Fiado vendido antes da desativação: o que os clientes ainda devem, parcelas, vencimentos e recebimentos."
       />
+
+      <Alert tone="info">
+        O sistema não vende mais fiado: toda venda nova é paga na hora (dinheiro, PIX ou cartão). Aqui ficam as contas antigas,
+        para consultar, receber, estornar um recebimento ou cancelar.
+      </Alert>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <StatCard
@@ -167,7 +160,7 @@ export default function ReceivablesPage() {
           description={
             filtering
               ? 'Ajuste a busca ou troque a aba.'
-              : 'Vendas fiado feitas no PDV ou na mesa e dívidas lançadas aparecem aqui. Para vender fiado, defina o limite do cliente em Clientes.'
+              : 'As contas de fiado vendidas antes da desativação aparecem aqui. Nenhuma conta nova é criada.'
           }
         />
       ) : (
@@ -247,16 +240,6 @@ export default function ReceivablesPage() {
       )}
 
       <ReceivableDetailDialog receivableId={detailId} canReceive={canRead} canManage={canManage} onClose={() => setDetailId(null)} />
-      <NewChargeDialog
-        open={creating}
-        onClose={() => setCreating(false)}
-        onCreated={(created) => {
-          setCreating(false);
-          toast.success(`Dívida de ${formatMoney(created.totalCents)} lançada para ${created.customer.name}.`);
-          void queryClient.invalidateQueries({ queryKey: ['receivables'] });
-          setDetailId(created.id);
-        }}
-      />
     </Page>
   );
 }

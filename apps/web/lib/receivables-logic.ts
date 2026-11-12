@@ -1,8 +1,6 @@
 import type { BadgeTone } from '@/components/ds/Badge';
 import { parseMoneyToCents } from './coupons-logic';
 import type {
-  CreditAccount,
-  CreditTerms,
   Receivable,
   ReceivableEntry,
   ReceivableEntryType,
@@ -10,18 +8,12 @@ import type {
   ReceivableStatusFilter,
 } from './receivables-api';
 
-// Presentation and form rules for fiado / contas a receber. The API is the authority (limit,
-// overdue, what a payment settles); these give fast feedback and readable output only.
+// Presentation and form rules for the contas a receber of the fiado sold before remocao-fiado
+// (fiado is no longer sold). The API is the authority (overdue, what a payment settles); these
+// give fast feedback and readable output only.
 
-export const MAX_INSTALLMENTS = 12;
-export const MAX_FIRST_DUE_DAYS = 365;
-export const DEFAULT_DUE_IN_DAYS = 30;
-// Same ceiling as the API (R$ 20.000.000,00).
-export const MAX_RECEIVABLE_CENTS = 2_000_000_000;
 export const MIN_REASON = 3;
 export const MAX_REASON = 200;
-export const MIN_DESCRIPTION = 2;
-export const MAX_DESCRIPTION = 200;
 
 export const RECEIVABLE_TABS: ReceivableStatusFilter[] = ['open', 'overdue', 'paid', 'cancelled', 'all'];
 export const RECEIVABLE_TAB_LABEL: Record<ReceivableStatusFilter, string> = {
@@ -81,16 +73,6 @@ export function addDaysToDateOnly(value: string, days: number): string {
 }
 
 // Same day of the following months, clamped to the month's last day (31/01 -> 28/02 -> 31/03).
-export function addMonthsToDateOnly(value: string, months: number): string {
-  const [year, month, day] = value.split('-').map(Number);
-  const target = new Date(Date.UTC(year, month - 1 + months, 1));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(day, lastDay));
-  return target.toISOString().slice(0, 10);
-}
-
-// ---- status ---------------------------------------------------------------------------------
-
 export function receivableBadge(receivable: Pick<Receivable, 'status' | 'overdue' | 'daysOverdue'>): { label: string; tone: BadgeTone } {
   if (receivable.status === 'PAID') return { label: 'Quitada', tone: 'success' };
   if (receivable.status === 'CANCELLED') return { label: 'Cancelada', tone: 'neutral' };
@@ -99,56 +81,6 @@ export function receivableBadge(receivable: Pick<Receivable, 'status' | 'overdue
     return { label: days > 0 ? `Vencida há ${days} ${days === 1 ? 'dia' : 'dias'}` : 'Vencida', tone: 'danger' };
   }
   return { label: 'Em aberto', tone: 'warning' };
-}
-
-// ---- terms of a sale on account ---------------------------------------------------------------
-
-export interface TermsDraft {
-  installments: number;
-  firstDueDate: string;
-}
-
-export function defaultTerms(today: string): TermsDraft {
-  return { installments: 1, firstDueDate: addDaysToDateOnly(today, DEFAULT_DUE_IN_DAYS) };
-}
-
-export function validateTerms(draft: TermsDraft, totalCents: number, today: string): string | null {
-  if (!Number.isInteger(draft.installments) || draft.installments < 1 || draft.installments > MAX_INSTALLMENTS) {
-    return `Escolha de 1 a ${MAX_INSTALLMENTS} parcelas.`;
-  }
-  if (!isDateOnly(draft.firstDueDate)) return 'Informe a data do primeiro vencimento.';
-  if (draft.firstDueDate < today) return 'O primeiro vencimento não pode estar no passado.';
-  if (draft.firstDueDate > addDaysToDateOnly(today, MAX_FIRST_DUE_DAYS)) return 'O primeiro vencimento pode ser em até 1 ano.';
-  if (totalCents > 0 && totalCents < draft.installments) return 'O valor é pequeno demais para tantas parcelas.';
-  return null;
-}
-
-export function toCreditTerms(draft: TermsDraft): CreditTerms {
-  return { installments: draft.installments, firstDueDate: draft.firstDueDate };
-}
-
-// What the installments will look like (the API builds the real ones with the same rule: equal
-// parts, the leftover cents on the first ones, monthly due dates).
-export function previewInstallments(totalCents: number, draft: TermsDraft): { number: number; dueDate: string; amountCents: number }[] {
-  if (totalCents < 1 || draft.installments < 1 || !isDateOnly(draft.firstDueDate)) return [];
-  const base = Math.floor(totalCents / draft.installments);
-  const leftover = totalCents - base * draft.installments;
-  return Array.from({ length: draft.installments }, (_, index) => ({
-    number: index + 1,
-    dueDate: addMonthsToDateOnly(draft.firstDueDate, index),
-    amountCents: base + (index < leftover ? 1 : 0),
-  }));
-}
-
-// Why this customer cannot take this sale on account right now (null = may). The API decides
-// again, against the locked account, when the sale is sent.
-export function creditBlockReason(account: CreditAccount, totalCents: number): string | null {
-  if (account.creditLimitCents <= 0) return 'Este cliente não tem limite de fiado.';
-  if (account.overdueCents > 0) return `Cliente com ${formatMoney(account.overdueCents)} em atraso: receba antes de vender fiado.`;
-  if (totalCents > account.availableCents) {
-    return `Limite insuficiente: disponível ${formatMoney(account.availableCents)} de ${formatMoney(account.creditLimitCents)}.`;
-  }
-  return null;
 }
 
 // ---- forms ----------------------------------------------------------------------------------
@@ -160,35 +92,11 @@ export function validateReason(reason: string): string | null {
   return null;
 }
 
-// '' is a valid limit: it means "no fiado" (0).
-export function parseLimit(raw: string): number | null {
-  if (raw.trim() === '') return 0;
-  const cents = parseMoneyToCents(raw);
-  return cents === null || cents < 0 || cents > MAX_RECEIVABLE_CENTS ? null : cents;
-}
-
 export function validatePayment(amount: string, openCents: number): string | null {
   const cents = parseMoneyToCents(amount);
   if (cents === null || cents < 1) return 'Informe o valor recebido (a partir de R$ 0,01).';
   if (cents > openCents) return `O valor é maior que o que está em aberto (${formatMoney(openCents)}).`;
   return null;
-}
-
-export interface ChargeDraft {
-  description: string;
-  amount: string;
-  installments: number;
-  firstDueDate: string;
-}
-
-export function validateCharge(draft: ChargeDraft, hasCustomer: boolean, today: string): string | null {
-  if (!hasCustomer) return 'Escolha o cliente.';
-  const description = draft.description.trim();
-  if (description.length < MIN_DESCRIPTION) return 'Descreva a dívida (ex.: saldo do caderno).';
-  if (description.length > MAX_DESCRIPTION) return `A descrição aceita até ${MAX_DESCRIPTION} caracteres.`;
-  const cents = parseMoneyToCents(draft.amount);
-  if (cents === null || cents < 1 || cents > MAX_RECEIVABLE_CENTS) return 'Informe o valor da dívida (a partir de R$ 0,01).';
-  return validateTerms(draft, cents, today);
 }
 
 // ---- history --------------------------------------------------------------------------------
@@ -221,16 +129,8 @@ export function formatSignedMoney(cents: number): string {
 // Friendly text for the API error codes of these screens; unknown codes keep the API message.
 export function receivableErrorMessage(code: string | undefined, fallback: string): string {
   switch (code) {
-    case 'RECEIVABLE_CUSTOMER_REQUIRED':
-      return 'Escolha um cliente cadastrado para vender fiado.';
-    case 'RECEIVABLE_CREDIT_NOT_ALLOWED':
-      return 'Este cliente não tem limite de fiado.';
-    case 'RECEIVABLE_LIMIT_EXCEEDED':
-      return 'A venda ultrapassa o limite de fiado do cliente.';
-    case 'RECEIVABLE_CUSTOMER_OVERDUE':
-      return 'O cliente tem parcela vencida: receba antes de vender fiado.';
-    case 'RECEIVABLE_NOTHING_TO_CHARGE':
-      return 'Não há valor a lançar no fiado nesta venda.';
+    case 'ON_ACCOUNT_DISABLED':
+      return 'Venda fiado não é mais aceita. Use dinheiro, PIX ou cartão.';
     case 'RECEIVABLE_OVERPAYMENT':
       return 'O valor é maior que o que está em aberto.';
     case 'RECEIVABLE_NOT_OPEN':

@@ -1,4 +1,4 @@
-import { checkoutBlockReason, tabPaymentOptions } from './tab-checkout-logic';
+import { checkoutBlockReason, paidWithLabel, TAB_PAYMENT_OPTIONS } from './tab-checkout-logic';
 
 describe('checkoutBlockReason', () => {
   it('blocks an empty tab', () => {
@@ -23,29 +23,13 @@ describe('checkoutBlockReason', () => {
   });
 });
 
-describe('fiado (ON_ACCOUNT) at the table checkout', () => {
-  const base = { itemCount: 2, paymentMethod: 'ON_ACCOUNT' as const, cashRegisterOpen: false };
-
-  it('needs a registered customer', () => {
-    expect(checkoutBlockReason(base)).toMatch(/cliente cadastrado/);
-    expect(checkoutBlockReason({ ...base, customerPicked: false })).toMatch(/cliente cadastrado/);
+describe('ways of paying a bill (remocao-fiado)', () => {
+  it('offers only money received now: cash, PIX and card, never fiado', () => {
+    expect(TAB_PAYMENT_OPTIONS.map((option) => option.value)).toEqual(['CASH', 'PIX', 'CARD']);
   });
 
-  it('is blocked by the reason the credit check gives, and free without one', () => {
-    expect(checkoutBlockReason({ ...base, customerPicked: true, creditBlock: 'Limite insuficiente.' })).toBe('Limite insuficiente.');
-    expect(checkoutBlockReason({ ...base, customerPicked: true, creditBlock: null })).toBeNull();
-  });
-
-  it('never needs the cash register: nothing is received', () => {
-    expect(checkoutBlockReason({ ...base, customerPicked: true })).toBeNull();
-  });
-
-  it('the credit check does not block the other ways of paying', () => {
-    expect(checkoutBlockReason({ ...base, paymentMethod: 'PIX', creditBlock: 'Limite insuficiente.' })).toBeNull();
-  });
-
-  it('is offered only to who may sell on account', () => {
-    expect(tabPaymentOptions(true).map((option) => option.value)).toEqual(['CASH', 'PIX', 'CARD', 'ON_ACCOUNT']);
-    expect(tabPaymentOptions(false).map((option) => option.value)).toEqual(['CASH', 'PIX', 'CARD']);
+  it('still names the fiado sales from before in their history', () => {
+    expect(paidWithLabel('ON_ACCOUNT')).toBe('Fiado (venda anterior)');
+    expect(paidWithLabel('CARD')).toBe('Cartão');
   });
 });

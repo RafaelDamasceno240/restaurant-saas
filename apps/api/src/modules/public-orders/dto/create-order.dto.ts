@@ -20,9 +20,10 @@ import { FulfillmentType, PaymentMethod } from '@prisma/client';
 import { AllowExtraFields } from '../../../common/decorators/allow-extra-fields.decorator';
 import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
 import { OrderLineOptionDto } from '../../order-creation/dto/order-line.dto';
+import { SALE_PAYMENT_METHODS } from '../../../common/util/payment-methods';
 
-// What a guest can pay with. ON_ACCOUNT (fiado) is never one of them.
-const PUBLIC_PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'PIX', 'CARD'];
+// What a guest can pay with: the same methods as every sale (fiado is never one of them).
+const PUBLIC_PAYMENT_METHODS = SALE_PAYMENT_METHODS;
 
 // One add-on chosen for each unit of the line. Only the id and how many: the price, the group and
 // whether it belongs to this product at all are decided by the server (option-pricing.ts). The

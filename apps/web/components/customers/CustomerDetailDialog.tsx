@@ -35,7 +35,7 @@ const SECTIONS: { key: Section; label: string }[] = [
   { key: 'summary', label: 'Resumo' },
   { key: 'loyalty', label: 'Fidelidade' },
   { key: 'cashback', label: 'Cashback' },
-  { key: 'credit', label: 'Fiado' },
+  { key: 'credit', label: 'Fiado antigo' },
 ];
 
 function formatDateTime(iso: string): string {

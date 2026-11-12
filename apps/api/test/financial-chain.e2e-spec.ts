@@ -11,6 +11,7 @@ import {
   statusBody,
   roundBody,
 } from './test-app.util';
+import { makeLegacyFiadoSaleE2E } from './legacy-fiado.util';
 
 type Json = Record<string, unknown>;
 
@@ -18,6 +19,8 @@ type Json = Record<string, unknown>;
 // -> stock -> audit. Each module has its own spec; this one checks that they hold TOGETHER:
 // one sale moving several ledgers, its cancellation undoing all of them or none, and the
 // flows that lock the same rows from different directions.
+// Fiado is no longer sold (remocao-fiado): a NEW sale on account is refused, and the fiado
+// sales from before (makeLegacyFiadoSaleE2E) still unwind every ledger when cancelled.
 // Burger R$ 40,00, made of 1 unit of one ingredient.
 describe('Financial chain of an order (e2e)', () => {
   let app: INestApplication;
@@ -66,7 +69,6 @@ describe('Financial chain of an order (e2e)', () => {
     await put(tenant.accessToken, '/v1/cashback/program', { enabled: true, earnRateBps: 1000, expireAfterDays: null }).expect(200);
     const customer = (await post(tenant.accessToken, '/v1/customers', { name: 'Cliente da Cadeia', phone: phone() }).expect(201)).body as { id: string };
     await post(tenant.accessToken, `/v1/cashback/customers/${customer.id}/adjust`, { amountCents: 50_000, reason: 'Saldo inicial do teste', idempotencyKey: key() }).expect(200);
-    await put(tenant.accessToken, `/v1/receivables/customers/${customer.id}/limit`, { creditLimitCents: 500_000 }).expect(200);
     return { ...tenant, burger, ingredient, customer };
   }
   type Ctx = Awaited<ReturnType<typeof setup>>;
@@ -79,6 +81,13 @@ describe('Financial chain of an order (e2e)', () => {
       customerId: ctx.customer.id,
       ...extra,
     });
+  // A fiado sale from before the change: sold today by PIX (no drawer, no payment row), then
+  // turned into what a sale on account was, with its receivable. Same shape as a supertest reply.
+  const legacySale = async (ctx: Ctx, extra: Json = {}, quantity = 1, installments = 1) => {
+    const sale = await pdv(ctx, { ...extra, paymentMethod: 'PIX' }, quantity).expect(201);
+    await makeLegacyFiadoSaleE2E(app, { orderId: sale.body.id, customerId: ctx.customer.id, installments, firstDueDate: shift(today(), 10) });
+    return sale;
+  };
   const status = (ctx: Ctx, orderId: string, next: string) => patch(ctx.accessToken, `/v1/orders/${orderId}/status`, statusBody(next));
 
   const stock = async (ctx: Ctx) =>
@@ -116,17 +125,26 @@ describe('Financial chain of an order (e2e)', () => {
   }
 
   describe('one sale moving every ledger', () => {
-    it('coupon, cashback and fiado on the same sale: each ledger gets exactly its part, and cancelling gives everything back', async () => {
+    it('a NEW sale on account is refused before any ledger moves, with or without terms', async () => {
+      const ctx = await setup();
+      const code = `NEG${uniqueSuffix().replace(/-/g, '').slice(-8)}`.toUpperCase();
+      await post(ctx.accessToken, '/v1/coupons', { code, discountType: 'FIXED', value: 1_000, usageLimit: 5 }).expect(201);
+      const refused = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', couponCode: code, cashbackToUseCents: 2_000, idempotencyKey: key() }, 3).expect(400);
+      expect(refused.body.message).toContain('fiado');
+      await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', creditTerms: { installments: 2, firstDueDate: shift(today(), 10) } }).expect(400);
+      expect(await prisma().order.count({ where: { tenantId: ctx.tenantId } })).toBe(0);
+      expect([await cashback(ctx), await debt(ctx), await stock(ctx)]).toEqual([50_000, 0, 1_000]);
+      expect((await prisma().coupon.findFirstOrThrow({ where: { tenantId: ctx.tenantId } })).usageCount).toBe(0);
+      await expectEverythingConsistent(ctx);
+    });
+
+    it('a fiado sale from before (coupon, cashback, debt): each ledger has its part, and cancelling gives everything back', async () => {
       const ctx = await setup();
       const code = `CAD${uniqueSuffix().replace(/-/g, '').slice(-8)}`.toUpperCase();
       await post(ctx.accessToken, '/v1/coupons', { code, discountType: 'FIXED', value: 1_000, usageLimit: 5 }).expect(201);
 
       // 3 burgers = 12000; coupon -1000; cashback -2000; on account 9000 in 2 installments.
-      const sale = await pdv(
-        ctx,
-        { paymentMethod: 'ON_ACCOUNT', couponCode: code, cashbackToUseCents: 2_000, creditTerms: { installments: 2, firstDueDate: shift(today(), 10) }, idempotencyKey: key() },
-        3,
-      ).expect(201);
+      const sale = await legacySale(ctx, { couponCode: code, cashbackToUseCents: 2_000, idempotencyKey: key() }, 3, 2);
       expect(await orderRow(sale.body.id)).toMatchObject({ subtotalCents: 12_000, discountCents: 1_000, cashbackUsedCents: 2_000, deliveryFeeCents: 0, totalCents: 9_000, paymentMethod: 'ON_ACCOUNT' });
       expect([await cashback(ctx), await debt(ctx), await stock(ctx)]).toEqual([48_000, 9_000, 1_000]);
       const coupon = await prisma().coupon.findFirstOrThrow({ where: { tenantId: ctx.tenantId } });
@@ -181,7 +199,7 @@ describe('Financial chain of an order (e2e)', () => {
       ['RECEIVABLE_CANCELLED', 'the cancellation of the debt'],
     ])('when %s cannot be recorded (%s), the order stays and no ledger moves', async (action) => {
       const ctx = await setup();
-      const sale = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', cashbackToUseCents: 2_000 }, 2).expect(201); // 8000 - 2000 = 6000
+      const sale = await legacySale(ctx, { cashbackToUseCents: 2_000 }, 2); // 8000 - 2000 = 6000
       await status(ctx, sale.body.id, 'CONFIRMED').expect(200);
       const before = { cashback: await cashback(ctx), debt: await debt(ctx), stock: await stock(ctx) };
       expect(before).toEqual({ cashback: 48_000, debt: 6_000, stock: 998 });
@@ -214,7 +232,7 @@ describe('Financial chain of an order (e2e)', () => {
   describe('double execution and races', () => {
     it('six simultaneous cancellations of the same sale undo it exactly once', async () => {
       const ctx = await setup();
-      const sale = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', cashbackToUseCents: 1_000 }, 2).expect(201);
+      const sale = await legacySale(ctx, { cashbackToUseCents: 1_000 }, 2);
       await status(ctx, sale.body.id, 'CONFIRMED').expect(200);
 
       const results = await Promise.all(Array.from({ length: 6 }, () => status(ctx, sale.body.id, 'CANCELLED')));
@@ -227,10 +245,10 @@ describe('Financial chain of an order (e2e)', () => {
       await expectEverythingConsistent(ctx);
     });
 
-    it('cancelling a sale on account while its debt is being paid: one of the two wins, never both', async () => {
+    it('cancelling a fiado sale from before while its debt is being paid: one of the two wins, never both', async () => {
       const ctx = await setup();
       for (let round = 0; round < 8; round++) {
-        const sale = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT' }).expect(201); // 4000
+        const sale = await legacySale(ctx); // 4000
         const receivable = await prisma().receivable.findUniqueOrThrow({ where: { orderId: sale.body.id } });
         const [cancelled, paid] = await Promise.all([
           status(ctx, sale.body.id, 'CANCELLED'),
@@ -297,35 +315,18 @@ describe('Financial chain of an order (e2e)', () => {
     });
   });
 
-  describe('repeating a sale on account', () => {
-    it('the same key with the same terms is the same sale; with other terms it is another request', async () => {
+  describe('the idempotency key cannot turn a sale into fiado', () => {
+    it('a sale paid now, repeated as fiado with the same key, is refused and the sale stays as it was', async () => {
       const ctx = await setup();
       const k = key();
-      const terms = { installments: 3, firstDueDate: shift(today(), 15) };
-      const first = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', creditTerms: terms, idempotencyKey: k }, 3).expect(201); // 12000
-      const again = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', creditTerms: terms, idempotencyKey: k }, 3).expect(201);
-      expect(again.body.id).toBe(first.body.id);
-
-      for (const other of [
-        { installments: 2, firstDueDate: terms.firstDueDate },
-        { installments: 3, firstDueDate: shift(today(), 16) },
-      ]) {
-        const refused = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', creditTerms: other, idempotencyKey: k }, 3).expect(409);
-        expect(refused.body.code).toBe('IDEMPOTENCY_KEY_REUSED');
-      }
-      // Not saying the terms again is accepted only for a sale that used the default (one
-      // installment): this one was split in three.
-      expect((await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', idempotencyKey: k }, 3).expect(409)).body.code).toBe('IDEMPOTENCY_KEY_REUSED');
-
+      const paid = await pdv(ctx, { paymentMethod: 'CARD', idempotencyKey: k }, 3).expect(201); // 12000
+      const refused = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', idempotencyKey: k }, 3).expect(400);
+      expect(refused.body.message).toContain('fiado');
+      expect((await pdv(ctx, { paymentMethod: 'CARD', idempotencyKey: k }, 3).expect(201)).body.id).toBe(paid.body.id);
+      expect(await orderRow(paid.body.id)).toMatchObject({ paymentMethod: 'CARD', totalCents: 12_000 });
       expect(await prisma().order.count({ where: { tenantId: ctx.tenantId } })).toBe(1);
-      expect(await prisma().receivable.count({ where: { tenantId: ctx.tenantId } })).toBe(1);
-      expect(await debt(ctx)).toBe(12_000);
-
-      // A sale made without terms (default) can be repeated without terms, today or later.
-      const k2 = key();
-      const plain = await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', idempotencyKey: k2 }).expect(201);
-      expect((await pdv(ctx, { paymentMethod: 'ON_ACCOUNT', idempotencyKey: k2 }).expect(201)).body.id).toBe(plain.body.id);
-      expect(await debt(ctx)).toBe(16_000);
+      expect(await prisma().receivable.count({ where: { tenantId: ctx.tenantId } })).toBe(0);
+      expect(await debt(ctx)).toBe(0);
       await expectEverythingConsistent(ctx);
     });
   });

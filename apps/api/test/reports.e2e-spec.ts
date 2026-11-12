@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import request from 'supertest';
 import { createActiveProductE2E, createStaffAndLoginE2E, createTestApp, getPrisma, registerTenantE2E, uniqueSuffix, statusBody, roundBody } from './test-app.util';
+import { makeLegacyFiadoSaleE2E, seedLegacyReceivableE2E } from './legacy-fiado.util';
 
 type Json = Record<string, unknown>;
 
@@ -61,7 +62,6 @@ describe('Reports (e2e)', () => {
     it('adds up what was sold, apart from what was cancelled, with every breakdown', async () => {
       const ctx = await setup();
       const fiado = await customer(ctx, 'Cliente Fiado');
-      await put(ctx.accessToken, `/v1/receivables/customers/${fiado.id}/limit`, { creditLimitCents: 50_000 }).expect(200);
       await post(ctx.accessToken, '/v1/cash/sessions', { branchId: ctx.branchId, openingBalanceCents: 0 }).expect(201);
       const code = `REP${uniqueSuffix().replace(/-/g, '').slice(-8)}`.toUpperCase();
       await post(ctx.accessToken, '/v1/coupons', { code, discountType: 'FIXED', value: 500 }).expect(201);
@@ -73,7 +73,9 @@ describe('Reports (e2e)', () => {
       await status(ctx, cancelled.id, 'CANCELLED').expect(200);
       const done = (await sale(ctx).expect(201)).body; // PIX 4000, completed
       await complete(ctx, done.id);
-      await sale(ctx, { paymentMethod: 'ON_ACCOUNT', customerId: fiado.id }).expect(201); // fiado 4000
+      // A fiado sale from before remocao-fiado (4000): still counted in the history, as ON_ACCOUNT.
+      const legacy = (await sale(ctx, { customerId: fiado.id }).expect(201)).body;
+      await makeLegacyFiadoSaleE2E(app, { orderId: legacy.id, customerId: fiado.id, firstDueDate: shift(today(), 10) });
       // A table bill: another source, born completed.
       const table = (await post(ctx.accessToken, '/v1/tables', { branchId: ctx.branchId, number: 1 }).expect(201)).body;
       const tab = (await post(ctx.accessToken, '/v1/tabs', { branchId: ctx.branchId, tableId: table.id }).expect(201)).body;
@@ -418,19 +420,18 @@ describe('Reports (e2e)', () => {
       await sale(ctx, { paymentMethod: 'PIX' }).expect(201); // not in the drawer
       await post(ctx.accessToken, `/v1/cash/sessions/${session.id}/movements`, { type: 'SUPPLY', amountCents: 500 }).expect(201);
       await post(ctx.accessToken, `/v1/cash/sessions/${session.id}/movements`, { type: 'WITHDRAWAL', amountCents: 300, reason: 'Troco para o banco' }).expect(201);
-      // A debt received in cash also goes through the drawer.
+      // A debt from before remocao-fiado, received in cash, also goes through the drawer.
       const debtor = await customer(ctx, 'Cliente Devedor');
-      const debt = (
-        await post(ctx.accessToken, '/v1/receivables', {
-          customerId: debtor.id,
+      const debt = {
+        id: await seedLegacyReceivableE2E(app, {
+          tenantId: ctx.tenantId,
           branchId: ctx.branchId,
-          description: 'Saldo anterior',
+          customerId: debtor.id,
           totalCents: 2_000,
-          installments: 1,
           firstDueDate: shift(today(), 10),
-          idempotencyKey: key(),
-        }).expect(201)
-      ).body;
+          description: 'Saldo anterior',
+        }),
+      };
       await post(ctx.accessToken, `/v1/receivables/${debt.id}/payments`, { amountCents: 700, method: 'CASH', branchId: ctx.branchId, idempotencyKey: key() }).expect(200);
       // expected = 1000 + 4000 + 500 + 700 - 300 = 5900; counted 5800 -> 100 short
       await patch(ctx.accessToken, `/v1/cash/sessions/${session.id}/close`, { countedClosingBalanceCents: 5_800 }).expect(200);
