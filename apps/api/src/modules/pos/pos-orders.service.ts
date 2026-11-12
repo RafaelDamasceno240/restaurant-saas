@@ -7,6 +7,7 @@ import { OrderDetailDto } from '../orders/dto/order-admin-response.dto';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { CreatePosOrderDto } from './dto/create-pos-order.dto';
 import { PosCouponPreviewDto } from '../coupons/dto/coupons.dto';
+import { QuoteItemsDto } from '../order-creation/dto/order-line.dto';
 
 @Injectable()
 export class PosOrdersService {
@@ -50,6 +51,12 @@ export class PosOrdersService {
     });
 
     return this.ordersService.findOneForTenant(user.tenantId, order.id);
+  }
+
+  // Read-only: what the basket costs right now, line by line (add-ons included), priced by the
+  // same code as the sale. The PDV shows this instead of its own sums; the sale prices it again.
+  quote(user: AuthenticatedRequestUser, dto: QuoteItemsDto) {
+    return this.orderCreation.quoteItems(user.tenantId, dto.items);
   }
 
   // Read-only: the same pricing and the same rules as createOrder(), nothing consumed or locked.

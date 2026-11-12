@@ -26,9 +26,10 @@ export interface ChosenOption {
   quantity: number;
 }
 
-// Frozen on the order line: names and prices as they were when the order was placed.
+// Frozen on the order line: names and prices as they were when the order was placed. The id is
+// null only when copied from an older snapshot whose option was deleted since (table checkout).
 export interface PricedOption {
-  optionItemId: string;
+  optionItemId: string | null;
   groupNameSnapshot: string;
   optionNameSnapshot: string;
   unitPriceCents: number;
@@ -47,9 +48,9 @@ export type OptionPricingResult =
 // Order of the result: the product's groups in their display order, then each group's options in
 // theirs (the kitchen reads them in the same order as the customer saw them).
 //
-// `enforceRequired`: the public checkout must satisfy every required group (minSelect > 0). The
-// staff flows (PDV) do not offer add-ons yet, so they sell the product at its base price and the
-// minimums are not checked there; the maximums and availability always are.
+// `enforceRequired`: every sale must satisfy each required group (minSelect > 0) - the public
+// checkout, the PDV and the table rounds all offer the add-ons. Kept as a switch for callers that
+// only want the maximums and availability checked; those are always checked.
 export function priceOptions(
   productName: string,
   groups: GroupForPricing[],

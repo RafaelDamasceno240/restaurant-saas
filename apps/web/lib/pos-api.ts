@@ -3,16 +3,25 @@ import { AdminOrderDetail } from './orders-api';
 import { StaffPaymentMethod } from './checkout-api';
 import type { CreditTerms } from './receivables-api';
 import type { CouponPreview } from './coupons-api';
+import type { ItemsQuote } from './staff-addons';
 
 // Deliberately minimal — only productId + quantity per item, exactly what
 // the backend's CreatePosOrderDto accepts. No price, no name, no subtotal,
 // no total: those are always recalculated server-side. No fulfillmentType
 // or address either — a counter sale is always PICKUP internally, set by
 // the backend, never chosen here.
+// One line: the product, how many, the add-ons of EACH unit (ids and quantities) and the note.
+export interface PosOrderLine {
+  productId: string;
+  quantity: number;
+  options?: { optionId: string; quantity: number }[];
+  notes?: string;
+}
+
 export interface CreatePosOrderInput {
   // Fatia 08: operating branch — re-validated by the backend on every call.
   branchId: string;
-  items: { productId: string; quantity: number }[];
+  items: PosOrderLine[];
   customerName?: string;
   customerPhone?: string;
   // A customer of the registry (needs customers.read). Only the id travels; when no name or
@@ -44,7 +53,12 @@ export function createPosOrder(
 // Read-only preview for the current basket (needs coupons.apply). Prices are never sent.
 export function previewPosCoupon(
   accessToken: string,
-  input: { branchId: string; items: { productId: string; quantity: number }[]; code: string; customerId?: string },
+  input: { branchId: string; items: PosOrderLine[]; code: string; customerId?: string },
 ): Promise<CouponPreview> {
   return apiFetch<CouponPreview>('/pos/orders/coupon-preview', { method: 'POST', body: input, accessToken });
+}
+
+// Read-only: what these lines cost right now, add-ons included, priced by the server (pos.create).
+export function quotePosItems(accessToken: string, items: PosOrderLine[]): Promise<ItemsQuote> {
+  return apiFetch<ItemsQuote>('/pos/orders/quote', { method: 'POST', body: { items }, accessToken });
 }

@@ -6,7 +6,7 @@ import { RequirePermissions } from '../../common/decorators/permissions.decorato
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { TabsService } from './tabs.service';
 import { CreateTabDto } from './dto/create-tab.dto';
-import { SendTabRoundDto } from './dto/send-tab-round.dto';
+import { QuoteTabRoundDto, SendTabRoundDto } from './dto/send-tab-round.dto';
 import { CancelTabItemDto } from './dto/cancel-tab-item.dto';
 import { TabRoundsService } from './tab-rounds.service';
 import { TabKitchenService } from './tab-kitchen.service';
@@ -62,6 +62,15 @@ export class TabsController {
     const result = await this.rounds.send(user, id, dto);
     if (result.idempotentReplay) res.status(HttpStatus.OK);
     return result;
+  }
+
+  // What the waiter's draft costs (add-ons included), priced by the server. Writes nothing.
+  @Post(':id/rounds/quote')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('tabs.update')
+  @ApiOperation({ summary: 'Preço de cada item do rascunho da rodada (adicionais incluídos); não grava nada' })
+  quoteRound(@CurrentUser() user: AuthenticatedRequestUser, @Param('id') id: string, @Body() dto: QuoteTabRoundDto) {
+    return this.rounds.quote(user, id, dto);
   }
 
   // B9: cancels some or all units of a sent item, with a reason. tabs.update for an item the

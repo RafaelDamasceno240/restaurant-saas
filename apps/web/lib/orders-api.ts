@@ -148,7 +148,15 @@ export interface KitchenTableRound {
   tableName: string | null;
   sentAt: string;
   status: KitchenRoundStatus;
-  items: { id: string; name: string; quantity: number; notes: string | null; status: KitchenRoundStatus }[];
+  items: {
+    id: string;
+    name: string;
+    quantity: number;
+    notes: string | null;
+    status: KitchenRoundStatus;
+    // The add-ons of EACH unit (absent from an API older than migration 22).
+    options?: { group: string; name: string; quantity: number }[];
+  }[];
 }
 
 export interface OrdersBoardColumn {

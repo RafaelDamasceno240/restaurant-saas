@@ -299,11 +299,16 @@ export function totalAfterCouponCents(subtotalCents: number, discountCents: numb
 export function couponPreviewKey(
   branchId: string,
   code: string,
-  items: { productId: string; quantity: number }[],
+  items: { productId: string; quantity: number; options?: { optionId: string; quantity: number }[] }[],
 ): string {
-  const basket = [...items]
-    .sort((a, b) => a.productId.localeCompare(b.productId))
-    .map((item) => `${item.productId}:${item.quantity}`)
-    .join(',');
+  // A line's add-ons change what it costs, so they are part of the basket too.
+  const line = (item: (typeof items)[number]) => {
+    const options = (item.options ?? [])
+      .map((o) => `${o.optionId}x${o.quantity}`)
+      .sort()
+      .join('+');
+    return options ? `${item.productId}:${item.quantity}:${options}` : `${item.productId}:${item.quantity}`;
+  };
+  const basket = items.map(line).sort().join(',');
   return `${branchId}|${normalizeCode(code)}|${basket}`;
 }

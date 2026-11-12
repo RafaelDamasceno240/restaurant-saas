@@ -1,15 +1,17 @@
 import { randomUUID } from 'crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
-import { Prisma, Product, TabItemStatus } from '@prisma/client';
+import { Prisma, TabItemStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { InventoryService } from '../inventory/inventory.service';
+import { OrderCreationService, PricedOrderItem } from '../order-creation/order-creation.service';
+import { normalizeLineNote } from '../order-creation/option-pricing';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { MAX_UNITS_PER_PRODUCT } from '../../common/util/item-quantity.util';
 import { TabsService } from './tabs.service';
-import { productOverTabUnitLimit, RoundLine, roundSignature } from './tab-calculations';
+import { mergeRoundOptions, productOverTabUnitLimit, RoundLine, roundSignature } from './tab-calculations';
 import { decideCancellation } from './tab-item-rules';
-import { SendTabRoundDto } from './dto/send-tab-round.dto';
+import { QuoteTabRoundDto, SendTabRoundDto } from './dto/send-tab-round.dto';
 import { CancelTabItemDto } from './dto/cancel-tab-item.dto';
 
 type Tx = Prisma.TransactionClient;
@@ -18,10 +20,26 @@ type Tx = Prisma.TransactionClient;
 // other channels are using at the same moment.
 const ROUND_TRANSACTION_OPTIONS = { timeout: 20_000, maxWait: 10_000 };
 
-type ExistingRound = Prisma.TabRoundGetPayload<{ include: { items: true } }>;
+// How a round is priced: the order pricing, with the 50-units limit left to the tab-wide check.
+const ROUND_PRICING = {
+  skipUnitLimit: true,
+  unavailableMessage: 'Um ou mais produtos da rodada não estão mais disponíveis.',
+};
+
+const ROUND_WITH_ITEMS = { items: { include: { options: true } } } satisfies Prisma.TabRoundInclude;
+
+type ExistingRound = Prisma.TabRoundGetPayload<{ include: typeof ROUND_WITH_ITEMS }>;
 
 type SendTxResult =
-  | { kind: 'created'; roundId: string; number: number; itemIds: string[]; movementIds: string[]; lines: RoundLine[] }
+  | {
+      kind: 'created';
+      roundId: string;
+      number: number;
+      itemIds: string[];
+      movementIds: string[];
+      lines: RoundLine[];
+      priced: PricedOrderItem[];
+    }
   | { kind: 'replay'; roundId: string; number: number };
 
 // ===========================================================================
@@ -32,6 +50,10 @@ type SendTxResult =
 //   locked, checked against what PENDING orders need (B2), recipes consumed (SALE per item).
 // Anything refused (closed tab, limit, no stock) rolls the whole round back: no item, no movement.
 // Stock is always the last lock, as in every order flow.
+// Add-ons (migration 22): before the transaction the round is priced exactly like a PDV or online
+// sale (OrderCreationService.priceItems: required groups, limits, sold out, tenant scope); each
+// item keeps its add-ons in tab_item_options and its unit price includes them. Add-ons have no
+// recipe, so the stock consumed is still the product's own.
 // Idempotency: the same key on the same tab returns the round it created (nothing new written),
 // whether the retry arrives after the first commit (found after the tab lock) or races it (the
 // UNIQUE (tabId, idempotencyKey) fires and the winner is returned). The same key with different
@@ -44,6 +66,7 @@ export class TabRoundsService {
     private readonly audit: AuditService,
     private readonly tabs: TabsService,
     private readonly inventory: InventoryService,
+    private readonly orderCreation: OrderCreationService,
   ) {}
 
   async send(user: AuthenticatedRequestUser, tabId: string, dto: SendTabRoundDto) {
@@ -51,20 +74,21 @@ export class TabRoundsService {
     const lines: RoundLine[] = dto.items.map((item) => ({
       productId: item.productId,
       quantity: item.quantity,
-      notes: item.notes?.trim() || null,
+      notes: normalizeLineNote(item.notes),
+      options: mergeRoundOptions(item.options),
     }));
 
     // A retry of a round already sent answers with that round even if a product was deactivated
-    // in the meantime, so the replay is looked for before the products are checked.
+    // (or an add-on sold out) in the meantime, so the replay is looked for before anything is priced.
     const known = await this.findByKey(tab.id, dto.idempotencyKey);
     if (known) return this.respond(user, tab.id, this.replayOrConflict(known, lines));
 
-    const productById = await this.loadProducts(user.tenantId, lines);
+    const priced = await this.priceLines(user.tenantId, dto.items);
 
     let result: SendTxResult;
     try {
       result = await this.prisma.$transaction(
-        (tx) => this.sendInTx(tx, user, tab, dto.idempotencyKey, lines, productById),
+        (tx) => this.sendInTx(tx, user, tab, dto.idempotencyKey, lines, priced),
         ROUND_TRANSACTION_OPTIONS,
       );
     } catch (error) {
@@ -89,6 +113,8 @@ export class TabRoundsService {
             tabItemId,
             productId: result.lines[index].productId,
             quantity: result.lines[index].quantity,
+            unitPriceCents: result.priced[index].unitPriceCents,
+            options: (result.priced[index].options ?? []).map((o) => ({ optionItemId: o.optionItemId, quantity: o.quantity })),
           })),
         },
       });
@@ -104,6 +130,13 @@ export class TabRoundsService {
       }
     }
     return this.respond(user, tab.id, result);
+  }
+
+  // Read-only: what the waiter's draft costs, line by line (add-ons included), priced by the same
+  // code as the round itself. Nothing is written or reserved; sending prices it all again.
+  async quote(user: AuthenticatedRequestUser, tabId: string, dto: QuoteTabRoundDto) {
+    await this.tabs.findTabForWrite(user, tabId);
+    return this.orderCreation.quoteItems(user.tenantId, dto.items, ROUND_PRICING);
   }
 
   // =========================================================================
@@ -220,14 +253,14 @@ export class TabRoundsService {
     tab: { id: string; branchId: string },
     idempotencyKey: string,
     lines: RoundLine[],
-    productById: Map<string, Product>,
+    priced: PricedOrderItem[],
   ): Promise<SendTxResult> {
     await this.tabs.lockTabAndAssertOpen(tx, tab.id, 'TAB_CLOSED');
 
     // Re-read AFTER the lock: a concurrent send with this key may have just committed.
     const existing = await tx.tabRound.findUnique({
       where: { tabId_idempotencyKey: { tabId: tab.id, idempotencyKey } },
-      include: { items: true },
+      include: ROUND_WITH_ITEMS,
     });
     if (existing) return this.replayOrConflict(existing, lines);
 
@@ -239,7 +272,7 @@ export class TabRoundsService {
     if (overLimit) {
       throw new BadRequestException({
         code: 'QUANTITY_LIMIT',
-        message: `No máximo ${MAX_UNITS_PER_PRODUCT} unidades de "${productById.get(overLimit)!.name}" na comanda.`,
+        message: `No máximo ${MAX_UNITS_PER_PRODUCT} unidades de "${priced.find((p) => p.productId === overLimit)!.productNameSnapshot}" na comanda.`,
       });
     }
 
@@ -260,27 +293,30 @@ export class TabRoundsService {
       select: { id: true },
     });
 
-    const items = lines.map((line, index) => {
-      const product = productById.get(line.productId)!;
-      return {
-        id: randomUUID(),
-        tenantId: user.tenantId,
-        tabId: tab.id,
-        roundId: round.id,
-        productId: product.id,
-        productNameSnapshot: product.name,
-        unitPriceCentsSnapshot: product.priceCents,
-        quantity: line.quantity,
-        notes: line.notes,
-        status: 'SENT' as const,
-        sentAt,
-        sentByUserId: user.userId,
-        // One millisecond apart, in the order the waiter listed them: the tab and the kitchen
-        // show the lines of a round as they were sent.
-        createdAt: new Date(sentAt.getTime() + index),
-      };
-    });
+    // Name and price (add-ons of one unit included) are the server's snapshot of this moment; a
+    // later change of the menu never touches them (same rule as an order line).
+    const items = priced.map((line, index) => ({
+      id: randomUUID(),
+      tenantId: user.tenantId,
+      tabId: tab.id,
+      roundId: round.id,
+      productId: line.productId,
+      productNameSnapshot: line.productNameSnapshot,
+      unitPriceCentsSnapshot: line.unitPriceCents,
+      quantity: line.quantity,
+      notes: line.notes ?? null,
+      status: 'SENT' as const,
+      sentAt,
+      sentByUserId: user.userId,
+      // One millisecond apart, in the order the waiter listed them: the tab and the kitchen
+      // show the lines of a round as they were sent.
+      createdAt: new Date(sentAt.getTime() + index),
+    }));
     await tx.tabItem.createMany({ data: items });
+    const options = priced.flatMap((line, index) =>
+      (line.options ?? []).map((option) => ({ ...option, tabItemId: items[index].id })),
+    );
+    if (options.length > 0) await tx.tabItemOption.createMany({ data: options });
 
     const movements = await this.inventory.consumeForTabRoundInTx(
       tx,
@@ -295,37 +331,36 @@ export class TabRoundsService {
       itemIds: items.map((item) => item.id),
       movementIds: movements.map((movement) => movement.id),
       lines,
+      priced,
     };
   }
 
-  // Every product re-read from the DB, scoped to THIS tenant and active=true, in one query. Same
-  // rule (and the same single 400 for "missing", "another tenant's" and "inactive") as the order
-  // creation, so the caller never learns which.
-  private async loadProducts(tenantId: string, lines: RoundLine[]): Promise<Map<string, Product>> {
-    const products = await this.prisma.product.findMany({
-      where: { id: { in: [...new Set(lines.map((line) => line.productId))] }, tenantId, active: true },
-    });
-    const productById = new Map(products.map((product) => [product.id, product]));
-    if (lines.some((line) => !productById.has(line.productId))) {
-      throw new BadRequestException({
-        code: 'PRODUCT_UNAVAILABLE',
-        message: 'Um ou mais produtos da rodada não estão mais disponíveis.',
-      });
-    }
-    return productById;
+  // The SAME pricing as a PDV or online sale (OrderCreationService.priceItems): every product
+  // re-read scoped to THIS tenant, active and not sold out, every add-on checked against the
+  // product's own groups (required groups, limits, sold out), one single 400 for "missing",
+  // "another tenant's" and "inactive" so the caller never learns which. The 50-units limit is
+  // checked over the whole tab inside the transaction instead.
+  private priceLines(tenantId: string, items: SendTabRoundDto['items']): Promise<PricedOrderItem[]> {
+    return this.orderCreation.priceItems(tenantId, items, { enforceRequiredOptions: true, ...ROUND_PRICING });
   }
 
   private findByKey(tabId: string, idempotencyKey: string) {
     return this.prisma.tabRound.findUnique({
       where: { tabId_idempotencyKey: { tabId, idempotencyKey } },
-      include: { items: true },
+      include: ROUND_WITH_ITEMS,
     });
   }
 
   private replayOrConflict(existing: ExistingRound, lines: RoundLine[]): SendTxResult {
-    // Quantity and notes of a sent item never change (a cancellation only counts cancelled
-    // units), so the round's items are still exactly what was sent.
-    if (roundSignature(existing.items) !== roundSignature(lines)) {
+    // Quantity, notes and add-ons of a sent item never change (a cancellation only counts
+    // cancelled units), so the round's items are still exactly what was sent.
+    const sent: RoundLine[] = existing.items.map((item) => ({
+      productId: item.productId,
+      quantity: item.quantity,
+      notes: item.notes,
+      options: item.options.map((o) => ({ optionItemId: o.optionItemId, quantity: o.quantity })),
+    }));
+    if (roundSignature(sent) !== roundSignature(lines)) {
       throw new ConflictException({
         code: 'IDEMPOTENCY_KEY_REUSED',
         message: 'Esta chave de idempotência já foi usada em outra rodada desta comanda.',

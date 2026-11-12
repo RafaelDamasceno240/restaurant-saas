@@ -62,6 +62,12 @@ export class OrderListResponseDto {
   @ApiProperty() meta!: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
+export class KitchenRoundItemOptionDto {
+  @ApiProperty() group!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() quantity!: number;
+}
+
 // B9: an item of a table round still in the kitchen's hands. `quantity` is what is still to be
 // made (cancelled units left out).
 export class KitchenRoundItemDto {
@@ -70,6 +76,8 @@ export class KitchenRoundItemDto {
   @ApiProperty() quantity!: number;
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
   @ApiProperty({ enum: ['SENT', 'PREPARING', 'READY'] }) status!: TabItemStatus;
+  // The add-ons of EACH unit, as frozen when the round was sent.
+  @ApiProperty({ type: [KitchenRoundItemOptionDto] }) options!: KitchenRoundItemOptionDto[];
 }
 
 // B9: one round sent from a table ("Mesa 4 · rodada 2"), with only its items still in production.

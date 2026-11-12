@@ -19,17 +19,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { FulfillmentType, PaymentMethod } from '@prisma/client';
 import { AllowExtraFields } from '../../../common/decorators/allow-extra-fields.decorator';
 import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
+import { OrderLineOptionDto } from '../../order-creation/dto/order-line.dto';
 
 // What a guest can pay with. ON_ACCOUNT (fiado) is never one of them.
 const PUBLIC_PAYMENT_METHODS: PaymentMethod[] = ['CASH', 'PIX', 'CARD'];
 
 // One add-on chosen for each unit of the line. Only the id and how many: the price, the group and
-// whether it belongs to this product at all are decided by the server (option-pricing.ts).
-export class OrderItemOptionInputDto {
-  @ApiProperty() @IsUUID() optionId!: string;
-
-  @ApiProperty({ example: 1, maximum: 50 }) @IsInt() @Min(1) @Max(50) quantity!: number;
-}
+// whether it belongs to this product at all are decided by the server (option-pricing.ts). The
+// same shape the staff flows (PDV, table rounds) send.
+export class OrderItemOptionInputDto extends OrderLineOptionDto {}
 
 export class OrderItemInputDto {
   @ApiProperty() @IsUUID() productId!: string;

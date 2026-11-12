@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
+import { OrderLineOptionDto } from '../../order-creation/dto/order-line.dto';
 
 // Same structural guarantee as CreateOrderDto / CreatePosOrderDto: no price/name field exists
 // here at all. The backend reads each Product itself and snapshots its name and price.
@@ -29,11 +30,30 @@ export class TabRoundItemDto {
   @Max(MAX_UNITS_PER_PRODUCT, { message: MAX_UNITS_MESSAGE })
   quantity!: number;
 
+  // The add-ons of EACH unit (ids and quantities only), priced and checked by the server exactly as
+  // a PDV or online sale: required groups, limits, availability (option-pricing.ts).
+  @ApiPropertyOptional({ type: [OrderLineOptionDto] })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => OrderLineOptionDto)
+  @ArrayMaxSize(50)
+  options?: OrderLineOptionDto[];
+
   @ApiPropertyOptional({ example: 'Sem cebola' })
   @IsOptional()
   @IsString()
   @MaxLength(300)
   notes?: string;
+}
+
+// Body of POST /tabs/:id/rounds/quote: what the waiter's draft costs, priced by the server.
+export class QuoteTabRoundDto {
+  @ApiProperty({ type: [TabRoundItemDto] })
+  @ValidateNested({ each: true })
+  @Type(() => TabRoundItemDto)
+  @ArrayMinSize(1, { message: 'A rodada precisa de pelo menos um item.' })
+  @ArrayMaxSize(50, { message: 'No máximo 50 itens por rodada.' })
+  items!: TabRoundItemDto[];
 }
 
 // B9: one "Enviar para a cozinha". The waiter's draft is sent whole: every item is created and

@@ -10,6 +10,7 @@ import {
   ImageIcon,
   Minus,
   NotebookPen,
+  Pencil,
   Plus,
   QrCode,
   ShoppingCart,
@@ -18,11 +19,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { ApiError } from '@/lib/api-client';
-import { categoriesApi, productsApi } from '@/lib/cardapio-api';
+import { Product, categoriesApi, optionGroupsApi, productsApi } from '@/lib/cardapio-api';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { formatCentsAsBRL } from '@/lib/money';
-import { MAX_UNITS_HINT, atUnitLimit } from '@/lib/cart-logic';
-import { createPosOrder, previewPosCoupon } from '@/lib/pos-api';
+import { MAX_UNITS_HINT, atUnitLimit, unitsOfProduct } from '@/lib/cart-logic';
+import { createPosOrder, previewPosCoupon, quotePosItems } from '@/lib/pos-api';
+import { needsPersonalization, optionsSummary, productSaleGroups, selectionFromOptions, toApiLine } from '@/lib/staff-addons';
+import { useServerQuote } from '@/lib/use-server-quote';
+import { ProductOptionsDialog, ProductOptionsInitial } from '@/components/sales/ProductOptionsDialog';
 import { CouponPreview } from '@/lib/coupons-api';
 import { couponApplyMessage, couponPreviewKey, totalAfterCouponCents } from '@/lib/coupons-logic';
 import { useActiveBranch } from '@/lib/use-active-branch';
@@ -37,6 +41,8 @@ import {
   getTotalQuantity,
   incrementItem,
   removeItem,
+  replaceLine,
+  roomFor,
 } from '@/lib/pos-logic';
 import { Alert, EmptyState, ErrorState, LoadingState } from '@/components/ds/States';
 import { Button } from '@/components/ds/Button';
@@ -123,10 +129,35 @@ export default function PdvPage() {
     enabled: !!accessToken,
   });
 
+  // Add-on groups of the menu (products.read), joined to each product by its optionGroupIds.
+  const optionGroupsQuery = useQuery({
+    queryKey: ['pdv-option-groups'],
+    queryFn: () => optionGroupsApi.list(accessToken as string),
+    enabled: !!accessToken,
+  });
+
+  // The product being personalized (a new line, or `editKey` = the cart line being edited).
+  const [personalizing, setPersonalizing] = useState<{
+    product: Product;
+    editKey: string | null;
+    initial: ProductOptionsInitial | null;
+  } | null>(null);
+  const personalizingGroups = personalizing ? productSaleGroups(personalizing.product, optionGroupsQuery.data) : [];
+
   const products = productsQuery.data ?? [];
   const visibleProducts = filterPosProducts(products, search, categoryId);
-  const subtotalCents = getSubtotalCents(cart);
+  const personalizableIds = new Set(products.filter((p) => p.optionGroupIds.length > 0).map((p) => p.id));
   const totalQuantity = getTotalQuantity(cart);
+
+  // What goes to the API for each line (ids, quantities, note - never a price), and what the
+  // server says these lines cost right now. The screen shows the server's numbers whenever they
+  // match the cart, and its own estimate (marked) while it asks.
+  const apiLines = cart.map(toApiLine);
+  const serverQuote = useServerQuote(apiLines, accessToken ? (lines) => quotePosItems(accessToken, lines) : null);
+  const estimatedSubtotalCents = getSubtotalCents(cart);
+  const subtotalCents = serverQuote.quote?.subtotalCents ?? estimatedSubtotalCents;
+  const lineSubtotalCents = (index: number) =>
+    serverQuote.quote?.items[index]?.subtotalCents ?? cart[index].priceCents * cart[index].quantity;
   // Applying coupons needs coupons.apply: OWNER/ADMIN/MANAGER/CASHIER (the API enforces it).
   const canApplyCoupon = (user?.roles ?? []).some((role) => ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER'].includes(role));
   // Reading and registering customers needs customers.read/create: the same four roles.
@@ -134,7 +165,7 @@ export default function PdvPage() {
   const couponCode = couponInput.trim();
   // A coupon limited per customer is valid or not depending on WHO buys: the preview belongs
   // to the customer it was asked for, too.
-  const previewKeyFor = (branch: string, code: string) => `${couponPreviewKey(branch, code, cart)}|${customer?.id ?? ''}`;
+  const previewKeyFor = (branch: string, code: string) => `${couponPreviewKey(branch, code, apiLines)}|${customer?.id ?? ''}`;
   const currentPreviewKey = branchId && couponCode ? previewKeyFor(branchId, couponCode) : null;
   const appliedCoupon = couponPreview && couponPreview.key === currentPreviewKey ? couponPreview.preview : null;
   const discountCents = appliedCoupon?.discountCents ?? 0;
@@ -155,7 +186,16 @@ export default function PdvPage() {
         ? 'Não há valor a lançar no fiado nesta venda.'
         : creditBlock;
 
-  function addProduct(product: { id: string; name: string; price: number }) {
+  // A product with add-ons opens its personalization; one without is added at once (the fast
+  // counter flow: tap, tap, tap). While the groups are still loading, the dialog waits for them.
+  function addProduct(product: Product) {
+    const hasGroups = optionGroupsQuery.data
+      ? needsPersonalization(productSaleGroups(product, optionGroupsQuery.data))
+      : product.optionGroupIds.length > 0;
+    if (hasGroups) {
+      setPersonalizing({ product, editKey: null, initial: null });
+      return;
+    }
     setCart((prev) =>
       addToCart(prev, {
         productId: product.id,
@@ -163,6 +203,19 @@ export default function PdvPage() {
         priceCents: Math.round(product.price * 100),
       }),
     );
+  }
+
+  // Opens a cart line again with its add-ons, note and quantity, to change any of them.
+  function editLine(key: string) {
+    const line = cart.find((item) => item.key === key);
+    const product = products.find((p) => p.id === line?.productId);
+    if (!line || !product) return;
+    const { selection, dropped } = selectionFromOptions(productSaleGroups(product, optionGroupsQuery.data), line.options);
+    setPersonalizing({
+      product,
+      editKey: key,
+      initial: { selection, notes: line.notes ?? '', quantity: line.quantity, droppedCount: dropped.length },
+    });
   }
 
   async function applyCoupon() {
@@ -174,7 +227,7 @@ export default function PdvPage() {
     try {
       const preview = await previewPosCoupon(accessToken as string, {
         branchId,
-        items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        items: apiLines,
         code: couponCode,
         ...(customer ? { customerId: customer.id } : {}),
       });
@@ -238,7 +291,7 @@ export default function PdvPage() {
       saleKeyRef.current ??= createIdempotencyKey();
       const order = await createPosOrder(accessToken as string, {
         branchId,
-        items: cart.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        items: apiLines,
         ...(customer
           ? { customerId: customer.id }
           : { customerName: customerName.trim() || undefined, customerPhone: customerPhone.trim() || undefined }),
@@ -270,11 +323,14 @@ export default function PdvPage() {
   const finalizeRef = useRef(handleFinalize);
   finalizeRef.current = handleFinalize;
   const canFinalizeRef = useRef(false);
-  canFinalizeRef.current = !isSubmitting && cart.length > 0 && !confirmation;
+  canFinalizeRef.current = !isSubmitting && cart.length > 0 && !confirmation && !personalizing;
+  const dialogOpenRef = useRef(false);
+  dialogOpenRef.current = personalizing !== null;
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement;
       const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+      if (dialogOpenRef.current) return;
       if (event.key === '/' && !typing) {
         event.preventDefault();
         searchRef.current?.focus();
@@ -367,19 +423,41 @@ export default function PdvPage() {
           </div>
         ) : (
           <ul className="divide-y divide-line">
-            {cart.map((item) => (
-              <li key={item.productId} className="animate-fade-in px-4 py-3">
+            {cart.map((item, index) => {
+              const quoted = serverQuote.quote?.items[index];
+              const productAtLimit = atUnitLimit(unitsOfProduct(cart, item.productId));
+              // Any line opens again: add-ons, the note for the kitchen and the quantity (a product
+              // without add-ons only gets the note there).
+              const editable = products.some((p) => p.id === item.productId);
+              return (
+              <li key={item.key} className="animate-fade-in px-4 py-3">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="text-sm font-medium text-foreground">{item.name}</span>
-                  <span className="shrink-0 text-sm font-semibold text-foreground">
-                    {formatBRL(item.priceCents * item.quantity)}
+                  <div className="min-w-0">
+                    <span className="text-sm font-medium text-foreground">{item.name}</span>
+                    {item.options.length > 0 && (
+                      <ul className="mt-0.5 space-y-0.5 text-xs text-muted-foreground" aria-label={`Adicionais de ${item.name}`}>
+                        {item.options.map((option) => (
+                          <li key={option.optionId}>
+                            + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                            {option.name}
+                            {option.priceCents > 0 && (
+                              <span className="text-subtle"> ({formatBRL(option.priceCents * option.quantity)})</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {item.notes && <p className="mt-0.5 text-xs italic text-warning">Obs.: {item.notes}</p>}
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-foreground">
+                    {formatBRL(lineSubtotalCents(index))}
                   </span>
                 </div>
                 <div className="mt-2 flex items-center justify-between">
                   <div className="flex items-center gap-1 rounded-ctl border border-line bg-surface-2 p-0.5">
                     <button
                       type="button"
-                      onClick={() => setCart((prev) => decrementItem(prev, item.productId))}
+                      onClick={() => setCart((prev) => decrementItem(prev, item.key))}
                       aria-label={`Diminuir ${item.name}`}
                       className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95 touch:h-11 touch:w-11"
                     >
@@ -388,30 +466,49 @@ export default function PdvPage() {
                     <span className="w-7 text-center text-sm font-semibold text-foreground">{item.quantity}</span>
                     <button
                       type="button"
-                      onClick={() => setCart((prev) => incrementItem(prev, item.productId))}
-                      disabled={atUnitLimit(item.quantity)}
-                      title={atUnitLimit(item.quantity) ? MAX_UNITS_HINT : undefined}
+                      onClick={() => setCart((prev) => incrementItem(prev, item.key))}
+                      disabled={productAtLimit}
+                      title={productAtLimit ? MAX_UNITS_HINT : undefined}
                       aria-label={`Aumentar ${item.name}`}
                       className="flex h-9 w-9 items-center justify-center rounded-md text-foreground transition-colors hover:bg-surface-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 touch:h-11 touch:w-11"
                     >
                       <Plus className="h-4 w-4" />
                     </button>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-subtle">{formatBRL(item.priceCents)} un.</span>
+                  <div className="flex items-center gap-1">
+                    <span className="mr-1 text-right text-xs leading-tight text-subtle">
+                      {formatBRL(quoted?.unitPriceCents ?? item.priceCents)} un.
+                      {(quoted?.extrasCents ?? 0) > 0 && (
+                        <span className="block">
+                          {formatBRL(quoted!.basePriceCents)} + {formatBRL(quoted!.extrasCents)}
+                        </span>
+                      )}
+                    </span>
+                    {editable && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Editar ${item.name}${item.options.length ? ` (${optionsSummary(item.options)})` : ''}`}
+                        title={item.options.length || personalizableIds.has(item.productId) ? 'Editar adicionais e observação' : 'Adicionar observação'}
+                        onClick={() => editLine(item.key)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button
                       variant="danger-ghost"
                       size="icon"
-                      aria-label={`Remover ${item.name}`}
-                      onClick={() => setCart((prev) => removeItem(prev, item.productId))}
+                      aria-label={`Remover ${item.name}${item.options.length ? ` (${optionsSummary(item.options)})` : ''}`}
+                      onClick={() => setCart((prev) => removeItem(prev, item.key))}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
-                {atUnitLimit(item.quantity) && <p className="mt-1 text-xs text-subtle">{MAX_UNITS_HINT}</p>}
+                {productAtLimit && <p className="mt-1 text-xs text-subtle">{MAX_UNITS_HINT}</p>}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
@@ -585,6 +682,12 @@ export default function PdvPage() {
           <span className="text-sm text-muted-foreground">Total</span>
           <span className="text-2xl font-bold tracking-tight text-foreground">{formatBRL(totalCents)}</span>
         </div>
+        {cart.length > 0 && (
+          <p className="-mt-2 text-right text-2xs text-subtle" role="status" aria-live="polite">
+            {serverQuote.quote ? 'Valores conferidos pelo sistema' : serverQuote.pending ? 'Conferindo valores...' : 'Valor estimado; o sistema confere ao finalizar'}
+          </p>
+        )}
+        {serverQuote.error && <Alert>{serverQuote.error}</Alert>}
 
         {error && <Alert>{error}</Alert>}
 
@@ -683,7 +786,8 @@ export default function PdvPage() {
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {visibleProducts.map((product) => {
-                const inCart = cart.find((i) => i.productId === product.id)?.quantity ?? 0;
+                const inCart = unitsOfProduct(cart, product.id);
+                const personalizable = product.optionGroupIds.length > 0;
                 return (
                   <button
                     key={product.id}
@@ -711,7 +815,7 @@ export default function PdvPage() {
                       <span className="mt-auto text-base font-bold text-accent">{formatBRL(Math.round(product.price * 100))}</span>
                       <span className="mt-1 flex h-9 items-center justify-center gap-1.5 rounded-ctl bg-accent/10 text-xs font-semibold text-accent transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                         <Plus className="h-3.5 w-3.5" aria-hidden />
-                        Adicionar
+                        {personalizable ? 'Personalizar' : 'Adicionar'}
                       </span>
                     </span>
                   </button>
@@ -723,6 +827,32 @@ export default function PdvPage() {
       </section>
 
       {cartPanel}
+
+      <ProductOptionsDialog
+        open={personalizing !== null}
+        product={personalizing?.product ?? null}
+        groups={personalizingGroups}
+        loading={optionGroupsQuery.isLoading}
+        initial={personalizing?.initial}
+        // The line being edited gives its own units back to the 50-per-product allowance.
+        maxQuantity={
+          personalizing
+            ? roomFor(
+                cart.filter((item) => item.key !== personalizing.editKey),
+                personalizing.product.id,
+              )
+            : 0
+        }
+        noteMax={140}
+        confirmLabel={personalizing?.editKey ? 'Salvar alterações' : 'Adicionar à venda'}
+        onClose={() => setPersonalizing(null)}
+        onConfirm={(line) => {
+          const input = { productId: line.productId, name: line.name, priceCents: line.unitPriceCents, options: line.options, notes: line.notes, quantity: line.quantity };
+          setCart((prev) => (personalizing?.editKey ? replaceLine(prev, personalizing.editKey, input) : addToCart(prev, input)));
+          setPersonalizing(null);
+          searchRef.current?.focus();
+        }}
+      />
 
       {/* Small screens: sticky bar that opens the cart sheet. */}
       {!cartOpen && (

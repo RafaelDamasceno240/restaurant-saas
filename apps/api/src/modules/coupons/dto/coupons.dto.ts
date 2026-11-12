@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
+import { StaffOrderLineDto } from '../../order-creation/dto/order-line.dto';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -207,14 +207,9 @@ export class ListCouponsQueryDto {
 
 // ---- preview (read-only) ---------------------------------------------------------------
 
-export class PreviewItemDto {
-  @ApiProperty() @IsUUID() productId!: string;
-  @ApiProperty({ example: 2, maximum: MAX_UNITS_PER_PRODUCT })
-  @IsInt()
-  @Min(1)
-  @Max(MAX_UNITS_PER_PRODUCT, { message: MAX_UNITS_MESSAGE })
-  quantity!: number;
-}
+// The same line the sale sends (add-ons and note included), so the preview prices the basket
+// exactly as the sale will.
+export class PreviewItemDto extends StaffOrderLineDto {}
 
 // Body of the PDV preview. Prices are NEVER part of it: the server prices the items.
 export class PosCouponPreviewDto {

@@ -6,6 +6,7 @@ import { AuthenticatedRequestUser } from '../../common/types/authenticated-reque
 import { PosOrdersService } from './pos-orders.service';
 import { CreatePosOrderDto } from './dto/create-pos-order.dto';
 import { PosCouponPreviewDto } from '../coupons/dto/coupons.dto';
+import { QuoteItemsDto } from '../order-creation/dto/order-line.dto';
 
 @ApiTags('pos')
 @ApiBearerAuth()
@@ -18,6 +19,14 @@ export class PosOrdersController {
   @ApiOperation({ summary: 'Cria um pedido de balcão (source=COUNTER); preço sempre recalculado no backend' })
   createOrder(@CurrentUser() user: AuthenticatedRequestUser, @Body() dto: CreatePosOrderDto) {
     return this.posOrdersService.createOrder(user, dto);
+  }
+
+  @Post('quote')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('pos.create')
+  @ApiOperation({ summary: 'Preço de cada item da venda (adicionais incluídos), calculado no servidor; não grava nada' })
+  quote(@CurrentUser() user: AuthenticatedRequestUser, @Body() dto: QuoteItemsDto) {
+    return this.posOrdersService.quote(user, dto);
   }
 
   @Post('coupon-preview')
