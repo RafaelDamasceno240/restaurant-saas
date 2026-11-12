@@ -10,6 +10,7 @@ import {
   Gift,
   LayoutDashboard,
   LayoutGrid,
+  MessageCircle,
   NotebookPen,
   Package,
   Settings,
@@ -65,6 +66,20 @@ export const DASHBOARD_NAV: NavGroup[] = [
       { key: 'cozinha', label: 'Cozinha', icon: ChefHat, href: '/dashboard/cozinha', roles: [...MANAGEMENT, 'KITCHEN'], permission: 'orders.update' },
       { key: 'delivery', label: 'Delivery', icon: Bike, href: '/dashboard/delivery', roles: [...MANAGEMENT, 'DELIVERY'], permission: 'delivery.read' },
       { key: 'caixa', label: 'Caixa', icon: Wallet, href: '/dashboard/caixa', roles: [...MANAGEMENT, 'CASHIER'], permission: 'cash.read' },
+    ],
+  },
+  {
+    key: 'atendimento',
+    label: 'Atendimento',
+    items: [
+      {
+        key: 'whatsapp',
+        label: 'WhatsApp',
+        icon: MessageCircle,
+        href: '/dashboard/atendimento/whatsapp',
+        roles: [...MANAGEMENT, 'CASHIER'],
+        permission: 'whatsapp.read',
+      },
     ],
   },
   {
