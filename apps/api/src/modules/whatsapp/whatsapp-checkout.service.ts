@@ -1,6 +1,7 @@
 import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isTenantBlocked } from '../../common/util/tenant-status.util';
+import { publicImageUrl } from '../media/media-url';
 import { AssistantEngineService } from './assistant/assistant-engine.service';
 import { CartLine, PricingRefused } from './assistant/assistant-toolbox';
 import { hashToken } from './whatsapp-reply.service';
@@ -8,6 +9,8 @@ import { hashToken } from './whatsapp-reply.service';
 export interface SharedCartLine {
   productId: string;
   name: string;
+  // The same photo the public menu shows (uploaded/imported image, else the pasted link), or null.
+  imageUrl: string | null;
   quantity: number;
   unitPriceCents: number;
   options: {
@@ -56,6 +59,15 @@ export class WhatsappCheckoutService {
       });
 
     const lines = Array.isArray(link.cart) ? (link.cart as unknown as CartLine[]) : [];
+    // Photos of this restaurant's products only (tenant-scoped), resolved like the public menu.
+    const photos = new Map(
+      (
+        await this.prisma.product.findMany({
+          where: { tenantId: tenant.id, id: { in: lines.map((l) => l.productId) } },
+          select: { id: true, imageMediaId: true, imageUrl: true },
+        })
+      ).map((p) => [p.id, publicImageUrl(p.imageMediaId, p.imageUrl)]),
+    );
     const items: SharedCartLine[] = [];
     for (const line of lines) {
       try {
@@ -63,6 +75,7 @@ export class WhatsappCheckoutService {
         items.push({
           productId: priced.productId,
           name: priced.name,
+          imageUrl: photos.get(priced.productId) ?? null,
           quantity: priced.quantity,
           unitPriceCents: priced.unitPriceCents,
           options: priced.options.map((o) => ({
@@ -85,6 +98,7 @@ export class WhatsappCheckoutService {
         items.push({
           productId: line.productId,
           name: product?.name ?? 'Produto indisponível',
+          imageUrl: photos.get(line.productId) ?? null,
           quantity: line.quantity,
           unitPriceCents: 0,
           options: [],

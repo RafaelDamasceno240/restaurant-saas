@@ -451,6 +451,33 @@ describe('WhatsApp assistant: orders, links, hand-off and failures (e2e)', () =>
     });
     expect(JSON.stringify(cart.body)).not.toContain(confirmed.waId);
 
+    // The photo of each line is the one the public menu shows (correcao-fotos-produtos): none yet,
+    // then an imported photo (media_assets) becomes its public URL. Nothing is copied.
+    expect(cart.body.items[0].imageUrl).toBeNull();
+    const photo = await prisma.mediaAsset.create({
+      data: {
+        tenantId: burger.tenantId,
+        contentType: 'image/png',
+        sizeBytes: 4,
+        sha256: createHash('sha256').update(`e2e-whatsapp-cart-photo-${Date.now()}`).digest('hex'),
+        data: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+      },
+    });
+    await prisma.product.update({
+      where: { id: burger.products.smash },
+      data: { imageMediaId: photo.id },
+    });
+    const withPhoto = await request(server)
+      .get(`/v1/public/whatsapp-carts/${burger.slug}/${token}`)
+      .expect(200);
+    expect(withPhoto.body.items[0].imageUrl).toBe(`/api/public/media/${photo.id}`);
+    expect(withPhoto.body.subtotalCents).toBe(6200);
+    await prisma.product.update({
+      where: { id: burger.products.smash },
+      data: { imageMediaId: null },
+    });
+    await prisma.mediaAsset.delete({ where: { id: photo.id } });
+
     // Priced again when opened: a new price shows; a sold-out product is flagged, not charged.
     await prisma.product.update({
       where: { id: burger.products.smash },
