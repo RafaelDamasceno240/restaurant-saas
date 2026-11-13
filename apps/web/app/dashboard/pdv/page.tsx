@@ -747,9 +747,11 @@ export default function PdvPage() {
                     className="group relative flex flex-col overflow-hidden rounded-card border border-line bg-surface text-left transition-all hover:border-line-strong hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <span className="relative flex aspect-[4/3] w-full items-center justify-center bg-surface-2">
-                      {product.imageUrl ? (
+                      {product.photoUrl ? (
+                        // photoUrl: the uploaded/imported photo, else the pasted link (what the public
+                        // menu shows). imageUrl alone is empty for imported products.
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
+                        <img src={product.photoUrl} alt="" className="h-full w-full object-cover" />
                       ) : (
                         <ImageIcon className="h-8 w-8 text-subtle" aria-hidden />
                       )}

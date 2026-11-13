@@ -118,7 +118,8 @@ export function cartFromShared(shared: SharedCart): CartState {
         productId: i.productId,
         name: i.name,
         priceCents: i.unitPriceCents,
-        imageUrl: null,
+        // Same photo as the public menu (resolved by the server); none when the product has none.
+        imageUrl: i.imageUrl ?? null,
         quantity: i.quantity,
         options,
         notes: i.notes,

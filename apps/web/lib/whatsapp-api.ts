@@ -72,6 +72,8 @@ export interface SharedCart {
   items: {
     productId: string;
     name: string;
+    // The photo the public menu shows (resolved by the server), or null.
+    imageUrl?: string | null;
     quantity: number;
     unitPriceCents: number;
     options: {

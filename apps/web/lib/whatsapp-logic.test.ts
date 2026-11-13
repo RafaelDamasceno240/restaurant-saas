@@ -47,6 +47,7 @@ describe('whatsapp-logic', () => {
         {
           productId: 'p1',
           name: 'Smash',
+          imageUrl: '/api/public/media/11111111-1111-4111-8111-111111111111',
           quantity: 2,
           unitPriceCents: 3100,
           options: [
@@ -82,7 +83,7 @@ describe('whatsapp-logic', () => {
         productId: 'p1',
         name: 'Smash',
         priceCents: 3100,
-        imageUrl: null,
+        imageUrl: '/api/public/media/11111111-1111-4111-8111-111111111111',
         quantity: 2,
         options: [
           {
@@ -96,5 +97,27 @@ describe('whatsapp-logic', () => {
         notes: 'sem cebola',
       },
     ]);
+  });
+
+  it('keeps the generic icon (no photo) when the product has none or the server sent none', () => {
+    const line = {
+      productId: 'p3',
+      name: 'Suco',
+      quantity: 1,
+      unitPriceCents: 900,
+      options: [],
+      notes: null,
+      available: true,
+      problem: null,
+    };
+    const base = {
+      restaurant: { name: 'R', slug: 'r' },
+      expiresAt: '2026-11-12T22:00:00.000Z',
+      subtotalCents: 900,
+    };
+    expect(
+      cartFromShared({ ...base, items: [{ ...line, imageUrl: null }] }).items[0].imageUrl,
+    ).toBeNull();
+    expect(cartFromShared({ ...base, items: [line] }).items[0].imageUrl).toBeNull();
   });
 });
