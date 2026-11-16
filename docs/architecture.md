@@ -14,7 +14,7 @@ serviço independente no futuro sem reescrever os demais.
 | `users`    | leitura de usuários — sempre filtrada pelo tenant autenticado |
 | `tenants`  | leitura do tenant do usuário autenticado                       |
 | `branches` | leitura de unidades do tenant autenticado                      |
-| `audit`    | escrita centralizada de `AuditLog`, best-effort                |
+| `audit`    | escrita centralizada de `AuditLog`: `record` (melhor esforço, depois do commit) e `recordTx` (dentro da transação da operação, usada pelos ledgers) |
 | `health`   | `/health`, `/health/live`, `/health/ready`                     |
 | `categories`, `products` | cardápio administrativo (preço em centavos no banco)  |
 | `public-menu` | cardápio público por slug, sem autenticação                |
@@ -26,6 +26,16 @@ serviço independente no futuro sem reescrever os demais.
 | `cash`     | sessões de caixa, suprimento, sangria, fechamento              |
 | `tables`, `tabs` | mesas e comandas, checkout idempotente da comanda        |
 | `inventory` | insumos, saldos, movimentações, fichas técnicas, inventário   |
+| `purchases` | fornecedores e compras de estoque (rascunho, recebimento, cancelamento) |
+| `delivery` | taxa e pedido mínimo por unidade, despacho, falha, reentrega, entregador |
+| `customers` | cadastro de clientes, histórico, métricas, segmentos e vínculo com pedidos |
+| `coupons`  | cupons de desconto, validação e consumo dentro da transação do pedido |
+| `loyalty`  | programa de pontos: ledger, recompensas, resgate, ajuste e estorno |
+| `cashback` | saldo de cashback em centavos: ledger, uso em vendas, devolução, expiração |
+| `receivables` | fiado / contas a receber: limite, parcelas, recebimentos, estornos |
+| `order-effects` | ponto único do que acontece com os benefícios quando um pedido é concluído, cancelado ou muda de cliente |
+| `reports`  | relatórios operacionais somente leitura (vendas, produtos, clientes, estoque, delivery, caixa) |
+| `redis`    | cliente Redis global (lista de sessões revogadas)             |
 | `prisma`   | `PrismaService` global, injetado nos demais módulos            |
 | `common`   | guards, decorators, filtro de exceções, middleware, logger     |
 
@@ -40,6 +50,20 @@ Request → RequestIdMiddleware → JwtAuthGuard → RolesGuard → PermissionsG
 explicitamente (register, login, refresh, health). Isso implementa
 "seguro por padrão": esquecer de proteger uma rota nova é impossível — é
 preciso decidir ativamente torná-la pública.
+
+## Transação do pedido e ordem de travas
+
+Criar, concluir e cancelar um pedido movem vários registros financeiros (caixa, cupom, cashback, fiado, pontos, estoque) em **uma única transação**: ou tudo é gravado, ou nada. Cada registro é protegido por trava de linha (`SELECT ... FOR UPDATE`), e todos os fluxos pegam as travas **na mesma ordem**:
+
+```
+linha do pedido → sessão de caixa → cupom → conta de cashback → conta de crédito (fiado) → conta de fidelidade → saldos de estoque
+```
+
+O cancelamento só trava a sessão de caixa quando o pedido tem uma venda em dinheiro a devolver (movimento `SALE_REFUND`, na sessão aberta da unidade; sem caixa aberto o cancelamento é recusado). A entrega (`deliveries`) é travada depois da sessão de caixa. Desde 2026-10-23 (correção B3 do piloto), concluir um pedido pago em dinheiro que ainda não entrou no caixa (online: `COMPLETED` ou `DELIVERED`) também trava a sessão de caixa, no mesmo lugar da ordem (pedido -> sessão de caixa -> entrega), e grava o `SALE` na mesma transação. Ao fazer um pedido `PENDING`, os saldos de estoque dos insumos dele são travados no fim da transação (correção B2), mantendo o estoque como última trava.
+
+A ordem única é o que impede deadlock entre, por exemplo, o fechamento de uma mesa e o cancelamento de outro pedido do mesmo cliente. Um fluxo novo que trave mais de um desses registros deve seguir essa ordem. `test/financial-chain.e2e-spec.ts` exercita os módulos juntos, inclusive esse cenário.
+
+Dinheiro é sempre `Int` em centavos; o servidor recalcula preço, desconto, taxa e total e nunca confia em valor vindo do cliente.
 
 ## Configuração
 
@@ -82,5 +106,5 @@ imediato.
 
 Nenhuma interface de provedor de pagamento, fiscal ou de mensageria existe
 (o enum `PaymentProvider` só tem `INTERNAL`) — a Fase 01 pediu explicitamente
-para não antecipar abstrações vazias. Quando a Fase 11 (Pagamentos) ou 12 (NFC-e) chegar, essas
+para não antecipar abstrações vazias. Quando um gateway de pagamento ou a NFC-e forem implementados, essas
 interfaces devem nascer junto com o primeiro provider real.

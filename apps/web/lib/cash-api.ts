@@ -1,8 +1,23 @@
 import { apiFetch } from './api-client';
+import { formatReais } from './money';
 
 // All money in the cash module travels as INTEGER CENTS, both ways. Expected
 // balance and difference are always computed by the backend.
-export type CashMovementType = 'SALE' | 'SUPPLY' | 'WITHDRAWAL';
+// RECEIVABLE_PAYMENT / RECEIVABLE_REFUND: a customer's debt (fiado) received in cash, and the
+// reversal of such a receipt. Both are written by the receivables module, never by this screen.
+// SALE_REFUND: a sale paid in cash that was cancelled; written by the order cancellation.
+export type CashMovementType =
+  | 'SALE'
+  | 'SUPPLY'
+  | 'WITHDRAWAL'
+  | 'RECEIVABLE_PAYMENT'
+  | 'RECEIVABLE_REFUND'
+  | 'SALE_REFUND';
+
+// Money leaving the drawer (shown with a minus sign).
+export function isCashOutflow(type: CashMovementType): boolean {
+  return type === 'WITHDRAWAL' || type === 'RECEIVABLE_REFUND' || type === 'SALE_REFUND';
+}
 
 export interface CashMovement {
   id: string;
@@ -21,7 +36,15 @@ export interface CashSession {
   branchName: string;
   status: 'OPEN' | 'CLOSED';
   openingBalanceCents: number;
-  totals: { salesCents: number; suppliesCents: number; withdrawalsCents: number };
+  totals: {
+    salesCents: number;
+    suppliesCents: number;
+    withdrawalsCents: number;
+    receivablePaymentsCents: number;
+    receivableRefundsCents: number;
+    // Cancelled cash sales given back. salesCents stays gross: net = salesCents - saleRefundsCents.
+    saleRefundsCents: number;
+  };
   expectedBalanceCents: number | null;
   countedClosingBalanceCents: number | null;
   differenceCents: number | null;
@@ -80,5 +103,5 @@ export function parseBRLToCents(input: string): number | null {
 export function formatCents(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return '—';
   const sign = cents < 0 ? '-' : '';
-  return `${sign}R$ ${(Math.abs(cents) / 100).toFixed(2).replace('.', ',')}`;
+  return `${sign}R$ ${formatReais(cents)}`;
 }

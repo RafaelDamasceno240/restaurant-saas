@@ -2,6 +2,9 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { getOrder } from '@/lib/checkout-api';
 import { ApiError } from '@/lib/api-client';
+import { formatCentsAsBRL, toCents } from '@/lib/money';
+import { trackingHeading } from '@/lib/order-tracking';
+import { CartLineDetails } from '@/components/menu/CartLineDetails';
 
 interface PageProps {
   params: { slug: string; orderId: string };
@@ -30,7 +33,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 function formatBRL(value: number): string {
-  return `R$ ${value.toFixed(2).replace('.', ',')}`;
+  return formatCentsAsBRL(toCents(value));
 }
 
 // Server Component, same pattern as the public menu page: fetch happens on
@@ -54,13 +57,15 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
     );
   }
 
+  const heading = trackingHeading(order.status);
+
   return (
     <main className="mx-auto min-h-screen max-w-2xl space-y-6 bg-background px-4 py-10">
       <div className="rounded-xl border border-line bg-surface p-6 text-center">
         <p className="text-3xl" aria-hidden>
-          ✅
+          {heading.icon}
         </p>
-        <h1 className="mt-2 text-xl font-semibold">Pedido recebido!</h1>
+        <h1 className="mt-2 text-xl font-semibold">{heading.title}</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Pedido <span className="font-medium text-foreground">#{order.orderNumber}</span> ·{' '}
           {STATUS_LABEL[order.status] ?? order.status}
@@ -70,12 +75,16 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
       <section className="rounded-xl border border-line bg-surface p-4">
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Itens</h2>
         <ul className="divide-y divide-line">
-          {order.items.map((item) => (
-            <li key={item.productId} className="flex items-center justify-between py-2 text-sm">
-              <span>
+          {order.items.map((item, index) => (
+            <li key={`${item.productId}-${index}`} className="flex items-start justify-between gap-3 py-2 text-sm">
+              <span className="min-w-0">
                 {item.quantity}× {item.name}
+                <CartLineDetails
+                  options={(item.options ?? []).map((o) => ({ name: o.name, quantity: o.quantity }))}
+                  notes={item.notes}
+                />
               </span>
-              <span className="font-medium">{formatBRL(item.subtotal)}</span>
+              <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">{formatBRL(item.subtotal)}</span>
             </li>
           ))}
         </ul>
@@ -85,10 +94,10 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
             <span>− {formatBRL(order.discount)}</span>
           </div>
         )}
-        {order.deliveryFee > 0 && (
+        {(order.deliveryFee > 0 || order.fulfillmentType === 'DELIVERY') && (
           <div className="mt-2 flex items-center justify-between border-t border-line pt-2 text-sm text-muted-foreground">
             <span>Taxa de entrega</span>
-            <span>{formatBRL(order.deliveryFee)}</span>
+            <span>{order.deliveryFee > 0 ? formatBRL(order.deliveryFee) : 'Grátis'}</span>
           </div>
         )}
         <div className="mt-2 flex items-center justify-between border-t border-line pt-2 font-semibold">
@@ -126,7 +135,7 @@ export default async function OrderConfirmationPage({ params }: PageProps) {
       )}
 
       <div className="text-center">
-        <Link href={`/menu/${params.slug}`} className="text-sm text-muted-foreground underline">
+        <Link href={`/menu/${params.slug}`} className="inline-block py-3 text-sm text-muted-foreground underline">
           Voltar ao cardápio
         </Link>
       </div>

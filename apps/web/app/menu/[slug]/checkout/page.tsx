@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useCart } from '@/lib/cart-context';
+import { toOrderItems } from '@/lib/cart-logic';
+import { CartLineDetails } from '@/components/menu/CartLineDetails';
 import { createIdempotencyKey } from '@/lib/idempotency-key';
 import { formatCentsAsBRL } from '@/lib/money';
 import { getPublicMenu, PublicMenuDelivery } from '@/lib/public-menu-api';
@@ -24,6 +26,9 @@ import { couponApplyMessage, couponPreviewKey, totalAfterCouponCents } from '@/l
 interface PageProps {
   params: { slug: string };
 }
+
+const CLOSED_MESSAGE =
+  'O restaurante está fechado agora e não está recebendo pedidos. Confira o horário de funcionamento no cardápio.';
 
 const emptyAddress = {
   street: '',
@@ -50,6 +55,12 @@ export default function CheckoutPage({ params }: PageProps) {
   const [notes, setNotes] = useState('');
   const [deliveryNotes, setDeliveryNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
+  // The error is printed at the end of the form, right above the fixed bottom bar: on a phone it
+  // would stay out of sight (B2: "sem estoque" must be seen), so it is brought into view.
+  const errorRef = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [error]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Coupon: only the CODE is sent with the order. The preview is a read-only convenience valid for
   // the exact basket it was asked for; the order itself is re-validated and recalculated by the
@@ -62,6 +73,9 @@ export default function CheckoutPage({ params }: PageProps) {
   // Delivery terms are informational here; the server is the source of truth and
   // recomputes the fee / enforces the minimum on order creation.
   const [terms, setTerms] = useState<PublicMenuDelivery | null>(null);
+  // Same "Aberto agora" the menu shows. Only a convenience: the API refuses the order by itself
+  // (RESTAURANT_CLOSED) whatever this screen believes, and then this turns on too.
+  const [closedNow, setClosedNow] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -69,6 +83,7 @@ export default function CheckoutPage({ params }: PageProps) {
       .then((menu) => {
         // `?? null`: an older API without the field must not break the checkout.
         if (active) setTerms(menu.delivery ?? null);
+        if (active) setClosedNow(menu.restaurant?.openNow === false);
       })
       .catch(() => {
         if (active) setTerms(null);
@@ -79,12 +94,17 @@ export default function CheckoutPage({ params }: PageProps) {
   }, [params.slug]);
 
   const deliveryUnavailable = terms !== null && !terms.enabled;
-  const feeCents = fulfillmentType === 'DELIVERY' && terms?.enabled ? Math.round(terms.fee * 100) : 0;
+  // Same rule as the server (delivery-pricing.ts): free from the threshold on, items subtotal.
+  const freeAboveCents = terms?.freeAbove ? Math.round(terms.freeAbove * 100) : null;
+  const freeDelivery = freeAboveCents !== null && subtotalCents >= freeAboveCents;
+  const feeCents =
+    fulfillmentType === 'DELIVERY' && terms?.enabled && !freeDelivery ? Math.round(terms.fee * 100) : 0;
   const minOrderCents = terms?.enabled ? Math.round(terms.minOrder * 100) : 0;
   const belowMinimum = fulfillmentType === 'DELIVERY' && minOrderCents > subtotalCents;
   const couponCode = couponInput.trim();
   const currentPreviewKey = couponCode
-    ? couponPreviewKey(params.slug, couponCode, visibleItems.map((i) => ({ productId: i.productId, quantity: i.quantity })))
+    ? // A line is identified with its add-ons and note: another combination is another basket.
+      couponPreviewKey(params.slug, couponCode, visibleItems.map((i) => ({ productId: i.lineId, quantity: i.quantity })))
     : null;
   const appliedCoupon = couponPreview && couponPreview.key === currentPreviewKey ? couponPreview.preview : null;
   const discountCents = appliedCoupon?.discountCents ?? 0;
@@ -96,8 +116,8 @@ export default function CheckoutPage({ params }: PageProps) {
     couponBusy.current = true;
     setCouponLoading(true);
     setCouponMessage(null);
-    const itemsPayload = visibleItems.map((item) => ({ productId: item.productId, quantity: item.quantity }));
-    const key = couponPreviewKey(params.slug, couponCode, itemsPayload);
+    const itemsPayload = toOrderItems(visibleItems);
+    const key = couponPreviewKey(params.slug, couponCode, visibleItems.map((i) => ({ productId: i.lineId, quantity: i.quantity })));
     try {
       const preview = await previewCoupon({ restaurantSlug: params.slug, items: itemsPayload, code: couponCode });
       setCouponPreview({ key, preview });
@@ -145,6 +165,10 @@ export default function CheckoutPage({ params }: PageProps) {
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (closedNow) {
+      setError(CLOSED_MESSAGE);
+      return;
+    }
 
     // Frontend validation only smooths the experience — it never replaces
     // the backend's own validation (see apps/api/.../create-order.dto.ts).
@@ -170,12 +194,12 @@ export default function CheckoutPage({ params }: PageProps) {
     setIsSubmitting(true);
     try {
       orderKeyRef.current ??= createIdempotencyKey();
-      // CRITICAL: only productId + quantity travel to the backend. No price,
-      // no name, no subtotal, no total — those are recalculated server-side
-      // from the database, never trusted from this cart.
+      // CRITICAL: only productId + quantity (+ add-on ids/quantities and the line note) travel to
+      // the backend. No price, no name, no subtotal, no total — those are recalculated
+      // server-side from the database, never trusted from this cart.
       const input: CreateOrderInput = {
         restaurantSlug: params.slug,
-        items: visibleItems.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+        items: toOrderItems(visibleItems),
         customer: { name: name.trim(), phone: phone.trim() },
         fulfillmentType,
         paymentMethod,
@@ -191,6 +215,10 @@ export default function CheckoutPage({ params }: PageProps) {
       router.push(`/menu/${params.slug}/pedido/${order.id}`);
     } catch (err) {
       if (err instanceof ApiError) orderKeyRef.current = null;
+      if (err instanceof ApiError && err.code === 'RESTAURANT_CLOSED') {
+        setClosedNow(true);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
       setError(
         err instanceof ApiError
           ? err.message
@@ -202,9 +230,9 @@ export default function CheckoutPage({ params }: PageProps) {
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-2xl space-y-6 bg-background px-4 pb-24 pt-6">
+    <main className="mx-auto min-h-screen max-w-2xl space-y-6 bg-background px-4 pb-36 pt-6">
       <div>
-        <Link href={`/menu/${params.slug}/carrinho`} className="text-sm text-muted-foreground underline">
+        <Link href={`/menu/${params.slug}/carrinho`} className="-my-3 inline-block py-3 text-sm text-muted-foreground underline">
           ← Voltar ao carrinho
         </Link>
         <h1 className="mt-2 text-lg font-semibold">
@@ -212,15 +240,22 @@ export default function CheckoutPage({ params }: PageProps) {
         </h1>
       </div>
 
+      {closedNow && (
+        <p role="status" className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
+          {CLOSED_MESSAGE}
+        </p>
+      )}
+
       <section className="rounded-xl border border-line bg-surface p-4">
         <h2 className="mb-2 text-sm font-medium text-muted-foreground">Resumo do pedido</h2>
         <ul className="divide-y divide-line">
           {visibleItems.map((item) => (
-            <li key={item.productId} className="flex items-center justify-between py-2 text-sm">
-              <span>
+            <li key={item.lineId} className="flex items-start justify-between gap-3 py-2 text-sm">
+              <span className="min-w-0">
                 {item.quantity}× {item.name}
+                <CartLineDetails options={item.options} notes={item.notes} />
               </span>
-              <span className="font-medium">
+              <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">
                 {formatCentsAsBRL(item.priceCents * item.quantity)}
               </span>
             </li>
@@ -247,10 +282,21 @@ export default function CheckoutPage({ params }: PageProps) {
       <form onSubmit={handleSubmit} className="space-y-6">
         <section className="space-y-3 rounded-xl border border-line bg-surface p-4">
           <h2 className="text-sm font-medium text-muted-foreground">Seus dados</h2>
-          <Input placeholder="Nome" required value={name} onChange={(e) => setName(e.target.value)} />
+          <Input
+            placeholder="Nome"
+            aria-label="Nome"
+            required
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
           <Input
             placeholder="Telefone (com DDD)"
+            aria-label="Telefone com DDD"
             required
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
           />
@@ -281,6 +327,9 @@ export default function CheckoutPage({ params }: PageProps) {
             <p className="text-xs text-muted-foreground">
               Taxa de entrega: {feeCents > 0 ? formatCentsAsBRL(feeCents) : 'grátis'}
               {minOrderCents > 0 ? ` · pedido mínimo ${formatCentsAsBRL(minOrderCents)} (sem a taxa)` : ''}
+              {freeAboveCents !== null && !freeDelivery
+                ? ` · grátis a partir de ${formatCentsAsBRL(freeAboveCents)} em itens`
+                : ''}
             </p>
           )}
           {belowMinimum && (
@@ -294,35 +343,45 @@ export default function CheckoutPage({ params }: PageProps) {
               <Input
                 className="col-span-2"
                 placeholder="Rua"
+                aria-label="Rua"
+                autoComplete="address-line1"
                 required
                 value={address.street}
                 onChange={(e) => setAddress({ ...address, street: e.target.value })}
               />
               <Input
                 placeholder="Número"
+                aria-label="Número"
                 required
                 value={address.number}
                 onChange={(e) => setAddress({ ...address, number: e.target.value })}
               />
               <Input
-                placeholder="Complemento (opcional)"
+                placeholder="Complemento"
+                aria-label="Complemento (opcional)"
+                autoComplete="address-line2"
                 value={address.complement}
                 onChange={(e) => setAddress({ ...address, complement: e.target.value })}
               />
               <Input
                 placeholder="Bairro"
+                aria-label="Bairro"
                 required
                 value={address.neighborhood}
                 onChange={(e) => setAddress({ ...address, neighborhood: e.target.value })}
               />
               <Input
                 placeholder="Cidade"
+                aria-label="Cidade"
+                autoComplete="address-level2"
                 required
                 value={address.city}
                 onChange={(e) => setAddress({ ...address, city: e.target.value })}
               />
               <Input
                 placeholder="UF"
+                aria-label="UF (estado)"
+                autoComplete="address-level1"
                 required
                 maxLength={2}
                 value={address.state}
@@ -330,7 +389,10 @@ export default function CheckoutPage({ params }: PageProps) {
               />
               <Input
                 placeholder="CEP"
+                aria-label="CEP"
                 required
+                inputMode="numeric"
+                autoComplete="postal-code"
                 value={address.zipCode}
                 onChange={(e) => setAddress({ ...address, zipCode: e.target.value })}
               />
@@ -436,22 +498,27 @@ export default function CheckoutPage({ params }: PageProps) {
           <h2 className="text-sm font-medium text-muted-foreground">Observações (opcional)</h2>
           <Textarea
             placeholder="Ex.: sem cebola, troco para R$ 50..."
+            aria-label="Observações do pedido"
             maxLength={500}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
         </section>
 
-        {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
+        {error && !(closedNow && error === CLOSED_MESSAGE) && (
+          <p ref={errorRef} role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
+            {error}
+          </p>
+        )}
 
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface p-4">
           <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
             <div>
               <p className="text-xs text-muted-foreground">Total</p>
-              <p className="text-lg font-semibold">{formatCentsAsBRL(displayTotalCents)}</p>
+              <p className="whitespace-nowrap text-lg font-semibold tabular-nums">{formatCentsAsBRL(displayTotalCents)}</p>
             </div>
-            <Button type="submit" className="w-auto px-6" disabled={isSubmitting}>
-              {isSubmitting ? 'Enviando...' : 'Confirmar pedido'}
+            <Button type="submit" className="w-auto px-6" disabled={isSubmitting || closedNow}>
+              {isSubmitting ? 'Enviando...' : closedNow ? 'Restaurante fechado' : 'Confirmar pedido'}
             </Button>
           </div>
         </div>

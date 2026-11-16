@@ -1,5 +1,6 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Logger } from '@nestjs/common';
 import { Observable, tap } from 'rxjs';
+import { redactUrlQuery } from '../util/redact-url.util';
 
 // Lightweight duration log per request, complementing pino-http's access
 // log with an explicit "handler finished" line (useful once business logic
@@ -14,7 +15,7 @@ export class LoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         this.logger.debug(
-          `${request.method} ${request.url} - ${Date.now() - started}ms [requestId=${request.requestId}]`,
+          `${request.method} ${redactUrlQuery(request.url)} - ${Date.now() - started}ms [requestId=${request.requestId}]`,
         );
       }),
     );

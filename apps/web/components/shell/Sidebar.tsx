@@ -1,10 +1,10 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import clsx from 'clsx';
-import { HelpCircle, LifeBuoy, LogOut, Menu, PanelLeftClose, X } from 'lucide-react';
+import { HelpCircle, KeyRound, LifeBuoy, LogOut, Menu, PanelLeftClose, X } from 'lucide-react';
 import { Tooltip } from '@/components/ds/Tooltip';
+import { BrandMark } from './BrandMark';
 import { isItemActive, NavGroup, NavItem } from './nav';
 
 export interface SidebarUser {
@@ -24,7 +24,10 @@ export interface SidebarProps {
   brandHref: string;
   brandName: string;
   brandSubtitle?: string;
+  /** The restaurant's own logo; without one the sidebar shows its initials. */
+  brandLogoUrl?: string | null;
   user: SidebarUser;
+  onChangePassword?: () => void;
   onLogout?: () => void;
 }
 
@@ -35,35 +38,6 @@ function initials(name: string): string {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join('');
-}
-
-// Official logo. The supplied artwork is a circular badge on a light square
-// (JPEG, no transparency), so it is shown inside a circular frame: the frame
-// crops away the light corners without touching the art (no filters, no
-// redraw). `scale` zooms the badge so its rim fills the circle.
-const LOGO_SRC = '/brand/doce-logo.png';
-const LOGO_NAME = "Do'cê Hamburgueria";
-
-function BrandLogo({ size, decorative }: { size: 'sm' | 'md'; decorative?: boolean }) {
-  return (
-    <span
-      className={clsx(
-        'relative block shrink-0 overflow-hidden rounded-full bg-background ring-1 ring-accent/40',
-        size === 'md' ? 'h-9 w-9' : 'h-8 w-8',
-      )}
-    >
-      <Image
-        src={LOGO_SRC}
-        // The restaurant name is printed next to the logo when expanded, so
-        // there it is decorative (alt=""); on its own (collapsed) it needs the name.
-        alt={decorative ? '' : LOGO_NAME}
-        fill
-        sizes="36px"
-        priority
-        className="scale-[1.28] object-contain"
-      />
-    </span>
-  );
 }
 
 function NavRow({
@@ -79,11 +53,11 @@ function NavRow({
 }) {
   const Icon = item.icon;
   const rowClass = clsx(
-    'group relative flex h-9 items-center gap-3 rounded-ctl text-sm font-medium transition-colors',
-    collapsed ? 'w-10 justify-center' : 'w-full px-2.5',
+    'group relative flex h-9 items-center gap-3 rounded-ctl text-sm font-medium transition-colors touch:h-11',
+    collapsed ? 'w-10 justify-center touch:w-11' : 'w-full px-2.5',
     active ? 'bg-accent/10 text-accent' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground',
     // Caramel marker: the selected item reads at a glance without a loud fill.
-    active && "before:absolute before:left-0 before:top-1.5 before:h-6 before:w-[3px] before:rounded-r before:bg-primary",
+    active && "before:absolute before:left-0 before:top-1/2 before:h-6 before:w-[3px] before:-translate-y-1/2 before:rounded-r before:bg-primary",
     item.soon && 'cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground',
   );
   const inner = (
@@ -131,7 +105,9 @@ export function Sidebar({
   brandHref,
   brandName,
   brandSubtitle,
+  brandLogoUrl,
   user,
+  onChangePassword,
   onLogout,
 }: SidebarProps) {
   const collapsed = drawer ? false : collapsedProp;
@@ -147,9 +123,9 @@ export function Sidebar({
       {/* Brand */}
       <div className={clsx('flex h-14 shrink-0 items-center border-b border-line', collapsed ? 'justify-center' : 'gap-2 px-3')}>
         {collapsed ? (
-          <Tooltip label={LOGO_NAME} side="right">
-            <Link href={brandHref} aria-label={LOGO_NAME} className="flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
-              <BrandLogo size="md" />
+          <Tooltip label={brandName} side="right">
+            <Link href={brandHref} aria-label={brandName} className="flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 touch:p-1">
+              <BrandMark name={brandName} logoUrl={brandLogoUrl} className="h-9 w-9 text-sm ring-1 ring-accent/40" decorative />
             </Link>
           </Tooltip>
         ) : (
@@ -159,7 +135,7 @@ export function Sidebar({
                 type="button"
                 onClick={onCloseDrawer}
                 aria-label="Fechar menu"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-11 touch:w-11"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -169,13 +145,13 @@ export function Sidebar({
                 onClick={onToggleCollapsed}
                 aria-label="Recolher menu"
                 aria-expanded
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-11 touch:w-11"
               >
                 <PanelLeftClose className="h-5 w-5" />
               </button>
             )}
             <Link href={brandHref} onClick={onCloseDrawer} className="flex min-w-0 items-center gap-2.5">
-              <BrandLogo size="md" decorative />
+              <BrandMark name={brandName} logoUrl={brandLogoUrl} className="h-9 w-9 text-sm ring-1 ring-accent/40" decorative />
               <span className="min-w-0 leading-tight">
                 <span className="block truncate font-heading text-sm font-semibold text-foreground">{brandName}</span>
                 {brandSubtitle && <span className="block truncate text-2xs text-subtle">{brandSubtitle}</span>}
@@ -195,7 +171,7 @@ export function Sidebar({
                 onClick={onToggleCollapsed}
                 aria-label="Expandir menu"
                 aria-expanded={false}
-                className="flex h-9 w-10 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground"
+                className="flex h-9 w-10 items-center justify-center rounded-ctl text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-11 touch:w-11"
               >
                 <Menu className="h-5 w-5" />
               </button>
@@ -254,13 +230,25 @@ export function Sidebar({
               <span className="block truncate text-2xs text-subtle">{user.email}</span>
             </span>
           )}
+          {onChangePassword && (
+            <Tooltip label="Trocar minha senha" side="right" disabled={!collapsed}>
+              <button
+                type="button"
+                onClick={onChangePassword}
+                aria-label="Trocar minha senha"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground touch:h-10 touch:w-10"
+              >
+                <KeyRound className="h-4 w-4" />
+              </button>
+            </Tooltip>
+          )}
           {onLogout && (
             <Tooltip label="Sair" side="right" disabled={!collapsed}>
               <button
                 type="button"
                 onClick={onLogout}
                 aria-label="Sair"
-                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-danger/10 hover:text-danger touch:h-10 touch:w-10"
               >
                 <LogOut className="h-4 w-4" />
               </button>

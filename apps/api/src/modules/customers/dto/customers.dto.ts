@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
@@ -18,6 +19,7 @@ import {
 } from 'class-validator';
 import { OrderStatus } from '@prisma/client';
 import { normalizeCpf, normalizePhone, PHONE_INPUT_PATTERN } from '../customer-input';
+import { CUSTOMER_SEGMENTS, CUSTOMER_SORTS, CustomerSegment, CustomerSort } from '../customer-segments';
 
 const trimmed = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 const blankToNull = ({ value }: { value: unknown }) => {
@@ -99,6 +101,19 @@ export class ListCustomersQueryDto {
   @IsOptional()
   @IsEnum({ active: 'active', inactive: 'inactive', all: 'all' })
   status?: CustomerStatusFilter;
+
+  @ApiPropertyOptional({
+    enum: CUSTOMER_SEGMENTS,
+    description: 'NEW: 1ª compra em 30 dias; RECURRING: 2+ compras e última em 60 dias; AT_RISK: sem compra há 61-180 dias; LOST: nunca comprou ou há mais de 180 dias',
+  })
+  @IsOptional()
+  @IsIn(CUSTOMER_SEGMENTS)
+  segment?: CustomerSegment;
+
+  @ApiPropertyOptional({ enum: CUSTOMER_SORTS, default: 'name', description: 'spent = maior gasto; ticket = maior ticket médio' })
+  @IsOptional()
+  @IsIn(CUSTOMER_SORTS)
+  sort?: CustomerSort;
 
   @ApiPropertyOptional({ minimum: 1, maximum: 1000 })
   @IsOptional()

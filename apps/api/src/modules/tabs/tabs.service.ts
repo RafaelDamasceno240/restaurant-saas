@@ -1,6 +1,6 @@
 import {
-  BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Injectable,
   NotFoundException,
@@ -12,12 +12,12 @@ import { BranchAccessService } from '../branches/branch-access.service';
 import { TablesService } from '../tables/tables.service';
 import { OrderCreationResult, OrderCreationService } from '../order-creation/order-creation.service';
 import { PaymentsService } from '../payments/payments.service';
+import { CustomerLookupService, LinkableCustomer } from '../customers/customer-lookup.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
-import { computeTabTotals } from './tab-calculations';
+import { activeUnits, computeTabTotals, optionsExtraCents } from './tab-calculations';
 import { buildPricedItemsFromTab, classifyExistingCheckout } from './tab-checkout';
 import { CreateTabDto } from './dto/create-tab.dto';
-import { AddTabItemDto } from './dto/add-tab-item.dto';
-import { UpdateTabItemDto } from './dto/update-tab-item.dto';
 import { ListTabsQueryDto } from './dto/list-tabs-query.dto';
 import { CheckoutTabDto } from './dto/checkout-tab.dto';
 
@@ -25,7 +25,11 @@ type Tx = Prisma.TransactionClient;
 
 const tabDetailInclude = {
   table: { select: { id: true, number: true, name: true } },
-  items: { orderBy: { createdAt: 'asc' as const } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    // Add-ons in the order they were written (the product's group/option order), like an order line.
+    include: { round: { select: { number: true } }, options: true },
+  },
   order: {
     select: {
       id: true,
@@ -41,7 +45,8 @@ const tabDetailInclude = {
 type ExistingSale = { id: string; tabId: string | null; idempotencyKey: string | null };
 
 type CheckoutTxResult =
-  | { kind: 'created'; created: OrderCreationResult; paymentId: string }
+  // paymentId is null for a bill put on account (fiado): nothing was received yet.
+  | { kind: 'created'; created: OrderCreationResult; paymentId: string | null }
   | { kind: 'existing'; existing: ExistingSale };
 
 type TabWithDetail = Prisma.TabGetPayload<{ include: typeof tabDetailInclude }>;
@@ -54,10 +59,12 @@ type TabWithDetail = Prisma.TabGetPayload<{ include: typeof tabDetailInclude }>;
 //  - opening a tab is serialized per table (SELECT ... FOR UPDATE on the
 //    table row) + a partial unique index as DB-level backstop
 //    (prisma/sql/tabs_constraints.sql) — never two OPEN tabs for one table;
-//  - every item mutation (add/update/remove) and checkout() lock the TAB row
-//    FOR UPDATE and re-check status inside the transaction, so an item can
-//    never land on a tab that's being checked out, and a tab can never be
-//    sold twice;
+//  - every item mutation (sending a round, cancelling units - TabRoundsService)
+//    and checkout() lock the TAB row FOR UPDATE and re-check status inside the
+//    transaction, so an item can never land on a tab that's being checked out,
+//    and a tab can never be sold twice;
+//  - B9: items are never edited or deleted once sent; more units = a new round,
+//    fewer = a cancellation (TabRoundsService);
 //  - a CLOSED tab is read-only: no route exists to reopen it, and every
 //    mutation re-checks status even if the frontend is stale;
 //  - tenantId always from the JWT; branch always re-validated via
@@ -75,6 +82,8 @@ export class TabsService {
     private readonly tablesService: TablesService,
     private readonly orderCreation: OrderCreationService,
     private readonly payments: PaymentsService,
+    private readonly customers: CustomerLookupService,
+    private readonly inventory: InventoryService,
   ) {}
 
   async findAllForBranch(user: AuthenticatedRequestUser, query: ListTabsQueryDto) {
@@ -155,106 +164,6 @@ export class TabsService {
     return this.findOneForTenant(user, tabId);
   }
 
-  async addItem(user: AuthenticatedRequestUser, tabId: string, dto: AddTabItemDto) {
-    const tab = await this.findTabForWrite(user, tabId);
-
-    // Re-read from the DB, scoped to THIS tenant and active=true — same
-    // guarantee as OrderCreationService. "Doesn't exist", "another tenant's
-    // product", and "inactive" all collapse into the same 400, so the
-    // caller never learns which (no cross-tenant existence leak). Product is
-    // NOT branch-scoped in this schema (tenant-wide catalog, same as
-    // PDV/checkout), so there is no separate branch check to make here.
-    const product = await this.prisma.product.findFirst({
-      where: { id: dto.productId, tenantId: user.tenantId, active: true },
-    });
-    if (!product) {
-      throw new BadRequestException({
-        code: 'PRODUCT_UNAVAILABLE',
-        message: 'Produto não encontrado ou não está mais disponível.',
-      });
-    }
-
-    const item = await this.prisma.$transaction(async (tx) => {
-      await this.lockTabAndAssertOpen(tx, tab.id, 'TAB_CLOSED');
-      return tx.tabItem.create({
-        data: {
-          tenantId: user.tenantId,
-          tabId: tab.id,
-          productId: product.id,
-          productNameSnapshot: product.name,
-          unitPriceCentsSnapshot: product.priceCents,
-          quantity: dto.quantity,
-          notes: dto.notes?.trim() || null,
-        },
-        select: { id: true },
-      });
-    });
-
-    await this.audit.record({
-      tenantId: user.tenantId,
-      userId: user.userId,
-      action: 'TAB_ITEM_ADDED',
-      entity: 'TabItem',
-      entityId: item.id,
-      afterData: { tabId: tab.id, productId: product.id, quantity: dto.quantity },
-    });
-    return this.findOneForTenant(user, tab.id);
-  }
-
-  async updateItem(
-    user: AuthenticatedRequestUser,
-    tabId: string,
-    itemId: string,
-    dto: UpdateTabItemDto,
-  ) {
-    const tab = await this.findTabForWrite(user, tabId);
-    const item = await this.prisma.tabItem.findFirst({ where: { id: itemId, tabId: tab.id } });
-    if (!item) throw this.itemNotFound();
-
-    await this.prisma.$transaction(async (tx) => {
-      await this.lockTabAndAssertOpen(tx, tab.id, 'TAB_CLOSED');
-      await tx.tabItem.update({
-        where: { id: item.id },
-        data: {
-          ...(dto.quantity !== undefined ? { quantity: dto.quantity } : {}),
-          ...(dto.notes !== undefined ? { notes: dto.notes.trim() || null } : {}),
-        },
-      });
-    });
-
-    await this.audit.record({
-      tenantId: user.tenantId,
-      userId: user.userId,
-      action: 'TAB_ITEM_UPDATED',
-      entity: 'TabItem',
-      entityId: item.id,
-      beforeData: { quantity: item.quantity, notes: item.notes },
-      afterData: { quantity: dto.quantity ?? item.quantity, notes: dto.notes ?? item.notes },
-    });
-    return this.findOneForTenant(user, tab.id);
-  }
-
-  async removeItem(user: AuthenticatedRequestUser, tabId: string, itemId: string) {
-    const tab = await this.findTabForWrite(user, tabId);
-    const item = await this.prisma.tabItem.findFirst({ where: { id: itemId, tabId: tab.id } });
-    if (!item) throw this.itemNotFound();
-
-    await this.prisma.$transaction(async (tx) => {
-      await this.lockTabAndAssertOpen(tx, tab.id, 'TAB_CLOSED');
-      await tx.tabItem.delete({ where: { id: item.id } });
-    });
-
-    await this.audit.record({
-      tenantId: user.tenantId,
-      userId: user.userId,
-      action: 'TAB_ITEM_REMOVED',
-      entity: 'TabItem',
-      entityId: item.id,
-      beforeData: { tabId: tab.id, productId: item.productId, quantity: item.quantity },
-    });
-    return this.findOneForTenant(user, tab.id);
-  }
-
   // =========================================================================
   // Fatia 10 — checkout: Tab OPEN -> paid Order + OrderItems (from the
   // TabItem snapshots) + Payment + (CASH) SALE movement + Tab CLOSED, all in
@@ -280,6 +189,13 @@ export class TabsService {
     const byKey = await this.findSaleByKey(user.tenantId, dto.idempotencyKey);
     if (byKey) return this.resolveExistingSale(user, byKey, tab.id, dto.idempotencyKey);
 
+    // After the replay check on purpose: repeating a checkout that already happened must keep
+    // answering with the sale, even if the customer was deactivated in the meantime.
+    const customer = dto.customerId ? await this.customers.resolveForOrder(user, dto.customerId) : null;
+    if (dto.cashbackToUseCents && !user.permissions.includes('cashback.use')) {
+      throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Você não tem permissão para usar cashback.' });
+    }
+
     const auditBase = {
       tenantId: user.tenantId,
       userId: user.userId,
@@ -294,7 +210,7 @@ export class TabsService {
 
     let result: CheckoutTxResult;
     try {
-      result = await this.prisma.$transaction((tx) => this.checkoutInTx(tx, user, tab, dto));
+      result = await this.prisma.$transaction((tx) => this.checkoutInTx(tx, user, tab, dto, customer));
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         // A concurrent request won the race on one of the unique constraints
@@ -349,6 +265,7 @@ export class TabsService {
     user: AuthenticatedRequestUser,
     tab: { id: string; branchId: string; customerName: string | null },
     dto: CheckoutTabDto,
+    customer: LinkableCustomer | null,
   ): Promise<CheckoutTxResult> {
     const rows = await tx.$queryRaw<{ status: string }[]>`
       SELECT "status" FROM "tabs" WHERE id = ${tab.id} FOR UPDATE`;
@@ -366,11 +283,19 @@ export class TabsService {
       });
     }
 
-    const items = await tx.tabItem.findMany({ where: { tabId: tab.id }, orderBy: { createdAt: 'asc' } });
-    if (items.length === 0) {
+    // B9: only the units still due are billed; cancellations take the tab lock too, so nothing
+    // changes what is due while this runs. The kitchen may still be working on some items: that
+    // is production, not billing, and it goes on after the bill is paid.
+    const items = await tx.tabItem.findMany({
+      where: { tabId: tab.id },
+      orderBy: { createdAt: 'asc' },
+      include: { options: true },
+    });
+    const billed = buildPricedItemsFromTab(items);
+    if (billed.length === 0) {
       throw new ConflictException({
         code: 'TAB_EMPTY',
-        message: 'Não é possível fechar uma comanda sem itens.',
+        message: 'Não há nada a cobrar nesta comanda. Se todos os itens foram cancelados, libere a mesa.',
       });
     }
 
@@ -380,21 +305,47 @@ export class TabsService {
       tenantId: user.tenantId,
       branchId: tab.branchId,
       source: 'TABLE',
-      // The food was already served at the table and the bill is paid now:
-      // the sale is born finished. It never enters the kitchen/KDS flow.
+      // The bill is paid now: the sale is born finished. The kitchen works on the tab's ITEMS
+      // (B9), never on this Order, which never enters the kitchen/KDS order flow.
       status: 'COMPLETED',
       fulfillmentType: 'DINE_IN',
       paymentMethod: dto.paymentMethod,
       recordCashSaleByUserId: user.userId,
-      customerName: tab.customerName,
-      customerPhone: null,
+      // Same snapshot rule as the PDV: what was typed on the tab wins; the registry fills
+      // the gaps once, and later edits of the customer never rewrite the order.
+      customerName: tab.customerName ?? customer?.name ?? null,
+      customerPhone: customer?.phone ?? null,
+      customerId: customer?.id ?? null,
+      cashbackToUseCents: dto.cashbackToUseCents ?? null,
       address: null,
       notes: null,
-      items: buildPricedItemsFromTab(items),
+      items: billed,
       tabId: tab.id,
       idempotencyKey: dto.idempotencyKey,
+      // B9: every round consumed its recipes when it was sent to the kitchen; the sale consumes
+      // nothing more (no second deduction, and no bill refused for stock that ran out since).
+      stockHandledByCaller: true,
     });
 
+    // B9 compatibility: items launched before rounds existed (no round) never consumed anything.
+    // Their recipes are consumed now, for the units still due, without refusing for lack of stock
+    // (the food is already at the table). Each is referenced to its tab item, so it can never be
+    // consumed twice. After the customer's accounts, like every stock lock.
+    const legacy = items.filter((item) => item.roundId === null && activeUnits(item) > 0);
+    const legacyMovements = legacy.length
+      ? await this.inventory.consumeForTabRoundInTx(
+          tx,
+          {
+            tenantId: user.tenantId,
+            branchId: tab.branchId,
+            items: legacy.map((item) => ({ ...item, quantity: activeUnits(item) })),
+          },
+          user.userId,
+          { servedAlready: true },
+        )
+      : [];
+
+    // A Payment row is money actually received: every bill is paid now (fiado is no longer sold).
     const payment = await this.payments.recordInternalConfirmed(tx, {
       tenantId: user.tenantId,
       orderId: created.order.id,
@@ -407,7 +358,41 @@ export class TabsService {
       data: { status: 'CLOSED', closedAt: new Date() },
     });
 
-    return { kind: 'created', created, paymentId: payment.id };
+    return {
+      kind: 'created',
+      created: { ...created, stockMovementIds: [...created.stockMovementIds, ...legacyMovements.map((m) => m.id)] },
+      paymentId: payment?.id ?? null,
+    };
+  }
+
+  // B9: a tab with nothing to charge (opened by mistake, or every item cancelled) used to keep its
+  // table occupied forever - checkout() refuses an empty bill and there was no other way to close
+  // it. This closes it WITHOUT a sale: no Order, no payment, no stock. Refused while any unit is
+  // still due. Same tab lock as everything else; the audit entry commits with it.
+  async closeEmpty(user: AuthenticatedRequestUser, tabId: string) {
+    const tab = await this.findTabForWrite(user, tabId);
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockTabAndAssertOpen(tx, tab.id, 'TAB_ALREADY_CLOSED');
+      const items = await tx.tabItem.findMany({ where: { tabId: tab.id }, select: { quantity: true, cancelledQuantity: true } });
+      const due = items.reduce((sum, item) => sum + activeUnits(item), 0);
+      if (due > 0) {
+        throw new ConflictException({
+          code: 'TAB_HAS_ITEMS_TO_CHARGE',
+          message: 'Esta comanda ainda tem itens a cobrar: feche a conta ou cancele os itens antes de liberar a mesa.',
+        });
+      }
+      await tx.tab.update({ where: { id: tab.id }, data: { status: 'CLOSED', closedAt: new Date() } });
+      await this.audit.recordTx(tx, {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        action: 'TAB_CLOSED_EMPTY',
+        entity: 'Tab',
+        entityId: tab.id,
+        beforeData: { status: 'OPEN' },
+        afterData: { status: 'CLOSED', tableId: tab.tableId, branchId: tab.branchId, cancelledItemCount: items.length },
+      });
+    });
+    return this.findOneForTenant(user, tab.id);
   }
 
   private findSaleByKey(tenantId: string, idempotencyKey: string) {
@@ -440,7 +425,7 @@ export class TabsService {
   }
 
   // ---------------------------------------------------------------------
-  private async findTabForWrite(user: AuthenticatedRequestUser, tabId: string) {
+  async findTabForWrite(user: AuthenticatedRequestUser, tabId: string) {
     const tab = await this.prisma.tab.findFirst({
       where: { id: tabId, tenantId: user.tenantId },
     });
@@ -449,7 +434,7 @@ export class TabsService {
     return tab;
   }
 
-  private async lockTabAndAssertOpen(tx: Tx, tabId: string, closedCode: string) {
+  async lockTabAndAssertOpen(tx: Tx, tabId: string, closedCode: string) {
     const rows = await tx.$queryRaw<{ status: string }[]>`
       SELECT "status" FROM "tabs" WHERE id = ${tabId} FOR UPDATE`;
     if (rows.length === 0) throw this.notFound();
@@ -477,10 +462,32 @@ export class TabsService {
         id: item.id,
         productId: item.productId,
         name: item.productNameSnapshot,
+        // Price of ONE unit as sent (add-ons included), and its two parts.
         unitPriceCents: item.unitPriceCentsSnapshot,
+        basePriceCents: item.unitPriceCentsSnapshot - optionsExtraCents(item.options),
+        extrasCents: optionsExtraCents(item.options),
+        options: item.options.map((option) => ({
+          optionId: option.optionItemId,
+          group: option.groupNameSnapshot,
+          name: option.optionNameSnapshot,
+          unitPriceCents: option.unitPriceCents,
+          quantity: option.quantity,
+        })),
         quantity: item.quantity,
-        subtotalCents: item.unitPriceCentsSnapshot * item.quantity,
+        // B9: units cancelled so far and units still due; the subtotal charges only the latter.
+        cancelledQuantity: item.cancelledQuantity,
+        activeQuantity: activeUnits(item),
+        subtotalCents: item.unitPriceCentsSnapshot * activeUnits(item),
         notes: item.notes,
+        status: item.status,
+        // null round = launched before rounds existed (never went to the kitchen).
+        roundId: item.roundId,
+        roundNumber: item.round?.number ?? null,
+        sentAt: item.sentAt,
+        preparingAt: item.preparingAt,
+        readyAt: item.readyAt,
+        servedAt: item.servedAt,
+        cancelledAt: item.cancelledAt,
       })),
       openedAt: tab.openedAt,
       closedAt: tab.closedAt,
@@ -509,7 +516,7 @@ export class TabsService {
     return new NotFoundException({ code: 'TAB_NOT_FOUND', message: 'Comanda não encontrada.' });
   }
 
-  private itemNotFound() {
+  itemNotFound() {
     return new NotFoundException({ code: 'TAB_ITEM_NOT_FOUND', message: 'Item não encontrado nesta comanda.' });
   }
 }

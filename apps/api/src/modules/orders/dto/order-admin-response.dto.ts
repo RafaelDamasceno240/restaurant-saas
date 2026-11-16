@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DeliveryStatus, FulfillmentType, OrderSource, OrderStatus, PaymentMethod } from '@prisma/client';
+import { DeliveryStatus, FulfillmentType, OrderSource, OrderStatus, PaymentMethod, TabItemStatus } from '@prisma/client';
 import {
   OrderAddressResponseDto,
   OrderItemResponseDto,
@@ -30,6 +30,9 @@ export class OrderListItemDto {
   @ApiProperty() branchId!: string;
   @ApiPropertyOptional({ nullable: true }) customerName!: string | null;
   @ApiPropertyOptional({ nullable: true }) customerPhone!: string | null;
+  // Link to the customer registry (null for guest orders). Only the id: the registry data
+  // itself is read through /customers, which has its own permission.
+  @ApiPropertyOptional({ nullable: true }) customerId!: string | null;
   @ApiProperty({ enum: FulfillmentType }) fulfillmentType!: FulfillmentType;
   @ApiProperty({ enum: PaymentMethod }) paymentMethod!: PaymentMethod;
   @ApiPropertyOptional({ nullable: true }) notes!: string | null;
@@ -37,6 +40,9 @@ export class OrderListItemDto {
   // Discount from a coupon over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
   @ApiProperty({ example: 5 }) discount!: number;
   @ApiPropertyOptional({ nullable: true }) couponCode!: string | null;
+  // Cashback balance of the linked customer spent on the items (0 when none);
+  // total = subtotal - discount - cashbackUsed + deliveryFee.
+  @ApiProperty({ example: 0 }) cashbackUsed!: number;
   @ApiProperty({ example: 5 }) deliveryFee!: number;
   @ApiProperty({ example: 54.8 }) total!: number;
   @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;
@@ -56,6 +62,55 @@ export class OrderListResponseDto {
   @ApiProperty() meta!: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
+export class KitchenRoundItemOptionDto {
+  @ApiProperty() group!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() quantity!: number;
+}
+
+// B9: an item of a table round still in the kitchen's hands. `quantity` is what is still to be
+// made (cancelled units left out).
+export class KitchenRoundItemDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() name!: string;
+  @ApiProperty() quantity!: number;
+  @ApiPropertyOptional({ nullable: true }) notes!: string | null;
+  @ApiProperty({ enum: ['SENT', 'PREPARING', 'READY'] }) status!: TabItemStatus;
+  // The add-ons of EACH unit, as frozen when the round was sent.
+  @ApiProperty({ type: [KitchenRoundItemOptionDto] }) options!: KitchenRoundItemOptionDto[];
+}
+
+// B9: one round sent from a table ("Mesa 4 · rodada 2"), with only its items still in production.
+// Its status is the least advanced of them: the card sits in that column and its action moves
+// exactly those items.
+export class KitchenTableRoundDto {
+  @ApiProperty() id!: string;
+  @ApiProperty() tabId!: string;
+  @ApiProperty() roundNumber!: number;
+  @ApiProperty() tableNumber!: number;
+  @ApiPropertyOptional({ nullable: true }) tableName!: string | null;
+  @ApiProperty() sentAt!: Date;
+  @ApiProperty({ enum: ['SENT', 'PREPARING', 'READY'] }) status!: TabItemStatus;
+  @ApiProperty({ type: [KitchenRoundItemDto] }) items!: KitchenRoundItemDto[];
+}
+
+// One column of the kitchen board: the newest orders in that status (capped) and how many
+// there are in all, so the screen can say when it is not showing everything. B9: plus the table
+// rounds in the same stage (SENT rounds sit in the PENDING column - "Novo" - since there is
+// nothing to accept: their stock was taken when they were sent; CONFIRMED has none).
+export class OrdersBoardColumnDto {
+  @ApiProperty({ enum: OrderStatus }) status!: OrderStatus;
+  @ApiProperty({ type: [OrderListItemDto] }) data!: OrderListItemDto[];
+  @ApiProperty() total!: number;
+  @ApiProperty({ type: [KitchenTableRoundDto] }) tableRounds!: KitchenTableRoundDto[];
+  @ApiProperty() tableRoundsTotal!: number;
+}
+
+export class OrdersBoardResponseDto {
+  @ApiProperty({ type: [OrdersBoardColumnDto] }) columns!: OrdersBoardColumnDto[];
+  @ApiProperty({ description: 'Máximo de pedidos devolvidos por coluna' }) columnLimit!: number;
+}
+
 export class OrderDetailDto {
   @ApiProperty() id!: string;
   @ApiProperty() orderNumber!: string;
@@ -64,6 +119,9 @@ export class OrderDetailDto {
   @ApiProperty() branchId!: string;
   @ApiPropertyOptional({ nullable: true }) customerName!: string | null;
   @ApiPropertyOptional({ nullable: true }) customerPhone!: string | null;
+  // Link to the customer registry (null for guest orders). Only the id: the registry data
+  // itself is read through /customers, which has its own permission.
+  @ApiPropertyOptional({ nullable: true }) customerId!: string | null;
   @ApiProperty({ enum: FulfillmentType }) fulfillmentType!: FulfillmentType;
   @ApiPropertyOptional({ type: OrderAddressResponseDto, nullable: true })
   address!: OrderAddressResponseDto | null;
@@ -74,6 +132,9 @@ export class OrderDetailDto {
   // Discount from a coupon over the items subtotal (0 without coupon); total = subtotal - discount + deliveryFee.
   @ApiProperty({ example: 5 }) discount!: number;
   @ApiPropertyOptional({ nullable: true }) couponCode!: string | null;
+  // Cashback balance of the linked customer spent on the items (0 when none);
+  // total = subtotal - discount - cashbackUsed + deliveryFee.
+  @ApiProperty({ example: 0 }) cashbackUsed!: number;
   @ApiProperty({ example: 5 }) deliveryFee!: number;
   @ApiProperty({ example: 54.8 }) total!: number;
   @ApiPropertyOptional({ type: OrderDeliverySummaryDto, nullable: true }) delivery!: OrderDeliverySummaryDto | null;

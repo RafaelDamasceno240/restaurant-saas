@@ -30,10 +30,20 @@ Retornar **o mesmo `404`** nos dois casos (recurso inexistente vs. recurso de
 outro tenant) evita que a API revele, por diferença de status code, que um
 determinado ID pertence a outro restaurante.
 
+## A única exceção: a administração da plataforma
+
+`/v1/platform/*` (docs/SUPER_ADMIN.md) lê **de propósito** vários restaurantes. Ela fica num
+módulo separado (`apps/api/src/modules/platform`, que não exporta nada), atrás do
+`PlatformAdminGuard`, que decide pela tabela `platform_admins` a cada requisição, nunca pelo papel no
+restaurante (OWNER e ADMIN administram um restaurante só e recebem `403` ali). Nenhuma rota de
+tenant mudou: o token de um administrador da plataforma continua preso ao próprio restaurante fora de
+`/platform` (`apps/api/test/platform-admin.e2e-spec.ts`, seção 24).
+
 ## Onde isso é testado
 
 `apps/api/test/tenant-isolation.e2e-spec.ts` é o teste obrigatório da Fase
-01: cria dois tenants (A e B) via `/auth/register` e garante que o token de A
+01: provisiona dois tenants (A e B) pelo `TenantProvisioningService` (não há cadastro público),
+entra com o OWNER de cada um e garante que o token de A
 nunca consegue ler usuário, branch ou qualquer dado de B.
 
 ## Extensão futura

@@ -33,6 +33,8 @@ export function Chip({
 }) {
   const classes = clsx(
     'inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-medium transition-colors [&>svg]:h-3.5 [&>svg]:w-3.5',
+    // Only the chips that lead somewhere need a finger-sized target.
+    href && 'touch:h-10',
     TONE[tone],
     href && 'hover:brightness-125',
     className,

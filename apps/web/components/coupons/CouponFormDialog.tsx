@@ -161,7 +161,10 @@ export function CouponFormDialog({
           <Field label="Limite de utilizações (opcional)" hint="Total de pedidos que podem usar o cupom">
             <Input value={draft.usageLimit} inputMode="numeric" maxLength={10} autoComplete="off" onChange={(e) => set('usageLimit', e.target.value)} />
           </Field>
-          <Field label="Limite por cliente (opcional)" hint="Exige cliente cadastrado no pedido (PDV)">
+          <Field
+            label="Limite por cliente (opcional)"
+            hint="Só vale no balcão (PDV), com o cliente cadastrado. No cardápio online este cupom não é aceito, porque lá o cliente não é identificado."
+          >
             <Input value={draft.perCustomerLimit} inputMode="numeric" maxLength={10} autoComplete="off" onChange={(e) => set('perCustomerLimit', e.target.value)} />
           </Field>
 

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revisão da Integração</title>
+<style>
+  :root { --bg: #f6f4f1; --card: #fff; --text: #1f1b16; --muted: #6b6259; --accent: #a5611c; --line: #e4ddd4; --ok: #2f7d4f; --warn: #b4521f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14110e; --card: #1e1a16; --text: #f1ece6; --muted: #a99f94; --accent: #e09a4d; --line: #332c25; --ok: #6cc08f; --warn: #f0905a; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 28px 16px 8px; max-width: 1200px; margin: 0 auto; }
+  h1 { margin: 0 0 6px; font-size: 24px; }
+  header p { margin: 0; color: var(--muted); }
+  nav { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); }
+  nav div { max-width: 1200px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 8px; overflow-x: auto; }
+  nav a { white-space: nowrap; color: var(--accent); text-decoration: none; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 13px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 8px 16px 48px; }
+  section { margin-top: 28px; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  section > p { margin: 0 0 12px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+  figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  figure a { display: block; background: #0001; }
+  figure img { display: block; width: 100%; max-height: 520px; object-fit: contain; }
+  figcaption { padding: 10px 12px; font-size: 14px; }
+  figcaption b { display: block; margin-bottom: 2px; }
+  .tag { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; margin-top: 6px; }
+  .ok { color: var(--ok); border: 1px solid var(--ok); }
+  .warn { color: var(--warn); border: 1px solid var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Revisão visual da integração</h1>
+  <p>Adicionais + assistente de WhatsApp + remoção do fiado, juntos, com o cardápio real da Do'cê num restaurante fictício (ambiente descartável). Clique numa imagem para abrir em tamanho real.</p>
+</header>
+<nav><div>
+  <a href="#cardapio">Cardápio público</a>
+  <a href="#pdv">PDV</a>
+  <a href="#comanda">Comandas</a>
+  <a href="#fiado">Fiado antigo</a>
+  <a href="#whatsapp">WhatsApp</a>
+  <a href="#checkout">Checkout</a>
+</div></nav>
+<main>
+  <section id="cardapio">
+    <h2>Cardápio público</h2>
+    <p>Cardápio real importado: categorias, fotos e o grupo obrigatório do combo.</p>
+    <div class="grid">
+      <figure><a href="int-01-cardapio-publico.png" target="_blank"><img src="int-01-cardapio-publico.png" alt="Cardápio público no celular"></a><figcaption><b>Cardápio no celular</b>Categorias e produtos reais da Do'cê, com as fotos importadas. Nenhuma menção a fiado.<br><span class="tag ok">aprovado</span></figcaption></figure>
+      <figure><a href="int-02-produto-obrigatorio.png" target="_blank"><img src="int-02-produto-obrigatorio.png" alt="Produto com grupo obrigatório"></a><figcaption><b>Combo Batata + Refri</b>Grupo obrigatório "Refrigerante combo" com as 4 bebidas.<br><span class="tag ok">aprovado</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="pdv">
+    <h2>PDV com adicionais e sem fiado</h2>
+    <p>Pagamento só em Dinheiro, Pix ou Cartão; totais conferidos pelo servidor.</p>
+    <div class="grid">
+      <figure><a href="int-03-pdv-modal-adicionais.png" target="_blank"><img src="int-03-pdv-modal-adicionais.png" alt="Modal de adicionais no PDV"></a><figcaption><b>Modal de adicionais</b>Smash Clássico + Bacon + Ovo = R$ 36,00, com observação "sem cebola".<br><span class="tag ok">aprovado</span></figcaption></figure>
+      <figure><a href="int-04-pdv-carrinho.png" target="_blank"><img src="int-04-pdv-carrinho.png" alt="Carrinho do PDV"></a><figcaption><b>Venda atual</b>R$ 50,99 cotado pelo servidor; formas de pagamento sem fiado. Os cards mostram o ícone padrão: o PDV ainda não exibe as fotos importadas (já era assim antes da integração).<br><span class="tag ok">aprovado</span> <span class="tag warn">foto: pendência antiga</span></figcaption></figure>
+      <figure><a href="int-05-pdv-venda-dinheiro.png" target="_blank"><img src="int-05-pdv-venda-dinheiro.png" alt="Venda concluída em dinheiro"></a><figcaption><b>Venda em dinheiro concluída</b>R$ 50,99 com o caixa aberto.<br><span class="tag ok">aprovado</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="comanda">
+    <h2>Comandas com adicionais e sem fiado</h2>
+    <p>Rodada com adicionais, fechamento só com dinheiro, PIX ou cartão, e cozinha.</p>
+    <div class="grid">
+      <figure><a href="int-06-comanda-rodada.png" target="_blank"><img src="int-06-comanda-rodada.png" alt="Rodada da comanda"></a><figcaption><b>Rodada enviada</b>Duplo Smash Bacon + Cebola Caramelizada e combo com Guaraná, com a observação.<br><span class="tag ok">aprovado</span></figcaption></figure>
+      <figure><a href="int-07-comanda-fechar-sem-fiado.png" target="_blank"><img src="int-07-comanda-fechar-sem-fiado.png" alt="Fechar conta sem fiado"></a><figcaption><b>Fechar conta</b>Opções: Dinheiro, PIX e Cartão. Conta fechada em PIX (R$ 52,99).<br><span class="tag ok">aprovado</span></figcaption></figure>
+      <figure><a href="int-08-cozinha.png" target="_blank"><img src="int-08-cozinha.png" alt="Tela da cozinha"></a><figcaption><b>Cozinha</b>Pedidos do PDV e da mesa com os adicionais.<br><span class="tag ok">aprovado</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="fiado">
+    <h2>Fiado antigo</h2>
+    <p>O histórico continua visível e pode ser recebido; não há como criar fiado novo.</p>
+    <div class="grid">
+      <figure><a href="int-09-contas-a-receber.png" target="_blank"><img src="int-09-contas-a-receber.png" alt="Contas a receber"></a><figcaption><b>Contas a receber</b>Conta antiga de R$ 60,00 vencida, aviso de que o sistema não vende mais fiado, sem "Lançar dívida".<br><span class="tag ok">aprovado</span></figcaption></figure>
+      <figure><a href="int-10-historico-pedidos.png" target="_blank"><img src="int-10-historico-pedidos.png" alt="Histórico de pedidos"></a><figcaption><b>Histórico de pedidos</b>A venda antiga continua aparecendo como "Fiado".<br><span class="tag ok">aprovado</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="whatsapp">
+    <h2>Assistente de WhatsApp (simulador)</h2>
+    <p>Cardápio real, nunca oferece fiado, carrinho calculado pelo sistema.</p>
+    <div class="grid">
+      <figure><a href="int-11a-whatsapp-antes-da-correcao.png" target="_blank"><img src="int-11a-whatsapp-antes-da-correcao.png" alt="Problema antes da correção"></a><figcaption><b>Antes da correção</b>Respondendo "coca cola zero" à pergunta do combo, o assistente adicionou o produto "Coca Cola 2L Zero" (R$ 16,00) e deixou o combo de fora. Corrigido no commit d6ef2a8.<br><span class="tag warn">problema encontrado</span></figcaption></figure>
+      <figure><a href="int-11-whatsapp-carrinho.png" target="_blank"><img src="int-11-whatsapp-carrinho.png" alt="Carrinho no WhatsApp"></a><figcaption><b>Depois da correção</b>Smash + Bacon (R$ 34,00) e combo com Coca zero (R$ 14,99): R$ 48,99.<br><span class="tag ok">aprovado</span></figcaption></figure>
+      <figure><a href="int-12-whatsapp-link.png" target="_blank"><img src="int-12-whatsapp-link.png" alt="Link de checkout"></a><figcaption><b>Resumo e link</b>Link do checkout enviado só depois do "sim".<br><span class="tag ok">aprovado</span></figcaption></figure>
+    </div>
+  </section>
+
+  <section id="checkout">
+    <h2>Checkout pelo link do WhatsApp</h2>
+    <p>Carrinho preenchido e recalculado, sem fiado, pedido confirmado.</p>
+    <div class="grid">
+      <figure><a href="int-13-carrinho-publico.png" target="_blank"><img src="int-13-carrinho-publico.png" alt="Carrinho público"></a><figcaption><b>Carrinho público</b>Itens e adicionais vindos do WhatsApp. Sem foto nos itens (pendência antiga, não da integração).<br><span class="tag ok">aprovado</span> <span class="tag warn">foto: pendência antiga</span></figcaption></figure>
+      <figure><a href="int-14-checkout.png" target="_blank"><img src="int-14-checkout.png" alt="Checkout"></a><figcaption><b>Checkout</b>Pagamento: Dinheiro, Pix ou Cartão. Total R$ 48,99.<br><span class="tag ok">aprovado</span></figcaption></figure>
+      <figure><a href="int-15-pedido-confirmado.png" target="_blank"><img src="int-15-pedido-confirmado.png" alt="Pedido confirmado"></a><figcaption><b>Pedido recebido</b>#MWDTIK6E-3A15, PIX, R$ 48,99, com os adicionais gravados.<br><span class="tag ok">aprovado</span></figcaption></figure>
+    </div>
+  </section>
+</main>
+</body>
+</html>

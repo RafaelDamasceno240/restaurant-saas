@@ -8,15 +8,10 @@ export default function HomePage() {
         Fundação, cardápio administrativo e público, carrinho, checkout,
         painel de pedidos, cozinha (KDS), PDV de balcão e caixa disponíveis.
       </p>
+      {/* Only "Entrar": there is no public sign-up, restaurants are provisioned when sold. */}
       <div className="flex gap-3">
         <Link href="/login" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
           Entrar
-        </Link>
-        <Link
-          href="/register"
-          className="rounded-lg border border-line-strong px-4 py-2 text-sm text-foreground"
-        >
-          Criar restaurante
         </Link>
       </div>
     </main>

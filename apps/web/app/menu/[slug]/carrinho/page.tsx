@@ -1,8 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { ArrowLeft, Minus, Plus, ShoppingBag, Trash2 } from 'lucide-react';
 import { useCart } from '@/lib/cart-context';
 import { formatCentsAsBRL } from '@/lib/money';
+import { MAX_UNITS_HINT, atUnitLimit, unitsOfProduct } from '@/lib/cart-logic';
+import { ProductImage } from '@/components/menu/ProductImage';
+import { CartLineDetails } from '@/components/menu/CartLineDetails';
 
 interface PageProps {
   params: { slug: string };
@@ -29,130 +33,124 @@ export default function CartPage({ params }: PageProps) {
   const visibleItems = belongsToThisRestaurant ? items : [];
 
   return (
-    <main className="mx-auto min-h-screen max-w-2xl bg-background px-4 pb-24 pt-6">
-      <div className="mb-4">
-        <Link href={`/menu/${params.slug}`} className="text-sm text-muted-foreground underline">
-          ← Voltar ao cardápio
+    <main className="mx-auto min-h-screen max-w-2xl pb-32">
+      <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-surface/95 px-4 py-3 backdrop-blur">
+        <Link
+          href={`/menu/${params.slug}`}
+          aria-label="Voltar ao cardápio"
+          className="flex h-9 w-9 items-center justify-center rounded-full hover:bg-surface-hover"
+        >
+          <ArrowLeft className="h-5 w-5" />
         </Link>
-        <h1 className="mt-2 text-lg font-semibold">
-          Carrinho{belongsToThisRestaurant && restaurantName ? ` · ${restaurantName}` : ''}
-        </h1>
-      </div>
+        <div className="min-w-0">
+          <h1 className="text-base font-bold leading-tight">Carrinho</h1>
+          {belongsToThisRestaurant && restaurantName && (
+            <p className="truncate text-xs text-muted-foreground">{restaurantName}</p>
+          )}
+        </div>
+        {visibleItems.length > 0 && (
+          <button
+            type="button"
+            onClick={clearCart}
+            className="-mr-2 ml-auto rounded-lg px-2 py-2.5 text-sm font-medium text-muted-foreground hover:text-danger"
+          >
+            Limpar
+          </button>
+        )}
+      </header>
 
       {visibleItems.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-line-strong bg-surface p-10 text-center">
-          <p className="text-2xl" aria-hidden>
-            🛒
-          </p>
-          <p className="font-medium">Seu carrinho está vazio</p>
+        <div className="mx-4 mt-8 flex flex-col items-center gap-3 rounded-3xl border border-dashed border-line-strong bg-surface p-10 text-center">
+          <ShoppingBag className="h-8 w-8 text-subtle" aria-hidden />
+          <p className="font-semibold">Seu carrinho está vazio</p>
           <Link
             href={`/menu/${params.slug}`}
-            className="mt-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
+            className="mt-2 rounded-2xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
           >
-            Voltar ao cardápio
+            Ver o cardápio
           </Link>
         </div>
       ) : (
         <>
-          <ul className="space-y-3">
-            {visibleItems.map((item) => (
-              <li
-                key={item.productId}
-                className="flex gap-3 rounded-xl border border-line bg-surface p-3"
-              >
-                {item.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+          <ul className="divide-y divide-line bg-surface sm:mx-4 sm:mt-4 sm:rounded-3xl sm:border sm:border-line">
+            {visibleItems.map((item) => {
+              const full = atUnitLimit(unitsOfProduct(visibleItems, item.productId));
+              return (
+                <li key={item.lineId} className="flex gap-3 px-4 py-4">
+                  <ProductImage
                     src={item.imageUrl}
-                    alt={item.name}
-                    className="h-16 w-16 flex-shrink-0 rounded-lg object-cover"
+                    alt=""
+                    className="h-16 w-16 shrink-0 rounded-xl"
                   />
-                ) : (
-                  <div
-                    aria-hidden
-                    className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-lg bg-surface-hover text-xl"
-                  >
-                    🍽️
-                  </div>
-                )}
-
-                <div className="flex min-w-0 flex-1 flex-col justify-between">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{item.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatCentsAsBRL(item.priceCents)} / un.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item.productId)}
-                      aria-label={`Remover ${item.name} do carrinho`}
-                      className="text-xs text-danger underline"
-                    >
-                      Remover
-                    </button>
-                  </div>
-
-                  <div className="mt-2 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold leading-snug">{item.name}</p>
                       <button
                         type="button"
-                        onClick={() => decrement(item.productId)}
-                        aria-label={`Diminuir quantidade de ${item.name}`}
-                        className="h-7 w-7 rounded-full border border-line-strong text-sm font-medium"
+                        onClick={() => removeItem(item.lineId)}
+                        aria-label={`Remover ${item.name} do carrinho`}
+                        className="-m-2 rounded-full p-3 text-subtle hover:text-danger"
                       >
-                        −
+                        <Trash2 className="h-4 w-4" />
                       </button>
-                      <span className="w-6 text-center text-sm font-medium">
-                        {item.quantity}
+                    </div>
+                    <CartLineDetails options={item.options} notes={item.notes} />
+                    <div className="mt-2 flex items-center justify-between">
+                      <div className="flex items-center gap-1 rounded-full border border-line">
+                        <button
+                          type="button"
+                          onClick={() => decrement(item.lineId)}
+                          aria-label={`Diminuir quantidade de ${item.name}`}
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-primary"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </button>
+                        <span className="min-w-5 text-center text-sm font-semibold tabular-nums">
+                          {item.quantity}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => increment(item.lineId)}
+                          disabled={full}
+                          title={full ? MAX_UNITS_HINT : undefined}
+                          aria-label={`Aumentar quantidade de ${item.name}`}
+                          className="flex h-8 w-8 items-center justify-center rounded-full text-primary disabled:cursor-not-allowed disabled:text-subtle"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <span className="shrink-0 whitespace-nowrap font-semibold tabular-nums">
+                        {formatCentsAsBRL(item.priceCents * item.quantity)}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => increment(item.productId)}
-                        aria-label={`Aumentar quantidade de ${item.name}`}
-                        className="h-7 w-7 rounded-full border border-line-strong text-sm font-medium"
-                      >
-                        +
-                      </button>
                     </div>
-                    <span className="font-semibold">
-                      {formatCentsAsBRL(item.priceCents * item.quantity)}
-                    </span>
+                    {full && <p className="mt-1 text-xs text-muted-foreground">{MAX_UNITS_HINT}</p>}
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
 
-          <button
-            type="button"
-            onClick={clearCart}
-            className="mt-4 text-sm text-muted-foreground underline"
-          >
-            Limpar carrinho
-          </button>
+          <div className="px-4 pt-4">
+            <Link
+              href={`/menu/${params.slug}`}
+              className="-my-2 inline-block py-3 text-sm font-semibold text-primary hover:underline"
+            >
+              + Adicionar mais itens
+            </Link>
+          </div>
 
-          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface p-4">
+          <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 backdrop-blur">
             <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
               <div>
                 <p className="text-xs text-muted-foreground">Subtotal</p>
-                <p className="text-lg font-semibold">{formatCentsAsBRL(subtotalCents)}</p>
+                <p className="text-lg font-bold tabular-nums">{formatCentsAsBRL(subtotalCents)}</p>
               </div>
-              <div className="flex gap-2">
-                <Link
-                  href={`/menu/${params.slug}`}
-                  className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-foreground"
-                >
-                  Continuar comprando
-                </Link>
-                <Link
-                  href={`/menu/${params.slug}/checkout`}
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover"
-                >
-                  Continuar para checkout
-                </Link>
-              </div>
+              <Link
+                href={`/menu/${params.slug}/checkout`}
+                className="rounded-2xl bg-primary px-6 py-3.5 text-sm font-semibold text-primary-foreground hover:bg-primary-hover"
+              >
+                Continuar
+              </Link>
             </div>
           </div>
         </>

@@ -1,0 +1,6 @@
+# Fotos baixadas (arquivos do restaurante, ~15 MB), capturas de tela (~16 MB, incluem telas da
+# Brendi) e relatórios de execução (têm ids e o operador): ficam fora do Git, só nesta máquina.
+# O extrator recria as fotos.
+imagens/
+capturas/
+execucoes/

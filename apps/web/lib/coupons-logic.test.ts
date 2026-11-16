@@ -4,6 +4,7 @@ import {
   EMPTY_DRAFT,
   centsToInput,
   couponApplyMessage,
+  couponChannelNote,
   couponErrorMessage,
   couponPreviewKey,
   describeDiscount,
@@ -242,7 +243,15 @@ describe('display helpers', () => {
     expect(couponErrorMessage('COUPON_CODE_TAKEN', 'x')).toMatch(/Desative-o/);
     expect(couponErrorMessage('COUPON_USAGE_LIMIT_BELOW_USED', 'limite menor que 4')).toBe('limite menor que 4');
     expect(couponErrorMessage('OUTRO', 'texto da API')).toBe('texto da API');
-    expect(couponApplyMessage('COUPON_INVALID', 'x')).toBe('Cupom inválido ou não aplicável a este pedido.');
+    // B10: the guest is told that coupons limited per customer only work at the counter.
+    expect(couponApplyMessage('COUPON_INVALID', 'x')).toBe(
+      'Cupom inválido ou não aplicável a este pedido. Cupons limitados por cliente valem só no balcão, com o cadastro do cliente.',
+    );
     expect(couponApplyMessage('COUPON_EXPIRED', 'Este cupom expirou.')).toBe('Este cupom expirou.');
+  });
+
+  it('a coupon limited per customer is marked as counter only (B10)', () => {
+    expect(couponChannelNote({ perCustomerLimit: 1 })).toBe('só no balcão (PDV)');
+    expect(couponChannelNote({ perCustomerLimit: null })).toBeNull();
   });
 });

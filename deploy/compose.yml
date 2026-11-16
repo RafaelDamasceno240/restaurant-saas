@@ -1,0 +1,144 @@
+# The whole system on Linux containers: API, web, PostgreSQL and Redis. For trying the build that
+# would be deployed, on one machine, before any hosting exists. See deploy/README.md.
+#
+#   cp deploy/.env.example deploy/.env        (then edit deploy/.env)
+#   docker compose -f deploy/compose.yml up -d --build
+#
+# This stack is closed on itself:
+#   - its own project name, network and volumes: it shares nothing with the development
+#     docker-compose.yml at the repository root (whose Postgres holds the DEV database);
+#   - DATABASE_URL and REDIS_URL are built here from the service names, never read from the
+#     environment: the stack cannot be pointed at an existing or external database by accident;
+#   - PostgreSQL and Redis publish no port: only the other containers reach them;
+#   - the web is published on BIND_ADDRESS, 127.0.0.1 unless you change it;
+#   - the API is published on 127.0.0.1 only, for health checks: browsers go through the web.
+name: restaurant-saas-stack
+
+x-database-url: &database-url postgresql://${POSTGRES_USER:?set POSTGRES_USER in deploy/.env}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/${POSTGRES_DB:?set POSTGRES_DB in deploy/.env}?schema=public
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # Accepting connections to THIS database, not just "the port is open".
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Only holds the session denylist (logged-out sessions, keys that expire with the access
+  # token). It still needs a volume: without one, `down` + `up` creates an empty Redis and the
+  # access token of a session that logged out is accepted again until it expires (measured on
+  # 2026-10-16). The image saves to /data on a normal stop.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot job (deploy/migrate.js): applies the pending migrations of prisma/migrations and
+  # then the seed of roles and permissions to THIS stack's database, and exits. The API only
+  # starts if it succeeded. The seed creates no tenant, user or demo data and can run again
+  # safely. One step at a time:
+  #   docker compose -f deploy/compose.yml run --rm migrate node /app/deploy/migrate.js status
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/api.migrate.Dockerfile
+    restart: "no"
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # No build target here or on the web, on purpose: this stack runs whatever a build with no
+  # target produces, which is what a platform that cannot choose a stage would run.
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATABASE_URL: *database-url
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in deploy/.env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in deploy/.env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      # How many proxies stand between the browser and the API. Here exactly one: the web
+      # container, whose server appends the browser's address to X-Forwarded-For. Put a TLS
+      # proxy in front of the web and this becomes 2. It must be the exact number: too low and
+      # every device shares one address, too high and a client can forge its own.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-10}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      # Always this machine only, whatever BIND_ADDRESS says: it is here for health checks.
+      # Browsers go through the web. Anything that reached the API directly would write its
+      # own X-Forwarded-For, and the API would believe it (TRUST_PROXY_HOPS above).
+      - "127.0.0.1:${API_PORT:-4000}:4000"
+    stop_grace_period: 15s
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        # The API as seen from the web container, written into the build (the /api rewrite).
+        API_URL: http://api:4000/v1
+    restart: unless-stopped
+    init: true
+    environment:
+      API_URL: http://api:4000/v1
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+
+  # Optional, never started by `up`: the full end-to-end suite on Linux, against a SEPARATE
+  # database of this stack's Postgres (the name ends in _e2e), so the tests never write to the
+  # database you are trying the system on.
+  #   docker compose -f deploy/compose.yml --profile e2e run --rm e2e
+  e2e:
+    profiles: ["e2e"]
+    build:
+      context: ..
+      dockerfile: deploy/api.e2e.Dockerfile
+    restart: "no"
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}_e2e?schema=public
+      REDIS_URL: redis://redis:6379/1
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

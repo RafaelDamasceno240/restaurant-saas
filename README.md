@@ -5,8 +5,8 @@
 > cardápio administrativo e público, carrinho, checkout público, pedidos, KDS,
 > PDV, caixa, mesas, comandas, estoque e compras. **PARCIAL:** pagamentos (só registro
 > interno, sem gateway), delivery (taxa, despacho, falha/reentrega, confirmação, entregador interno e histórico; sem mapas/GPS nem entregador externo),
-> CRM (clientes: cadastro, histórico e métricas; cupons e descontos; sem fidelidade/campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
-> NFC-e, fidelidade/cashback, WhatsApp/IA, relatórios, cobrança SaaS. Detalhes e
+> CRM (clientes: cadastro, histórico, segmentos e métricas; cupons; fidelidade por pontos; cashback; fiado/contas a receber; sem campanhas), perfil do restaurante (leitura; edição não persiste). **NÃO IMPLEMENTADO:**
+> NFC-e, WhatsApp/IA, cobrança SaaS, push com o app fechado. O painel é instalável (PWA, `docs/PWA.md`) e tem relatórios operacionais (`docs/REPORTS.md`). Detalhes e
 > evidências em `docs/PROJECT_STATUS.md`.
 
 ## Visão geral
@@ -45,7 +45,7 @@ packages/
 
 ## Requisitos
 
-- Node.js 20+
+- Node.js 20+ (as suítes e as imagens Docker rodam em 24.14.1; 20 não foi testado nesta rodada)
 - pnpm 9+ (`corepack enable` habilita a versão do `packageManager`)
 - Docker + Docker Compose (para Postgres/Redis locais)
 
@@ -60,6 +60,11 @@ cp apps/web/.env.example apps/web/.env
 
 Ajuste os segredos em `apps/api/.env` (`JWT_ACCESS_SECRET` e
 `JWT_REFRESH_SECRET` precisam de ao menos 32 caracteres cada).
+
+O frontend não tem variável pública de API: o navegador chama sempre
+`/api/...` no próprio host do Next, que repassa para a API. `API_URL`
+(`apps/web/.env`, só de servidor) diz onde a API está; sem ela vale
+`http://localhost:4000/v1`. Ver `docs/authentication.md`.
 
 ## Infraestrutura local (Docker)
 
@@ -94,15 +99,21 @@ pnpm dev:web       # somente o frontend
 
 - API: http://localhost:4000/v1
 - Swagger (fora de produção): http://localhost:4000/docs
-- Frontend: http://localhost:3000
+- Frontend: http://localhost:3000 (as chamadas do navegador vão para
+  http://localhost:3000/api/..., repassadas à API pelo Next)
 
 ## Testes
 
 ```bash
 pnpm --filter api test        # unitários da API (sem banco)
 pnpm --filter web test        # unitários do frontend
-pnpm --filter api test:e2e    # e2e: 28 suítes cobrindo auth, tenant, cardápio, pedidos, KDS, PDV, caixa, mesas, comandas, estoque, compras, delivery, clientes e cupons
+pnpm --filter api test:e2e    # e2e: 47 suítes cobrindo auth, sessão, revogação, proxy reverso, tenant, perfil do restaurante, equipe e senhas, cardápio, pedidos, KDS e quadro da cozinha, PDV, caixa, estorno de venda em dinheiro, mesas, comandas, estoque, compras, delivery, clientes, cupons, fidelidade, cashback, fiado, relatórios e a cadeia financeira do pedido
 ```
+
+Resultado em 2026-10-10: API unit 297, API e2e 777 (46 suítes), web unit 312, sem falhas — nesta
+máquina, em um clone limpo seguindo este README e dentro de um container Linux
+(`deploy/README.md`). Em 2026-10-17, com o perfil do restaurante: API unit 315, API e2e 787
+(47 suítes), web unit 319, sem falhas, nesta máquina (o container Linux não foi repetido).
 
 Os testes e2e sobem uma aplicação Nest real e usam o `DATABASE_URL` do
 ambiente — aponte para um banco de teste descartável antes de rodá-los.
@@ -110,9 +121,9 @@ ambiente — aponte para um banco de teste descartável antes de rodá-los.
 ### Preparar o banco descartável dos e2e
 
 Um banco novo (só com as migrations) **não basta**: as roles e permissões (RBAC)
-precisam estar semeadas. O `POST /v1/auth/register` — usado pelos e2e para criar
-cada tenant de teste — depende delas; sem o seed ele responde `500` e as suítes
-falham em massa (observado na validação do CRM: 41 de 41 testes de clientes
+precisam estar semeadas. O provisionamento de restaurante (`TenantProvisioningService`) —
+usado pelos e2e para criar cada tenant de teste, já que não há cadastro público — depende delas
+(papel OWNER); sem o seed ele falha e as suítes falham em massa (observado na validação do CRM: 41 de 41 testes de clientes
 falharam até o seed ser executado). O seed (`prisma/seed.ts`) cria apenas roles,
 permissões e a ligação entre elas; não cria tenants, usuários nem produtos.
 
@@ -140,6 +151,90 @@ pnpm typecheck
 pnpm build
 ```
 
+O build da API roda `prisma generate` antes do `nest build`. No Windows ele
+falha com `EPERM` se a API estiver rodando (o processo segura o engine do
+Prisma): pare a API antes de buildar.
+
+## Deploy (API + PostgreSQL + Redis, e Next.js em outro host)
+
+O que o código espera da plataforma — nenhum arquivo de configuração de
+provedor é versionado.
+
+**API**
+
+| Etapa | Comando |
+| --- | --- |
+| Instalação | `pnpm install --frozen-lockfile` **com devDependencies** (ver aviso abaixo) |
+| Build | `pnpm --filter api build` (`prisma generate && nest build`; precisa das devDependencies) |
+| Migrations | `pnpm --filter api prisma:deploy` |
+| Seed de papéis e permissões | `pnpm --filter api prisma:seed:prod` (seed compilado, não precisa de `ts-node`) |
+| Start | `pnpm --filter api start:prod` (`node dist/src/main.js`) |
+
+Variáveis: `NODE_ENV=production` (sem ela o cookie de sessão sai sem `Secure`
+e o Swagger fica público), `DATABASE_URL`, `REDIS_URL`, `JWT_ACCESS_SECRET`,
+`JWT_REFRESH_SECRET`, `CORS_ORIGIN` (origem do frontend), `TRUST_PROXY_HOPS`
+e, opcionais, `JWT_ACCESS_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`,
+`AUTH_RATE_LIMIT_PER_MINUTE`. A porta vem de `PORT`. Health checks:
+`/health/live` (processo) e `/health/ready` (PostgreSQL + Redis).
+
+**Instalação em modo produção.** Com `NODE_ENV=production` no momento do `pnpm install`, o pnpm
+pula as devDependencies: o script `prepare` (husky) falha, a instalação termina com erro e não há
+`prisma`, `nest` nem `tsc` para o build (medido em 2026-10-10). O build do frontend também precisa
+delas (TypeScript, Tailwind, PostCSS). Se a plataforma define `NODE_ENV=production` nessa fase,
+defina também `NPM_CONFIG_PRODUCTION=false`, ou use as imagens de `deploy/`, que compilam em um
+estágio com devDependencies e entregam a imagem final sem elas.
+
+São 18 migrations (`prisma/migrations`). O `postinstall` do `@prisma/client` não gera o cliente
+neste monorepo: ele só existe depois de `prisma generate`, que faz parte do build.
+
+O seed é obrigatório num banco novo — sem papéis e permissões o registro de
+restaurante responde `500` — e é idempotente. Num banco que **já tenha
+pedidos**, rode antes o preflight somente leitura da migration de cupons.
+
+O processo encerra de forma ordenada no `SIGTERM`: termina as requisições em
+andamento e só então desconecta do banco. Isso leva até ~5 s (conexões
+keep-alive), então a plataforma precisa dar esse tempo antes do `SIGKILL`.
+
+**Frontend**
+
+Variável: `API_URL` = URL pública da API **com `/v1`**, definida para o build
+e para a execução. Não existe mais `NEXT_PUBLIC_API_URL`.
+
+Start: `pnpm --filter web start` (`node server.js`, porta em `PORT`, padrão 3000). É o servidor do
+Next com uma diferença: acrescenta ao `X-Forwarded-For` o endereço de quem conectou, antes de o
+`/api` repassar a requisição à API. O frontend conta, portanto, como um proxy em
+`TRUST_PROXY_HOPS`.
+
+**Conferir no ambiente real antes de abrir para usuários**
+
+- **Endereço do cliente.** `TRUST_PROXY_HOPS` é o número exato de proxies entre o navegador e a
+  API, contando o frontend: 1 quando o navegador abre o frontend direto, 2 com um proxy TLS ou
+  balanceador na frente dele. A menos, todos os aparelhos dividem os limites; a mais, o cliente
+  consegue forjar o próprio endereço. A API não pode ser alcançável por fora desses proxies. Ver
+  `deploy/README.md`, "Endereço do cliente". Na Vercel o `/api` é executado pela plataforma (o
+  `server.js` não roda) e o que ela envia à API precisa ser medido:
+- `TRUST_PROXY_HOPS`: faça login pelo site e veja `refresh_tokens.ip`. Tem de
+  ser o seu IP público. Se aparecer um endereço do proxy ou da plataforma do
+  frontend, todos os usuários estão dividindo o mesmo limite de requisições
+  (o refresh de sessão aceita 30 por minuto por endereço) — ajuste o número.
+- Cookie de sessão: `refresh_token` guardado para o domínio do **frontend**,
+  com `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
+- `/docs` da API respondendo `404`.
+
+## Containers (Linux)
+
+`deploy/` tem as imagens Docker da API e do frontend e um Compose que sobe o sistema inteiro
+(API, frontend, PostgreSQL e Redis) com as migrations em um job separado:
+
+```bash
+cp deploy/.env.example deploy/.env
+docker compose -f deploy/compose.yml up -d --build
+```
+
+Comandos de verificação, logs, encerramento, testes e2e em Linux e limites conhecidos estão em
+`deploy/README.md`. O `docker-compose.yml` da raiz continua sendo só o PostgreSQL e o Redis do
+desenvolvimento, e as duas pilhas não compartilham banco, rede nem volume.
+
 ## Estrutura de pastas (resumo)
 
 Ver `docs/architecture.md` para a árvore completa e as decisões por trás dela.
@@ -154,6 +249,10 @@ Ver `docs/architecture.md` para a árvore completa e as decisões por trás dela
 - `docs/DEMO_MODE.md` — modo demonstração (`/demo/*`, dados fictícios, sem API)
 - `docs/RESTAURANT_PROFILE.md` — perfil do restaurante (real x demonstrativo)
 - `docs/INVENTORY.md`, `docs/PURCHASES.md`, `docs/DELIVERY.md`, `docs/CRM.md`, `docs/CASH_REGISTER_PLAN.md`, `docs/UI_DESIGN_SYSTEM.md`
+- `docs/LOYALTY.md`, `docs/CASHBACK.md`, `docs/RECEIVABLES.md` — fidelidade, cashback e fiado
+- `docs/PWA.md` — app instalável, service worker, offline, avisos e uso com o dedo
+- `docs/REPORTS.md` — relatórios de vendas, produtos, clientes, estoque, delivery e caixa
+- `deploy/README.md` — imagens Docker, Compose do sistema inteiro, migrations, saúde e limites
 
 ## Roadmap (não implementar sem aprovação explícita)
 

@@ -1,6 +1,11 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, uniqueSuffix, uniqueDocument } from './test-app.util';
+import {
+  createTestApp,
+  provisionAndSignInE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 describe('Auth flow (e2e)', () => {
   let app: INestApplication;
@@ -32,9 +37,9 @@ describe('Auth flow (e2e)', () => {
     };
   }
 
-  it('registers a tenant + owner and returns tokens', async () => {
+  it('signs the owner of a provisioned restaurant in and returns tokens', async () => {
     const payload = registerPayload();
-    const response = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const response = await provisionAndSignInE2E(app, payload);
 
     expect(response.body.accessToken).toBeDefined();
     expect(response.body.user.email).toBe(payload.email);
@@ -53,7 +58,7 @@ describe('Auth flow (e2e)', () => {
   // cookie de refresh".
   it('sets the refresh_token cookie with Path=/ so it survives URI versioning and the frontend origin', async () => {
     const payload = registerPayload();
-    const response = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const response = await provisionAndSignInE2E(app, payload);
 
     const setCookie: string = response.headers['set-cookie'][0];
     expect(setCookie).toMatch(/refresh_token=/);
@@ -64,15 +69,9 @@ describe('Auth flow (e2e)', () => {
     expect(setCookie).toMatch(/SameSite=Lax/i);
   });
 
-  it('rejects duplicate slug/document on register', async () => {
-    const payload = registerPayload();
-    await request(server).post('/v1/auth/register').send(payload).expect(201);
-    await request(server).post('/v1/auth/register').send(payload).expect(409);
-  });
-
   it('logs in with correct credentials and rejects wrong password', async () => {
     const payload = registerPayload();
-    await request(server).post('/v1/auth/register').send(payload).expect(201);
+    await provisionAndSignInE2E(app, payload);
 
     await request(server)
       .post('/v1/auth/login')
@@ -89,7 +88,7 @@ describe('Auth flow (e2e)', () => {
 
   it('returns the authenticated user on /auth/me', async () => {
     const payload = registerPayload();
-    const registerRes = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const registerRes = await provisionAndSignInE2E(app, payload);
     const accessToken = registerRes.body.accessToken;
 
     const me = await request(server)
@@ -106,7 +105,7 @@ describe('Auth flow (e2e)', () => {
 
   it('rotates tokens on /auth/refresh using the httpOnly cookie', async () => {
     const payload = registerPayload();
-    const registerRes = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const registerRes = await provisionAndSignInE2E(app, payload);
     const cookie = registerRes.headers['set-cookie'][0];
 
     const refreshed = await request(server)
@@ -123,7 +122,7 @@ describe('Auth flow (e2e)', () => {
 
   it('logs out and revokes the refresh token', async () => {
     const payload = registerPayload();
-    const registerRes = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const registerRes = await provisionAndSignInE2E(app, payload);
     const cookie = registerRes.headers['set-cookie'][0];
     const accessToken = registerRes.body.accessToken;
 

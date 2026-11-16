@@ -2,18 +2,26 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Logger, VersioningType } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AppConfig } from './config/configuration';
+import { applyTrustProxy } from './common/http/trust-proxy';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // rawBody: the WhatsApp webhook checks the signature Meta computes over the exact bytes sent.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true, rawBody: true });
   app.useLogger(app.get(PinoLogger));
 
   const config = app.get(ConfigService<AppConfig, true>);
+
+  applyTrustProxy(app, config.get('trustProxyHops', { infer: true }));
+  // A redeploy stops the process with SIGTERM: let Nest finish the requests
+  // in flight and run onModuleDestroy (Prisma disconnect) before exiting.
+  app.enableShutdownHooks();
 
   app.use(helmet());
   app.use(cookieParser());

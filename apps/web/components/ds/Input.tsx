@@ -8,15 +8,16 @@ import {
 import clsx from 'clsx';
 import { ChevronDown, Search } from 'lucide-react';
 
+// On touch devices the text is 16px: iOS zooms the page when a focused field has smaller text.
 const CONTROL =
-  'w-full rounded-ctl border border-line bg-surface-2 text-sm text-foreground placeholder:text-subtle outline-none transition-colors ' +
+  'w-full rounded-ctl border border-line bg-surface-2 text-sm text-foreground placeholder:text-subtle outline-none transition-colors touch:text-base ' +
   'hover:border-line-strong focus:border-accent/70 focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-50';
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...props },
   ref,
 ) {
-  return <input ref={ref} className={clsx(CONTROL, 'h-9 px-3', className)} {...props} />;
+  return <input ref={ref} className={clsx(CONTROL, 'h-9 px-3 touch:h-11', className)} {...props} />;
 });
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<HTMLTextAreaElement>>(
@@ -31,7 +32,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
 ) {
   return (
     <div className="relative">
-      <select ref={ref} className={clsx(CONTROL, 'h-9 appearance-none pl-3 pr-8', className)} {...props}>
+      <select ref={ref} className={clsx(CONTROL, 'h-9 appearance-none pl-3 pr-8 touch:h-11', className)} {...props}>
         {children}
       </select>
       <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
@@ -55,7 +56,7 @@ export const SearchInput = forwardRef<
       <input
         ref={ref}
         type="search"
-        className={clsx(CONTROL, large ? 'h-12 pl-11 pr-4 text-base' : 'h-9 pl-9 pr-3', className)}
+        className={clsx(CONTROL, large ? 'h-12 pl-11 pr-4 text-base' : 'h-9 pl-9 pr-3 touch:h-11', className)}
         {...props}
       />
     </div>

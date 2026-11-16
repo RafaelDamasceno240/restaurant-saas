@@ -6,7 +6,15 @@ import { Pencil, Power } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { formatCents } from '@/lib/cash-api';
 import { CustomerDetail, customersApi } from '@/lib/customers-api';
-import { CUSTOMER_STATUS_TONE, formatCpf, formatPhone, lastOrderLabel } from '@/lib/customers-logic';
+import {
+  CUSTOMER_SEGMENT_HINT,
+  CUSTOMER_SEGMENT_LABEL,
+  CUSTOMER_SEGMENT_TONE,
+  CUSTOMER_STATUS_TONE,
+  formatCpf,
+  formatPhone,
+  lastOrderLabel,
+} from '@/lib/customers-logic';
 import { Badge } from '@/components/ds/Badge';
 import { Button } from '@/components/ds/Button';
 import { Dialog } from '@/components/ds/Dialog';
@@ -15,6 +23,20 @@ import { StatCard } from '@/components/ds/StatCard';
 import { useToast } from '@/components/ds/Toast';
 import { useErrorMessage } from '@/components/estoque/use-inventory';
 import { StatusBadge } from '@/components/pedidos/StatusBadge';
+import { Tabs } from '@/components/ds/Tabs';
+import { CustomerLoyaltyPanel } from '@/components/loyalty/CustomerLoyaltyPanel';
+import { CustomerCashbackPanel } from '@/components/cashback/CustomerCashbackPanel';
+import { CustomerCreditPanel } from '@/components/receivables/CustomerCreditPanel';
+
+// Sections of the dialog. Each benefit keeps its own panel (and its own requests), so the
+// summary opens as fast as before.
+type Section = 'summary' | 'loyalty' | 'cashback' | 'credit';
+const SECTIONS: { key: Section; label: string }[] = [
+  { key: 'summary', label: 'Resumo' },
+  { key: 'loyalty', label: 'Fidelidade' },
+  { key: 'cashback', label: 'Cashback' },
+  { key: 'credit', label: 'Fiado antigo' },
+];
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -39,9 +61,13 @@ export function CustomerDetailDialog({
   const queryClient = useQueryClient();
   const open = customerId !== null;
   const [page, setPage] = useState(1);
+  const [section, setSection] = useState<Section>('summary');
   const toggling = useRef(false);
 
-  useEffect(() => setPage(1), [customerId]);
+  useEffect(() => {
+    setPage(1);
+    setSection('summary');
+  }, [customerId]);
 
   const detail = useQuery({
     queryKey: ['customers', 'detail', customerId],
@@ -120,10 +146,21 @@ export function CustomerDetailDialog({
         <ErrorState message="Não foi possível carregar o cliente." onRetry={() => void detail.refetch()} />
       ) : (
         <div className="space-y-5">
+          <Tabs value={section} onChange={setSection} items={SECTIONS} />
+          {section === 'loyalty' && <CustomerLoyaltyPanel customerId={customer.id} customerActive={customer.active} />}
+          {section === 'cashback' && <CustomerCashbackPanel customerId={customer.id} />}
+          {section === 'credit' && <CustomerCreditPanel customerId={customer.id} />}
+          {section === 'summary' && (
+            <>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={CUSTOMER_STATUS_TONE[customer.active ? 'active' : 'inactive']} dot>
               {customer.active ? 'Ativo' : 'Inativo'}
             </Badge>
+            {customer.segments.map((key) => (
+              <span key={key} title={CUSTOMER_SEGMENT_HINT[key]}>
+                <Badge tone={CUSTOMER_SEGMENT_TONE[key]}>{CUSTOMER_SEGMENT_LABEL[key]}</Badge>
+              </span>
+            ))}
             {customer.email && <span className="text-sm text-muted-foreground">{customer.email}</span>}
             {customer.cpf && <span className="text-sm tabular-nums text-muted-foreground">CPF {formatCpf(customer.cpf)}</span>}
           </div>
@@ -137,6 +174,25 @@ export function CustomerDetailDialog({
             <StatCard label="Última compra" value={<span className="text-lg">{lastOrderLabel(metrics.lastOrderAt)}</span>} />
           </div>
 
+          {customer.topProducts.length > 0 && (
+            <section aria-label="Produtos mais comprados" className="space-y-2">
+              <h3 className="text-sm font-semibold text-foreground">Produtos mais comprados</h3>
+              <ol className="divide-y divide-line rounded-ctl border border-line">
+                {customer.topProducts.map((product, index) => (
+                  <li key={product.productId} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <span className="min-w-0 truncate text-foreground">
+                      <span className="mr-2 text-xs font-semibold tabular-nums text-subtle">{index + 1}º</span>
+                      {product.name}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                      {product.quantity} un. · {formatCents(product.totalCents)}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
           <section aria-label="Histórico de pedidos" className="space-y-2">
             <h3 className="text-sm font-semibold text-foreground">Histórico de pedidos</h3>
             {orders.isPending ? (
@@ -144,7 +200,7 @@ export function CustomerDetailDialog({
             ) : orders.isError ? (
               <ErrorState message="Não foi possível carregar os pedidos." onRetry={() => void orders.refetch()} />
             ) : orders.data.data.length === 0 ? (
-              <EmptyState title="Nenhum pedido vinculado" description="Pedidos feitos no PDV com este cliente aparecem aqui." />
+              <EmptyState title="Nenhum pedido vinculado" description="Vendas feitas com este cliente no PDV ou na mesa, e pedidos vinculados a ele, aparecem aqui." />
             ) : (
               <>
                 <ul className="divide-y divide-line rounded-ctl border border-line">
@@ -183,6 +239,8 @@ export function CustomerDetailDialog({
               </>
             )}
           </section>
+            </>
+          )}
         </div>
       )}
     </Dialog>

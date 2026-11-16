@@ -3,6 +3,9 @@ import type { CouponPreview } from './coupons-api';
 
 export type FulfillmentType = 'DELIVERY' | 'PICKUP';
 export type PaymentMethod = 'CASH' | 'PIX' | 'CARD';
+// What the staff screens (PDV, table checkout, order lists) deal with: the three above plus
+// ON_ACCOUNT (fiado), which the public checkout never offers and the API refuses from it.
+export type StaffPaymentMethod = PaymentMethod | 'ON_ACCOUNT';
 
 export interface CheckoutAddressInput {
   street: string;
@@ -14,13 +17,20 @@ export interface CheckoutAddressInput {
   zipCode: string;
 }
 
-// Deliberately minimal: ONLY productId + quantity per item. Price, name and
-// subtotal are never sent as authority — the backend re-reads them from the
-// database. See docs/PROJECT_STATUS.md "Fatia 04" and
+// Deliberately minimal: ONLY productId + quantity per item (plus the ids and quantities of the
+// chosen add-ons, and the line note). Price, name and subtotal are never sent as authority — the
+// backend re-reads them from the database. See docs/PROJECT_STATUS.md "Fatia 04" and
 // apps/api/.../public-orders.service.ts for the enforcement side of this.
+export interface OrderItemInput {
+  productId: string;
+  quantity: number;
+  options?: { optionId: string; quantity: number }[];
+  notes?: string;
+}
+
 export interface CreateOrderInput {
   restaurantSlug: string;
-  items: { productId: string; quantity: number }[];
+  items: OrderItemInput[];
   customer: { name: string; phone: string };
   fulfillmentType: FulfillmentType;
   address?: CheckoutAddressInput;
@@ -33,12 +43,24 @@ export interface CreateOrderInput {
   idempotencyKey?: string;
 }
 
-export interface OrderItemResponse {
-  productId: string;
+// An add-on as it was charged, per unit of the line.
+export interface OrderItemOptionResponse {
+  group: string;
   name: string;
   unitPrice: number;
   quantity: number;
+}
+
+export interface OrderItemResponse {
+  productId: string;
+  name: string;
+  // Add-ons of one unit included.
+  unitPrice: number;
+  quantity: number;
   subtotal: number;
+  // Older orders (and older APIs) have neither.
+  notes?: string | null;
+  options?: OrderItemOptionResponse[];
 }
 
 // Returned ONLY by createOrder(), synchronously, to the browser that just
@@ -84,7 +106,7 @@ export function getOrder(slug: string, orderId: string): Promise<PublicOrderConf
 // itself; nothing is consumed, so the answer may be stale by the time the order is confirmed.
 export function previewCoupon(input: {
   restaurantSlug: string;
-  items: { productId: string; quantity: number }[];
+  items: OrderItemInput[];
   code: string;
 }): Promise<CouponPreview> {
   return apiFetch<CouponPreview>('/public/orders/coupon-preview', { method: 'POST', body: input });

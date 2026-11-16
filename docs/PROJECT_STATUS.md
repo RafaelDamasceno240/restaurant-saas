@@ -2,6 +2,10 @@
 
 ## AUDITORIA TÉCNICA — 2026-09-30 (estado real, prevalece sobre as seções históricas abaixo)
 
+> Os números de teste desta auditoria são de 2026-09-30. O estado mais recente (testes, migrations,
+> pendências) está nas seções **"Fechamento técnico do salto (2026-10-05)"** e **"Núcleo operacional e
+> implantação em containers (2026-10-10)"**, no fim deste arquivo. A segunda prevalece onde divergirem.
+
 As seções seguintes são um registro cronológico. Os trechos que dizem que nada
 foi executado no ambiente ("Motivo, sem meias-palavras", "Pendência
 estrutural") descrevem rodadas antigas e **estão superados** pela validação de
@@ -12,6 +16,7 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Área | Estado | Evidência |
 |---|---|---|
 | Auth/RBAC | IMPLEMENTADO | `auth.e2e-spec`, guards globais, refresh com rotação |
+| Equipe (usuários) | IMPLEMENTADO (2026-10-10) | `users-management` e `users-password` e2e; cadastro, papel, unidades, inativação, redefinição e troca de senha; tela `/dashboard/usuarios`. Sem convite nem recuperação por e-mail. Ver `docs/authentication.md` |
 | Multi-tenancy | IMPLEMENTADO | `tenant-isolation.e2e-spec`; `tenantId` sempre vem do JWT |
 | Unidades (branch access) | IMPLEMENTADO | `BranchAccessService` usado em caixa, estoque, PDV, mesas, comandas e pedidos |
 | Cardápio | IMPLEMENTADO | `menu`/`public-menu` e2e |
@@ -24,12 +29,13 @@ estrutural") descrevem rodadas antigas e **estão superados** pela validação d
 | Comandas | IMPLEMENTADO | `tabs`/`tab-checkout` e2e; checkout idempotente |
 | Estoque | IMPLEMENTADO | `inventory.e2e-spec` |
 | Compras e fornecedores | IMPLEMENTADO | `purchases.e2e-spec` (29 casos); ver seção "Compras de estoque" |
-| Perfil do restaurante | PARCIAL | página lê nome, slug, razão social e documento do tenant; endereço, horários e canais são demonstrativos; edição não persiste |
+| Perfil do restaurante | IMPLEMENTADO (2026-10-17) | `restaurant-profile` e2e; nome, razão social, descrição, contato, endereço e horários editáveis por OWNER/ADMIN e exibidos no cardápio público com "aberto agora" no fuso do restaurante. Sem logo própria, feriados nem bloqueio de pedido fora do horário. Ver `docs/RESTAURANT_PROFILE.md` |
 | Demo | DEMO/MOCK | `/demo/*` sem chamadas à API |
-| Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `provider` só `INTERNAL`; sem gateway |
+| Pagamentos | PARCIAL | `PaymentMethod` CASH/PIX/CARD é só rótulo; `ON_ACCOUNT` (fiado) abre uma conta a receber em vez de um pagamento; `provider` só `INTERNAL`; sem gateway |
 | Delivery | PARCIAL | fatias 1 a 3 da Fase 10: taxa e pedido mínimo por unidade, registro da entrega, despachar/confirmar, falha e reentrega, observação da entrega, busca/filtros/paginação, atribuição de entregador interno e histórico de tentativas, tela `/dashboard/delivery` (ver `docs/DELIVERY.md`). Sem entregador externo, mapas/GPS, taxa por zona e sem entrega pelo PDV |
-| CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV. Fatia 2: cupons e descontos (cálculo e validação no backend, PDV e checkout público, prévia, concorrência e idempotência, tela `/dashboard/cupons`). Ver `docs/CRM.md`. Sem cashback, fidelidade, campanhas, WhatsApp nem segmentação; o PDV (tela) ainda não tem seletor de cliente |
-| Relatórios | NÃO IMPLEMENTADO | só métricas do dia derivadas de `GET /orders` |
+| CRM | PARCIAL | fatia 1 da Fase 11: cadastro de clientes por tenant, busca/paginação, histórico de pedidos e métricas derivadas, tela `/dashboard/clientes`, vínculo opcional no PDV. Fatia 2: cupons e descontos (cálculo e validação no backend, PDV e checkout público, prévia, concorrência e idempotência, tela `/dashboard/cupons`). Ver `docs/CRM.md`. Fatias 3 a 6 (2026-10-04/05): segmentos e vínculo de cliente em PDV/mesa/pedido, fidelidade por pontos (`docs/LOYALTY.md`), cashback (`docs/CASHBACK.md`) e fiado/contas a receber (`docs/RECEIVABLES.md`). Sem campanhas nem WhatsApp |
+| Relatórios | IMPLEMENTADO (operacionais) | `GET /v1/reports/{sales,products,customers,inventory,delivery,cash}` e tela `/dashboard/relatorios`; `reports.e2e-spec`. Sem exportação, comparação de períodos nem margem por produto. Ver `docs/REPORTS.md` |
+| PWA / mobile | IMPLEMENTADO (sem push) | manifest, service worker conservador, página offline, instalação, controles de toque; push com o app fechado não existe. Validado só por emulação. Ver `docs/PWA.md` |
 | WhatsApp/IA | NÃO IMPLEMENTADO | |
 | NFC-e | NÃO IMPLEMENTADO | |
 | SaaS Billing | NÃO IMPLEMENTADO | sem cobrança; `Tenant.status` já bloqueia login e cardápio público quando SUSPENDED/CANCELLED |
@@ -327,13 +333,12 @@ definitivamente fechada.
   próprias apps (`api`/`web`) fica para uma fase de deploy futura
   (decisão consciente, ver `docs/architecture.md`).
 - **Limitação de produção herdada da correção do cookie (item 11 do
-  histórico acima)**: `Path=/` resolve dev local porque `localhost:3000` e
-  `localhost:4000` são o mesmo host (cookie `Domain` ignora porta). Em
-  produção, se frontend e API ficarem em hosts distintos de verdade (ex.
-  `app.exemplo.com` e `api.exemplo.com`), esse cookie **não** vai
-  atravessar — `Path` não resolve isso, só `Domain` compartilhado (mesmo
-  domínio-raiz + proxy reverso) ou uma troca de estratégia (BFF no
-  Next.js). Ver `docs/authentication.md` → "Escopo do cookie de refresh".
+  histórico acima) — resolvida na fase pré-deploy**: `Path=/` só resolvia
+  dev local, porque `localhost:3000` e `localhost:4000` são o mesmo host. O
+  navegador agora só fala com o frontend: o Next reescreve `/api/*` para a
+  API, e o cookie fica guardado para o host do frontend mesmo com a API em
+  outro domínio. Ver `docs/authentication.md` → "Escopo do cookie de
+  refresh".
   Precisa ser decidido antes do primeiro deploy real, não necessariamente
   nesta fase.
 
@@ -1847,7 +1852,8 @@ JWT_REFRESH_EXPIRES_IN=7d
 CORS_ORIGIN=http://localhost:3000
 ```
 
-`apps/web/.env`: `NEXT_PUBLIC_API_URL=http://localhost:4000/v1`
+`apps/web/.env`: `API_URL=http://localhost:4000/v1` (só de servidor; o
+navegador usa o proxy `/api`)
 
 `.env` (raiz, só para o `docker-compose.yml`): `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `REDIS_PORT` — valores
@@ -2530,3 +2536,134 @@ Segunda fatia da Fase 11. Detalhes e decisões em `docs/CRM.md`.
 - **Permissões:** `coupons.read/create/update/apply` (OWNER/ADMIN/MANAGER: todas; CASHIER: só `apply`). Rode `pnpm db:seed` e faça login de novo.
 - **Limitações:** cancelar o pedido não devolve o uso; limite por cliente só com cliente vinculado (API do PDV); sem restrição por produto/categoria.
 - **Tela:** `/dashboard/cupons` (Cupons, para OWNER/ADMIN/MANAGER); campo de cupom no PDV e no checkout.
+
+## Segurança e sessão — fechamento (2026-10-04)
+
+Detalhes em `docs/authentication.md`.
+
+- **Proxy `/api`, renovação de token e logout pelo cookie** (commit `14f9b31`): o navegador só fala com o frontend; `401` renova uma vez e repete uma vez; logout funciona com access token expirado.
+- **Revogação imediata do access token:** logout e reuso de refresh token gravam uma marca no Redis conferida a cada requisição (`401 SESSION_REVOKED`); falha aberta se o Redis cair. O Redis passa a ser usado em tempo de requisição (antes só no health check).
+- **Login sem vazamento:** senha conferida antes de revelar conta bloqueada ou restaurante suspenso; e-mail desconhecido custa o mesmo Argon2.
+- **CSP com nonce** em todas as páginas (sem `unsafe-inline`/`unsafe-eval` para scripts), `Permissions-Policy` e HSTS em produção. Todas as rotas do web passaram a ser dinâmicas.
+- **Visitante anônimo** não dispara mais `POST /auth/refresh`; slug inexistente responde 404 real.
+- `GET /orders?branchId=` de outro restaurante responde `404 BRANCH_NOT_FOUND` também para OWNER/ADMIN.
+- **Pendências:** rate limit ainda em memória por instância; suspensão de restaurante/bloqueio de usuário feitos direto no banco não derrubam o access token já emitido (até 15 min); busca de clientes com dado pessoal em query string; logout sem rede não apaga o cookie.
+
+## Cupons — auditoria e DEV (2026-10-04)
+
+- Auditoria sem defeitos: regras, cálculo, limites, concorrência, idempotência, isolamento e permissões cobertos por 92 testes e2e (6 arquivos). Os dois casos antes não medidos foram executados: 40 pedidos simultâneos no mesmo cupom limitado e venda em dinheiro com total 0.
+- Ajuste: a transação de criação do pedido passou a ter orçamento explícito (20 s / 10 s).
+- Banco DEV: migration `20261002100000_coupons` aplicada com `prisma migrate deploy` depois de preflight somente leitura e backup verificado por restauração; seed executado (57 permissões); sem drift.
+
+## CRM avançado (2026-10-04)
+
+Terceira fatia da Fase 11. Detalhes em `docs/CRM.md` ("CRM avançado").
+
+- **Segmentação** derivada dos pedidos (novos, recorrentes, sem compra recente, inativos há 180+ dias) e **ordenações** por maior gasto, maior ticket, mais pedidos e compra mais recente, tudo em uma consulta SQL parametrizada; contadores por segmento.
+- **Produtos mais comprados** no detalhe do cliente.
+- **Integração:** seletor de cliente no PDV (com cadastro na hora), cliente no fechamento de mesa e vínculo/desvínculo de pedidos existentes (online e delivery) com sugestão por telefone e auditoria atômica.
+- Sem migration e sem permissão nova.
+
+## Fidelidade — pontos (2026-10-04)
+
+Quarta fatia da Fase 11. Regra, modelo e decisões em `docs/LOYALTY.md`.
+
+- **Regra:** pedido concluído (`COMPLETED`/`DELIVERED`) de cliente vinculado credita `floor((subtotal − desconto) / 100) × pontos por real`, uma vez por pedido; pontos são trocados por recompensas do catálogo; ajuste manual e estorno com motivo.
+- **Ledger:** `loyalty_entries` append-only (trigger), saldo como total corrente travado por linha, nunca negativo (CHECK), idempotência por chave, auditoria na mesma transação.
+- **Integração:** novo `OrderEffectsService`, chamado dentro da transação que conclui o pedido (status genérico, entrega confirmada, fechamento de mesa) e ao vincular cliente a pedido já concluído.
+- **API:** `/v1/loyalty/*`; permissões `loyalty.read/redeem/adjust/configure`.
+- **Tela:** `/dashboard/fidelidade` e aba Fidelidade no detalhe do cliente.
+- **Migration:** `20261005001215_loyalty` (aditiva). Aplicada só no banco descartável; **não aplicada no DEV**.
+- **Limitações:** pontos não expiram; resgate não vira desconto em pedido; taxa única por restaurante.
+
+## Cashback (2026-10-04)
+
+Quinta fatia da Fase 11. Regra, modelo e decisões em `docs/CASHBACK.md`.
+
+- **Regra:** pedido concluído credita `floor((subtotal − desconto − cashback usado) × taxa em pontos-base / 10000)`; o saldo paga itens de vendas futuras no PDV e na mesa; cancelar o pedido devolve o que ele usou; ajuste administrativo e estorno com motivo; expiração opcional por inatividade.
+- **Ledger em centavos:** `cashback_entries` append-only, saldo como total corrente travado por linha, nunca negativo; `orders.cashbackUsedCents` e fórmula do total conferida por `CHECK`.
+- **Integração:** uso validado contra o saldo travado dentro da transação que cria o pedido (`OrderCreationService`); crédito e devolução pelo `OrderEffectsService`; ordem de locks caixa → cupom → cashback → fidelidade.
+- **API:** `/v1/cashback/*` e `cashbackToUseCents` em `POST /pos/orders` e `POST /tabs/:id/checkout`; permissões `cashback.read/use/adjust/configure`.
+- **Tela:** cartão de cashback em `/dashboard/fidelidade`, campo de uso no PDV e na mesa, aba Cashback no cliente, linha no detalhe do pedido.
+- **Migration:** `20261005003323_cashback`. Validada no banco descartável, em banco novo e em uma cópia do DEV; **não aplicada no DEV**.
+- **Limitações:** expiração por inatividade da conta (não por lote); sem agendador; sem uso no checkout público.
+
+## Fiado / contas a receber (2026-10-05)
+
+Sexta fatia da Fase 11. Regra, modelo e decisões em `docs/RECEIVABLES.md`.
+
+- **Regra:** cliente compra fiado só com limite definido, dentro do limite e sem parcela vencida; a venda (`ON_ACCOUNT`) abre uma conta com 1 a 12 parcelas mensais; recebimento total ou parcial em dinheiro, Pix ou cartão abate as parcelas por vencimento; estorno de recebimento e cancelamento com motivo; cancelar o pedido cancela a dívida; venda fiado não gera pontos nem cashback.
+- **Ledger em centavos:** `receivable_entries` e `receivable_payment_allocations` append-only; dívida do cliente, pago por conta e pago por parcela como totais correntes travados por linha; atraso calculado contra o dia do restaurante (`tenants.timezone`), nunca gravado.
+- **Integração:** limite e atraso conferidos contra a conta travada dentro da transação que cria o pedido (`OrderCreationService`); cancelamento e troca de cliente pelo `OrderEffectsService`; ordem de locks caixa → cupom → cashback → crédito → fidelidade; dinheiro recebido entra na sessão de caixa (`RECEIVABLE_PAYMENT`) e o estorno sai dela (`RECEIVABLE_REFUND`).
+- **API:** `/v1/receivables/*`, `paymentMethod: ON_ACCOUNT` + `creditTerms` em `POST /pos/orders` e `POST /tabs/:id/checkout`; permissões `receivables.read/sell/receive/manage`; o checkout público recusa `ON_ACCOUNT`.
+- **Tela:** `/dashboard/fiado` (Contas a receber), forma de pagamento Fiado no PDV e na mesa, aba Fiado no cliente, fiado recebido no Caixa.
+- **Migration:** `20261005005645_receivables`. Validada no banco descartável, em banco novo e em uma cópia do DEV (13 → 16); **não aplicada no DEV**.
+- **Defeito encontrado e corrigido antes do commit:** o `CHECK` da forma de pagamento aceitava `PAYMENT` com forma nula (`NULL IN (...)` resulta em `NULL`, que um `CHECK` aceita); passou a exigir `IS NOT NULL`.
+- **Limitações:** sem juros/multa, sem renegociação de parcelas, sem cobrança automática, sem tela para alterar o fuso do restaurante, um pagamento abate uma conta por vez.
+
+## PWA e experiência mobile (2026-10-05)
+
+Detalhes em `docs/PWA.md`.
+
+- **Instalável:** manifest (`/manifest.webmanifest`, `start_url: /dashboard`, standalone, atalhos), ícones 192/512/maskable/Apple, favicon (antes respondia 404), metatags Apple e `theme-color`.
+- **Service worker conservador** (`public/sw.js`): guarda só arquivos de build e ícones; nunca `/api`, nunca HTML, nunca escritas. Navegação sem servidor cai em `offline.html`. Sem fila offline.
+- **Sem conexão:** faixa de aviso no painel; ao abrir o app sem alcançar a API o operador não é mais jogado para o login (só `401`/`403` encerram a sessão).
+- **Avisos de pedido novo:** notificação local, opcional, com o app aberto em segundo plano. **Push com o app fechado: não implementado** (sem chaves VAPID, sem armazenamento de inscrições, sem emissor).
+- **Toque:** variante `touch:` no design system; controles com 40–44px e campos com 16px em celular e tablet; desktop inalterado. Cozinha no celular deixou de cortar os pedidos.
+- **Validação:** Chrome headless com emulação de tela e toque em 390×844, 820×1180 e 1366×900; não validado em aparelho físico.
+- Sem alteração de API nem de banco nesta etapa.
+
+## Relatórios operacionais (2026-10-05)
+
+Oitava etapa do salto. Regras e contrato em `docs/REPORTS.md`.
+
+- **Seis relatórios somente leitura:** vendas (totais, por dia, por hora, por pagamento, origem e atendimento), produtos, clientes, estoque (entradas, consumo, saídas e perdas por insumo), delivery (situação, tempos, taxa, entregadores) e caixa (sessões, totais e diferenças).
+- **Escopo:** tenant do token; unidade conferida (`404`/`403`) ou, sem ela, exatamente as unidades do usuário; permissão `reports.read` (proprietário, administrador, gerente).
+- **Período em dias de calendário no fuso do restaurante** (`tenants.timezone`), inclusive nas duas pontas, até 366 dias; dia e hora agrupados no mesmo fuso.
+- **Venda = pedido não cancelado**, pelo dia de criação; cancelados à parte.
+- **Desempenho:** agregação no banco, número fixo de consultas por relatório, listas paginadas, índices já existentes. Sem migration.
+- **Tela:** `/dashboard/relatorios` com filtro de período e unidade, seis abas e gráficos em HTML sem biblioteca.
+- **Limitações:** sem exportação, sem comparação entre períodos, sem margem por produto, sem cache.
+
+## Fechamento técnico do salto (2026-10-05)
+
+Validação e endurecimento do que foi entregue nas oito etapas do salto, sem funcionalidade nova. Detalhes e evidências em `RELATORIO_VALIDACAO_COMPRAS.txt`, seções 21 a 28.
+
+- **Testes no fechamento:** API unit 29 suítes / 286 testes; API E2E 42 suítes / 728 testes; web unit 20 suítes / 256 testes; lint, typecheck e build das duas aplicações sem erro. Navegador real (Chrome headless, build de produção): 223 verificações em 9 roteiros, mais as auditorias de toque, teclado e rolagem em 390×844, 820×1180 e 1366×900.
+- **Defeitos encontrados e corrigidos:**
+  - deadlock entre fechamento de mesa e cancelamento do mesmo cliente sobre o mesmo insumo (ordem de travas invertida); corrigido com uma ordem única, descrita em `docs/architecture.md`;
+  - repetição idempotente de venda fiado ignorava parcelas e vencimento;
+  - checkout público: telefone sem teclado de telefone e área de texto com 14px no toque.
+- **Limitação conhecida, sem decisão:** cancelar venda em **dinheiro** não gera devolução no caixa (anterior ao salto; ver `docs/CASH_REGISTER_PLAN.md`). **Superado em 2026-10-10:** decidido e implementado o estorno automático (seção seguinte).
+- **Migrations:** 16 no código. No banco de desenvolvimento estavam aplicadas 13 no momento do fechamento; `20261005001215_loyalty`, `20261005003323_cashback` e `20261005005645_receivables` aguardavam autorização, com preflight sem violações, backup verificado por restauração e ensaio do upgrade em cópia. Depois delas é preciso rodar o seed (70 permissões) e os usuários entrarem de novo.
+- **Não validado:** aparelho físico (celular, tablet, iOS), Safari e Firefox, teste de carga, validação manual por pessoa.
+- **Fora do escopo, não iniciado:** WhatsApp, IA, gateway de pagamento, NFC-e, cobrança SaaS, campanhas, push com o app fechado.
+
+## Núcleo operacional e implantação em containers (2026-10-10)
+
+Meta em vigor: colocar o núcleo operacional em uso em um restaurante real até 31/10/2026. Detalhes e evidências em `RELATORIO_VALIDACAO_COMPRAS.txt`, seções 35 a 38. **O produto não está pronto para produção:** não existe ambiente publicado validado, o banco publicado tem estado desconhecido e nada foi testado em aparelho real.
+
+- **Equipe e senhas** (`bf25f60`): a gestão cria funcionários com papel e unidades, inativa, reativa e redefine senhas; qualquer pessoa troca a própria senha. Mudar papel, inativar ou trocar senha encerra as sessões da conta. Sem migration. Ver `docs/authentication.md`, "Equipe e senhas".
+- **Estorno de venda em dinheiro** (`d4924e1`): cancelar um pedido pago em dinheiro grava um `SALE_REFUND` no caixa aberto da unidade, na mesma transação; sem caixa aberto o cancelamento é recusado. Migration `20261010230000_cash_sale_refund` (a 17ª, só acrescenta). Não é retroativo. Ver `docs/CASH_REGISTER_PLAN.md`.
+- **Testes em 2026-10-10:** API unit 30 suítes / 297 testes; API E2E 46 suítes / 777 testes; web unit 25 suítes / 312 testes; lint, typecheck e build sem erro. O E2E completo passou em três ambientes: nesta máquina, em um clone limpo com banco criado do zero e dentro de um container Linux.
+- **Correção de reprodutibilidade** (`39bda9e`): com o `.env` copiado do exemplo, o E2E falhava com `429` em 368 de 757 testes, porque o limite de autenticação do exemplo (10 por minuto) prevalecia sobre o do utilitário de testes.
+- **Containers:** `deploy/` traz as imagens da API e do frontend (Node 24.14.1, pnpm 9.12.0, Debian 12) e um Compose com API, frontend, PostgreSQL 16 e Redis 7. Migrations e seed rodam em um job separado, nunca na partida da API; PostgreSQL e Redis não publicam porta; a imagem final não tem devDependencies. Validado localmente: 17 migrations e seed em banco vazio, saúde da API e do frontend, 28 verificações em navegador real e 33 sondagens de segurança. Ver `deploy/README.md`.
+- **Migrations:** 17 no código. Banco de desenvolvimento: 16 aplicadas; a 17ª aguarda autorização. Banco publicado: desconhecido.
+- **Uma imagem por função e job de banco (2026-10-11):** até 2026-10-10 o último estágio de `deploy/api.Dockerfile` era o de testes. Construído sem alvo, o arquivo produzia uma imagem que, ao iniciar, aplicava migrations, rodava o seed e executava a suíte E2E contra o banco recebido (conferido com `docker build` e `docker image inspect`); uma hospedagem que não escolhe o estágio subiria isso como se fosse a API. Corrigido: `deploy/api.Dockerfile` entrega só a imagem de produção (`node dist/src/main.js`, usuário `node`, sem ferramentas de desenvolvimento, com o cliente Prisma gerado); o job de banco fica em `deploy/api.migrate.Dockerfile` e `deploy/migrate.js` (`status`, `migrate`, `seed`, `release`); os testes, em `deploy/api.e2e.Dockerfile`. `node deploy/verify-images.js` constrói as quatro imagens sem alvo e confere o resultado. Ordem de uma implantação: banco, job de banco, API, saúde; a API nunca aplica migrations nem seed ao iniciar. Validado localmente em bancos descartáveis: banco vazio (17 migrations, 70 permissões, 245 vínculos), repetição sem efeito, versão antiga atualizada, migration que falha no meio (o seed não roda, nada da migration permanece, recuperação com `migrate resolve`), banco com tabelas e sem histórico recusado, duas instâncias da API sem tocar no schema. E2E em container Linux pela imagem de testes separada: 46 suítes, 777 testes, 0 falhas. **Não validado em hospedagem:** o estágio que o construtor da plataforma escolhe, a ordem job de banco e depois API, e o que acontece quando o job falha. **Achado:** `/health/ready` não enxerga o schema; uma API apontada para um banco sem migrations fica saudável e responde `500`. Ver `deploy/README.md` e a seção 42 do relatório.
+- **Riscos abertos:**
+  - limites por endereço divididos pelos aparelhos do mesmo Wi-Fi: **reduzido em 2026-10-10**. A Cozinha passou de 48 para 12 requisições por minuto (quadro inteiro em `GET /orders/board`) e o frontend deixou de repetir requisições recusadas. Medido com telas reais: duas cozinhas tinham 96 recusas (`429`) em 146 requisições por minuto e ficavam sem mostrar pedidos; agora cinco cozinhas e três listas de pedidos operam sem recusa. Os limites continuam por endereço: acima de cerca de 8 telas de cozinha ou 30 telas no total em um mesmo endereço a recusa volta; limitar por usuário é decisão pendente;
+  - endereço do cliente atrás do frontend: **corrigido em 2026-10-10** para o frontend rodando com `apps/web/server.js` (Docker e `pnpm --filter web start`), que acrescenta o endereço real ao `X-Forwarded-For`; `TRUST_PROXY_HOPS` passa a contar o frontend. Continua aberto: o valor tem de ser o número exato de proxies de cada hospedagem, a API não pode ser alcançável por fora deles, e na Vercel (onde `server.js` não roda) o comportamento não foi medido;
+  - o cookie de sessão exige HTTPS fora de `localhost`, então teste em aparelhos precisa de um endereço com HTTPS;
+  - instalar com `NODE_ENV=production` sem forçar devDependencies quebra a instalação e o build fora das imagens de `deploy/`;
+  - o e-mail de login diferencia maiúsculas de minúsculas; o dono que esquecer a senha não tem recuperação; o caixa não cancela pedidos; só existe uma unidade por restaurante sem intervenção no banco.
+- **Não validado:** hospedagem real, HTTPS, aparelho físico, Node 20, carga, uso por uma pessoa.
+- **Fora do escopo, não iniciado:** impressão, NFC-e, WhatsApp, IA, gateway de pagamento, cobrança SaaS.
+
+## Perfil do restaurante editável (2026-10-17)
+
+Detalhes e evidências em `RELATORIO_VALIDACAO_COMPRAS.txt`, seção 45, e em `docs/RESTAURANT_PROFILE.md`.
+
+- **Entrega:** `GET/PATCH /v1/tenants/current/profile` (`restaurant.read` / `restaurant.update`, permissão que já existia sem uso). O cardápio público passa a mostrar descrição, endereço, telefone, WhatsApp, Instagram, horários e "Aberto/Fechado agora", calculado no fuso do restaurante. A tela `/dashboard/restaurante` deixou de mostrar endereço e horários demonstrativos e ganhou um formulário que salva.
+- **Migration:** `20261017150000_restaurant_profile` (a 18ª; quatro colunas nulas). Validada em banco vazio e numa cópia de um banco de testes com 17 migrations e 16.048 restaurantes: dados iguais antes e depois, `migrate diff` sem diferença. **Não aplicada no DEV** (continua com 16) nem na homologação (17).
+- **Testes:** API unit 32 suítes / 315 testes; web unit 26 suítes / 319 testes; E2E da API 47 suítes, incluindo a nova `restaurant-profile` (10 casos), 787 testes, 0 falhas; lint e typecheck sem erro. Números completos na seção 45 do relatório.
+- **Decisão em aberto:** com o restaurante fechado, o checkout público continua aceitando pedidos.

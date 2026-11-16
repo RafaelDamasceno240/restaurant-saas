@@ -16,8 +16,9 @@ import {
   describeUsage,
   formatWindow,
   isFiltering,
-  centsToInput,
+  couponChannelNote,
 } from '@/lib/coupons-logic';
+import { formatCentsAsBRL } from '@/lib/money';
 import { Badge } from '@/components/ds/Badge';
 import { Button } from '@/components/ds/Button';
 import { Card } from '@/components/ds/Card';
@@ -195,8 +196,8 @@ export default function CouponsPage() {
                     <Td>
                       <div className="font-medium text-foreground">{describeDiscount(coupon)}</div>
                       <div className="text-xs text-muted-foreground">
-                        {coupon.minOrderCents > 0 ? `Mínimo R$ ${centsToInput(coupon.minOrderCents)}` : 'Sem mínimo'}
-                        {coupon.perCustomerLimit !== null ? ` · ${coupon.perCustomerLimit}/cliente` : ''}
+                        {coupon.minOrderCents > 0 ? `Mínimo ${formatCentsAsBRL(coupon.minOrderCents)}` : 'Sem mínimo'}
+                        {coupon.perCustomerLimit !== null ? ` · ${coupon.perCustomerLimit}/cliente · ${couponChannelNote(coupon)}` : ''}
                       </div>
                     </Td>
                     <Td className="text-xs text-muted-foreground">{formatWindow(coupon)}</Td>

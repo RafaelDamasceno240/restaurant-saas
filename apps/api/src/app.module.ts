@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { PrismaModule } from './prisma/prisma.module';
+import { RedisModule } from './redis/redis.module';
 import { LoggerModule } from './common/logger/logger.module';
 import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
@@ -22,6 +23,8 @@ import { HealthModule } from './modules/health/health.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { ProductsModule } from './modules/products/products.module';
 import { PublicMenuModule } from './modules/public-menu/public-menu.module';
+import { MediaModule } from './modules/media/media.module';
+import { OptionGroupsModule } from './modules/option-groups/option-groups.module';
 import { PublicOrdersModule } from './modules/public-orders/public-orders.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PosModule } from './modules/pos/pos.module';
@@ -33,6 +36,12 @@ import { PurchasesModule } from './modules/purchases/purchases.module';
 import { DeliveryModule } from './modules/delivery/delivery.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
+import { LoyaltyModule } from './modules/loyalty/loyalty.module';
+import { CashbackModule } from './modules/cashback/cashback.module';
+import { ReceivablesModule } from './modules/receivables/receivables.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { PlatformModule } from './modules/platform/platform.module';
+import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -44,6 +53,7 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
     LoggerModule,
     PrismaModule,
+    RedisModule,
     AuditModule,
     AuthModule,
     UsersModule,
@@ -53,6 +63,8 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     CategoriesModule,
     ProductsModule,
     PublicMenuModule,
+    MediaModule,
+    OptionGroupsModule,
     PublicOrdersModule,
     OrdersModule,
     PosModule,
@@ -64,6 +76,12 @@ import { CouponsModule } from './modules/coupons/coupons.module';
     DeliveryModule,
     CustomersModule,
     CouponsModule,
+    LoyaltyModule,
+    CashbackModule,
+    ReceivablesModule,
+    ReportsModule,
+    PlatformModule,
+    WhatsappModule,
   ],
   providers: [
     // Order matters: auth -> roles -> permissions -> rate limit.

@@ -7,6 +7,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  roundBody,
 } from './test-app.util';
 
 // Fatia 10 — POST /v1/tabs/:id/checkout: Tab -> paid Order, atomically and
@@ -65,9 +66,9 @@ describe('Tab checkout (fechamento financeiro) (e2e)', () => {
       const product = await createActiveProductE2E(server, tenant.accessToken, item.name, item.price);
       products.push(product);
       await request(server)
-        .post(`/v1/tabs/${tab.id}/items`)
+        .post(`/v1/tabs/${tab.id}/rounds`)
         .set(auth(tenant.accessToken))
-        .send({ productId: product.id, quantity: item.quantity })
+        .send(roundBody([{ productId: product.id, quantity: item.quantity }]))
         .expect(201);
     }
     return { ...tenant, table, tab: tab as { id: string }, products };
@@ -200,9 +201,9 @@ describe('Tab checkout (fechamento financeiro) (e2e)', () => {
       await request(server).post('/v1/tabs').set(auth(a.accessToken)).send({ branchId: a.branchId, tableId: secondTable.id }).expect(201)
     ).body;
     await request(server)
-      .post(`/v1/tabs/${secondTab.id}/items`)
+      .post(`/v1/tabs/${secondTab.id}/rounds`)
       .set(auth(a.accessToken))
-      .send({ productId: a.products[0].id, quantity: 1 })
+      .send(roundBody([{ productId: a.products[0].id, quantity: 1 }]))
       .expect(201);
     const key = newKey();
 

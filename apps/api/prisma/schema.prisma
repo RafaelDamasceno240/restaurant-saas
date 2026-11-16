@@ -38,39 +38,76 @@ enum RoleName {
 }
 
 model Tenant {
-  id        String       @id @default(uuid())
-  name      String
-  legalName String
-  document  String       @unique
-  slug      String       @unique
-  status    TenantStatus @default(TRIAL)
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  id           String       @id @default(uuid())
+  name         String
+  legalName    String
+  document     String       @unique
+  slug         String       @unique
+  status       TenantStatus @default(TRIAL)
+  // IANA time zone of the restaurant. "Today" for due dates, overdue receivables and report
+  // periods is the calendar day in this zone, never the server's.
+  timezone     String       @default("America/Sao_Paulo")
+  // Public profile of the brand, shown on the public menu. The contact, the address and the
+  // opening hours belong to the branch that receives online orders (Branch).
+  description  String?
+  // Instagram handle, without "@".
+  instagram    String?
+  // Look of the public menu. The images live in media_assets (GET /public/media/:id) and
+  // brandColor ("#RRGGBB") only tints the public pages; NULL keeps the neutral defaults.
+  logoMediaId  String?
+  coverMediaId String?
+  brandColor   String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
-  branches          Branch[]
-  users             User[]
-  userRoles         UserRole[]
-  auditLogs         AuditLog[]
-  categories        Category[]
-  products          Product[]
-  orders            Order[]
-  deliveries        Delivery[]
-  cashSessions      CashRegisterSession[]
-  cashMovements     CashMovement[]
-  diningTables      DiningTable[]
-  tabs              Tab[]
-  payments          Payment[]
-  inventoryItems    InventoryItem[]
-  inventoryBalances InventoryBalance[]
-  stockMovements    StockMovement[]
-  suppliers         Supplier[]
-  customers         Customer[]
-  coupons           Coupon[]
-  couponRedemptions CouponRedemption[]
-  purchases         Purchase[]
-  purchaseSequence  PurchaseSequence?
-  productRecipes    ProductRecipe[]
-  inventoryCounts   InventoryCount[]
+  branches              Branch[]
+  users                 User[]
+  userRoles             UserRole[]
+  auditLogs             AuditLog[]
+  categories            Category[]
+  products              Product[]
+  orders                Order[]
+  deliveries            Delivery[]
+  cashSessions          CashRegisterSession[]
+  cashMovements         CashMovement[]
+  diningTables          DiningTable[]
+  tabs                  Tab[]
+  tabRounds             TabRound[]
+  tabItemCancellations  TabItemCancellation[]
+  payments              Payment[]
+  inventoryItems        InventoryItem[]
+  inventoryBalances     InventoryBalance[]
+  stockMovements        StockMovement[]
+  suppliers             Supplier[]
+  customers             Customer[]
+  coupons               Coupon[]
+  couponRedemptions     CouponRedemption[]
+  purchases             Purchase[]
+  purchaseSequence      PurchaseSequence?
+  productRecipes        ProductRecipe[]
+  inventoryCounts       InventoryCount[]
+  loyaltyProgram        LoyaltyProgram?
+  loyaltyRewards        LoyaltyReward[]
+  loyaltyAccounts       LoyaltyAccount[]
+  loyaltyEntries        LoyaltyEntry[]
+  cashbackProgram       CashbackProgram?
+  cashbackAccounts      CashbackAccount[]
+  cashbackEntries       CashbackEntry[]
+  creditAccounts        CreditAccount[]
+  receivables           Receivable[]
+  receivableEntries     ReceivableEntry[]
+  mediaAssets           MediaAsset[]
+  optionGroups          OptionGroup[]
+  optionItems           OptionItem[]
+  productOptionGroups   ProductOptionGroup[]
+  whatsappConnection    WhatsappConnection?
+  whatsappContacts      WhatsappContact[]
+  whatsappConversations WhatsappConversation[]
+  whatsappMessages      WhatsappMessage[]
+  whatsappJobs          WhatsappJob[]
+  whatsappCheckoutLinks WhatsappCheckoutLink[]
+  logoMedia             MediaAsset?            @relation("TenantLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+  coverMedia            MediaAsset?            @relation("TenantCover", fields: [coverMediaId], references: [id], onDelete: SetNull)
 
   @@map("tenants")
 }
@@ -82,6 +119,8 @@ model Branch {
   code               String
   document           String?
   phone              String?
+  // Digits only, national number (same rule as phone).
+  whatsapp           String?
   email              String?
   address            String?
   number             String?
@@ -95,9 +134,18 @@ model Branch {
 
   // Delivery settings (Fase 10). Defaults keep the behavior that existed before
   // the module: delivery accepted, no fee, no minimum.
-  deliveryEnabled       Boolean @default(true)
-  deliveryFeeCents      Int     @default(0)
-  deliveryMinOrderCents Int     @default(0)
+  deliveryEnabled        Boolean @default(true)
+  deliveryFeeCents       Int     @default(0)
+  deliveryMinOrderCents  Int     @default(0)
+  // Items subtotal from which the delivery fee is not charged (NULL = always charged). Compared
+  // with the subtotal BEFORE any coupon, like the minimum.
+  deliveryFreeAboveCents Int?
+
+  // Weekly opening hours, validated by the API (modules/tenants/opening-hours.ts):
+  // [{ "weekday": 0-6 (0 = Sunday), "opens": "HH:MM", "closes": "HH:MM" }], sorted, never
+  // overlapping; "closes" earlier than "opens" means after midnight. A weekday with no
+  // interval is closed. NULL means the restaurant never informed its hours.
+  openingHours Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -110,10 +158,12 @@ model Branch {
   cashSessions      CashRegisterSession[]
   diningTables      DiningTable[]
   tabs              Tab[]
+  tabRounds         TabRound[]
   inventoryBalances InventoryBalance[]
   stockMovements    StockMovement[]
   inventoryCounts   InventoryCount[]
   purchases         Purchase[]
+  receivables       Receivable[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -132,25 +182,51 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  userRoles            UserRole[]
-  userBranches         UserBranch[]
-  refreshTokens        RefreshToken[]
-  auditLogs            AuditLog[]
-  dispatchedDeliveries Delivery[]            @relation("DeliveryDispatchedBy")
-  completedDeliveries  Delivery[]            @relation("DeliveryCompletedBy")
-  courierDeliveries    Delivery[]            @relation("DeliveryCourier")
-  openedCashSessions   CashRegisterSession[] @relation("CashSessionOpenedBy")
-  closedCashSessions   CashRegisterSession[] @relation("CashSessionClosedBy")
-  cashMovements        CashMovement[]
-  stockMovements       StockMovement[]
-  inventoryCounts      InventoryCount[]
-  createdPurchases     Purchase[]            @relation("PurchaseCreatedBy")
-  receivedPurchases    Purchase[]            @relation("PurchaseReceivedBy")
-  cancelledPurchases   Purchase[]            @relation("PurchaseCancelledBy")
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userRoles             UserRole[]
+  userBranches          UserBranch[]
+  refreshTokens         RefreshToken[]
+  auditLogs             AuditLog[]
+  dispatchedDeliveries  Delivery[]             @relation("DeliveryDispatchedBy")
+  completedDeliveries   Delivery[]             @relation("DeliveryCompletedBy")
+  courierDeliveries     Delivery[]             @relation("DeliveryCourier")
+  openedCashSessions    CashRegisterSession[]  @relation("CashSessionOpenedBy")
+  closedCashSessions    CashRegisterSession[]  @relation("CashSessionClosedBy")
+  cashMovements         CashMovement[]
+  stockMovements        StockMovement[]
+  inventoryCounts       InventoryCount[]
+  createdPurchases      Purchase[]             @relation("PurchaseCreatedBy")
+  receivedPurchases     Purchase[]             @relation("PurchaseReceivedBy")
+  cancelledPurchases    Purchase[]             @relation("PurchaseCancelledBy")
+  loyaltyEntries        LoyaltyEntry[]
+  cashbackEntries       CashbackEntry[]
+  createdReceivables    Receivable[]
+  receivableEntries     ReceivableEntry[]
+  sentTabRounds         TabRound[]             @relation("TabRoundSentBy")
+  sentTabItems          TabItem[]              @relation("TabItemSentBy")
+  tabItemCancellations  TabItemCancellation[]  @relation("TabItemCancelledBy")
+  platformAdmin         PlatformAdmin?
+  whatsappConversations WhatsappConversation[] @relation("WhatsappAssignedUser")
+  whatsappMessages      WhatsappMessage[]      @relation("WhatsappMessageAuthorUser")
 
   @@index([tenantId])
   @@map("users")
+}
+
+// Someone who administers the PLATFORM (every restaurant), not a restaurant. Deliberately not a
+// role: roles live inside one tenant (UserRole.tenantId) and OWNER/ADMIN must never reach other
+// tenants. Granted and revoked only by the local CLI (src/cli/platform-admin.ts); no route writes
+// it. Read on every /platform request (PlatformAdminGuard), so a revocation takes effect at once.
+model PlatformAdmin {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  // The operator who ran the grant (OS user@host), for the record. Never comes from a request.
+  grantedBy String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("platform_admins")
 }
 
 model UserBranch {
@@ -262,38 +338,150 @@ model Category {
   description  String?
   active       Boolean  @default(true)
   displayOrder Int      @default(0)
+  // Id of this row in the system it was imported from (menu importer); NULL when created here.
+  externalId   String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   products Product[]
 
+  @@unique([tenantId, externalId])
   @@index([tenantId])
   @@map("categories")
 }
 
 model Product {
-  id           String   @id @default(uuid())
-  tenantId     String
-  categoryId   String
-  name         String
-  description  String?
-  priceCents   Int
-  imageUrl     String?
-  active       Boolean  @default(true)
-  displayOrder Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                  String         @id @default(uuid())
+  tenantId            String
+  categoryId          String
+  name                String
+  description         String?
+  priceCents          Int
+  // Promotion: the full price shown struck through ("de R$ 35 por R$ 32"). Always above
+  // priceCents (CHECK); priceCents is still what is charged.
+  compareAtPriceCents Int?
+  imageUrl            String?
+  // An uploaded/imported photo (media_assets). When set it wins over imageUrl.
+  imageMediaId        String?
+  active              Boolean        @default(true)
+  // Shown on the public menu but cannot be ordered ("Esgotado"). `active = false` hides it.
+  soldOut             Boolean        @default(false)
+  // Listed again in the highlights strip at the top of the public menu.
+  featured            Boolean        @default(false)
+  badges              ProductBadge[] @default([])
+  displayOrder        Int            @default(0)
+  externalId          String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  category   Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  orderItems OrderItem[]
-  tabItems   TabItem[]
-  recipe     ProductRecipe?
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category     Category             @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  imageMedia   MediaAsset?          @relation("ProductImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
+  orderItems   OrderItem[]
+  tabItems     TabItem[]
+  recipe       ProductRecipe?
+  optionGroups ProductOptionGroup[]
 
+  @@unique([tenantId, externalId])
   @@index([tenantId])
   @@index([categoryId])
   @@map("products")
+}
+
+enum ProductBadge {
+  NEW
+  VEGETARIAN
+}
+
+// A set of add-ons/choices ("Turbine seu lanche!", "Refrigerante do combo"), reusable by many
+// products of the same tenant. The customer picks between minSelect and maxSelect units in
+// total (minSelect > 0 makes the group required); each option has its own maxQuantity.
+// Validated again by the API on every order: the client never prices anything.
+model OptionGroup {
+  id         String   @id @default(uuid())
+  tenantId   String
+  name       String
+  minSelect  Int      @default(0)
+  maxSelect  Int      @default(1)
+  active     Boolean  @default(true)
+  externalId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  options  OptionItem[]
+  products ProductOptionGroup[]
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId])
+  @@map("option_groups")
+}
+
+model OptionItem {
+  id           String   @id @default(uuid())
+  tenantId     String
+  groupId      String
+  name         String
+  description  String?
+  // Added to the product price for each unit chosen (0 = free choice).
+  priceCents   Int      @default(0)
+  maxQuantity  Int      @default(1)
+  active       Boolean  @default(true)
+  soldOut      Boolean  @default(false)
+  displayOrder Int      @default(0)
+  imageMediaId String?
+  externalId   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  group      OptionGroup       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  imageMedia MediaAsset?       @relation("OptionImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
+  orderLines OrderItemOption[]
+  tabLines   TabItemOption[]
+
+  @@unique([tenantId, externalId])
+  @@index([groupId])
+  @@map("option_items")
+}
+
+model ProductOptionGroup {
+  tenantId     String
+  productId    String
+  groupId      String
+  displayOrder Int    @default(0)
+
+  tenant  Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  group   OptionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([productId, groupId])
+  @@index([groupId])
+  @@index([tenantId])
+  @@map("product_option_groups")
+}
+
+// Images of the public menu (logo, cover, products, options), kept in the database so a backup
+// carries them and no file storage is needed. Content-addressed per tenant (sha256), served by
+// GET /public/media/:id with a long cache: a row is never rewritten.
+model MediaAsset {
+  id          String   @id @default(uuid())
+  tenantId    String
+  contentType String
+  sizeBytes   Int
+  sha256      String
+  data        Bytes
+  createdAt   DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products     Product[]    @relation("ProductImage")
+  options      OptionItem[] @relation("OptionImage")
+  tenantLogos  Tenant[]     @relation("TenantLogo")
+  tenantCovers Tenant[]     @relation("TenantCover")
+
+  @@unique([tenantId, sha256])
+  @@map("media_assets")
 }
 
 enum OrderStatus {
@@ -323,6 +511,9 @@ enum PaymentMethod {
   CASH
   PIX
   CARD
+  // Fiado (Fase 11, fatia 6): nothing is received now; the order opens a Receivable for the
+  // linked customer. Staff flows only - the public checkout never accepts it.
+  ON_ACCOUNT
 }
 
 model Order {
@@ -350,18 +541,22 @@ model Order {
   state        String?
   zipCode      String?
 
-  subtotalCents    Int
+  subtotalCents     Int
   // Discount applied to the ITEMS subtotal by a coupon (Fase 11, fatia 2); 0 without coupon.
   // Never applies to the delivery fee. CHECK: 0 <= discountCents <= subtotalCents.
-  discountCents    Int     @default(0)
+  discountCents     Int     @default(0)
+  // Cashback balance of the linked customer spent on this order (Fase 11, fatia 5); 0 when
+  // none. Covers items only: CHECK 0 <= cashbackUsedCents <= subtotalCents - discountCents.
+  cashbackUsedCents Int     @default(0)
   // Snapshot of the delivery fee charged on this order (0 for non-delivery).
-  // totalCents = subtotalCents - discountCents + deliveryFeeCents (CHECK in the database).
-  deliveryFeeCents Int     @default(0)
-  totalCents       Int
+  // totalCents = subtotalCents - discountCents - cashbackUsedCents + deliveryFeeCents (CHECK in
+  // the database).
+  deliveryFeeCents  Int     @default(0)
+  totalCents        Int
   // Coupon used, if any. couponCode is the canonical code AT ORDER TIME (snapshot, survives
   // the coupon being edited); couponId becomes NULL only if the coupon row ever disappears.
-  couponId         String?
-  couponCode       String?
+  couponId          String?
+  couponCode        String?
 
   tabId          String? @unique
   idempotencyKey String?
@@ -369,16 +564,20 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch       Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  tab          Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
-  items        OrderItem[]
-  cashMovement CashMovement?
-  payment      Payment?
-  delivery     Delivery?
-  customer     Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  coupon       Coupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
-  redemption   CouponRedemption?
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch          Branch            @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  tab             Tab?              @relation(fields: [tabId], references: [id], onDelete: Restrict)
+  items           OrderItem[]
+  cashMovement    CashMovement?     @relation("CashSaleOrder")
+  cashRefund      CashMovement?     @relation("CashRefundedOrder")
+  payment         Payment?
+  delivery        Delivery?
+  customer        Customer?         @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  coupon          Coupon?           @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  redemption      CouponRedemption?
+  loyaltyEntries  LoyaltyEntry[]
+  cashbackEntries CashbackEntry[]
+  receivable      Receivable?
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, createdAt])
@@ -397,13 +596,40 @@ model OrderItem {
   unitPriceCents      Int
   quantity            Int
   subtotalCents       Int
+  // B9: the tab item this line bills (table checkout only). Unique: a tab item is charged at most
+  // once, whatever happens.
+  tabItemId           String? @unique
+  // The customer's note for this line ("sem cebola"), separate from the order's notes.
+  notes               String?
 
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order   Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  tabItem TabItem?          @relation(fields: [tabItemId], references: [id], onDelete: SetNull)
+  options OrderItemOption[]
 
   @@index([orderId])
   @@index([productId])
   @@map("order_items")
+}
+
+// The add-ons chosen for ONE unit of an order line, frozen at order time (names and prices are
+// snapshots, like the line itself). The line's unitPriceCents already includes them:
+// unitPriceCents = product price + sum(option unitPriceCents * quantity).
+model OrderItemOption {
+  id                 String  @id @default(uuid())
+  orderItemId        String
+  optionItemId       String?
+  groupNameSnapshot  String
+  optionNameSnapshot String
+  unitPriceCents     Int
+  quantity           Int
+
+  orderItem  OrderItem   @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  optionItem OptionItem? @relation(fields: [optionItemId], references: [id], onDelete: SetNull)
+
+  @@index([orderItemId])
+  @@index([optionItemId])
+  @@map("order_item_options")
 }
 
 // Operational state of a delivery, independent of the commercial OrderStatus.
@@ -479,6 +705,12 @@ enum CashMovementType {
   WITHDRAWAL
   SUPPLY
   SALE
+  // Cash received for a receivable (fiado paid in cash): money IN, like a sale.
+  RECEIVABLE_PAYMENT
+  // A cash payment of a receivable that was reversed: money OUT.
+  RECEIVABLE_REFUND
+  // A sale paid in cash that was cancelled: what it put in the drawer goes back OUT.
+  SALE_REFUND
 }
 
 model CashRegisterSession {
@@ -515,13 +747,19 @@ model CashMovement {
   amountCents     Int
   reason          String?
   orderId         String?          @unique
+  // SALE_REFUND only: the cancelled order whose cash sale this movement gives back. Unique, so
+  // the database itself refuses a second refund of the same sale. A CHECK in the migration ties
+  // the column to the type (set on SALE_REFUND, null on everything else).
+  refundedOrderId String?          @unique
   createdByUserId String
   createdAt       DateTime         @default(now())
 
-  session   CashRegisterSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
-  tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  order     Order?              @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  createdBy User                @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  session         CashRegisterSession @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  tenant          Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order           Order?              @relation("CashSaleOrder", fields: [orderId], references: [id], onDelete: Restrict)
+  refundedOrder   Order?              @relation("CashRefundedOrder", fields: [refundedOrderId], references: [id], onDelete: Restrict)
+  createdBy       User                @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  receivableEntry ReceivableEntry?
 
   @@index([sessionId, createdAt])
   @@map("cash_movements")
@@ -567,11 +805,59 @@ model Tab {
   branch Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
   table  DiningTable @relation(fields: [tableId], references: [id], onDelete: Restrict)
   items  TabItem[]
+  rounds TabRound[]
   order  Order?
 
   @@index([tenantId, branchId, status])
   @@index([tableId, status])
   @@map("tabs")
+}
+
+// B9 (piloto 2026-10-23): what happens to a tab item in the kitchen. A waiter sends a ROUND of
+// items; from then on each item is produced (SENT -> PREPARING -> READY), delivered to the table
+// (SERVED) or cancelled. CANCELLED means every unit was cancelled; a partial cancellation keeps
+// the status of the units left (TabItem.cancelledQuantity).
+enum TabItemStatus {
+  SENT
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+// Where the ingredients of cancelled units went: back to the stock (a REVERSAL movement), lost
+// (the consumption written when the round was sent stays), or nowhere (nothing was consumed for
+// them: a product without a recipe, or an item launched before rounds existed).
+enum TabItemStockOutcome {
+  RETURNED
+  WASTED
+  NONE
+}
+
+// B9: one "Enviar para a cozinha" of a tab. Its items are created, and their recipes consumed,
+// in the same transaction as the round. The waiter's idempotency key makes a repeated send
+// return this round instead of a second one.
+model TabRound {
+  id             String   @id @default(uuid())
+  tenantId       String
+  branchId       String
+  tabId          String
+  // 1, 2, 3... within the tab: what the kitchen sees ("Mesa 4 · rodada 2").
+  number         Int
+  idempotencyKey String
+  sentByUserId   String
+  sentAt         DateTime @default(now())
+
+  tenant Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  tab    Tab       @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  sentBy User      @relation("TabRoundSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
+  items  TabItem[]
+
+  @@unique([tabId, number])
+  @@unique([tabId, idempotencyKey])
+  @@index([tenantId, branchId, sentAt])
+  @@map("tab_rounds")
 }
 
 model TabItem {
@@ -586,12 +872,76 @@ model TabItem {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  tab     Tab     @relation(fields: [tabId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  // B9. NULL round = an item launched before rounds existed (migration 19): it never went to the
+  // kitchen, counts as SERVED, and its recipe is consumed at checkout. Every newer item belongs
+  // to the round that sent it (CHECK in the migration).
+  roundId           String?
+  status            TabItemStatus @default(SENT)
+  // Units cancelled so far (each cancellation is a TabItemCancellation row). What the bill
+  // charges is quantity - cancelledQuantity; all of them cancelled <=> status CANCELLED (CHECK).
+  cancelledQuantity Int           @default(0)
+  sentAt            DateTime?
+  sentByUserId      String?
+  preparingAt       DateTime?
+  readyAt           DateTime?
+  servedAt          DateTime?
+  cancelledAt       DateTime?
+
+  tab           Tab                   @relation(fields: [tabId], references: [id], onDelete: Cascade)
+  product       Product               @relation(fields: [productId], references: [id], onDelete: Restrict)
+  round         TabRound?             @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  sentBy        User?                 @relation("TabItemSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
+  cancellations TabItemCancellation[]
+  orderItem     OrderItem?
+  options       TabItemOption[]
 
   @@index([tabId])
   @@index([productId])
+  @@index([roundId])
   @@map("tab_items")
+}
+
+// The add-ons chosen for ONE unit of a tab item, frozen when its round was sent (migration 22).
+// Same rule as OrderItemOption: unitPriceCentsSnapshot of the item already includes them, and the
+// table checkout copies them to the sale's order lines.
+model TabItemOption {
+  id                 String  @id @default(uuid())
+  tabItemId          String
+  optionItemId       String?
+  groupNameSnapshot  String
+  optionNameSnapshot String
+  unitPriceCents     Int
+  quantity           Int
+
+  tabItem    TabItem     @relation(fields: [tabItemId], references: [id], onDelete: Cascade)
+  optionItem OptionItem? @relation(fields: [optionItemId], references: [id], onDelete: SetNull)
+
+  @@index([tabItemId])
+  @@index([optionItemId])
+  @@map("tab_item_options")
+}
+
+// B9: one cancellation of some units of a tab item - who, when, why, how many, in which state
+// they were and what happened to their ingredients. Append-only history; the stock reversal of a
+// RETURNED cancellation points at this row (StockMovement referenceType TAB_ITEM_CANCELLATION).
+model TabItemCancellation {
+  id                String              @id @default(uuid())
+  tenantId          String
+  tabItemId         String
+  quantity          Int
+  reason            String
+  statusAtCancel    TabItemStatus
+  stockOutcome      TabItemStockOutcome
+  cancelledByUserId String
+  createdAt         DateTime            @default(now())
+
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tabItem     TabItem @relation(fields: [tabItemId], references: [id], onDelete: Cascade)
+  cancelledBy User    @relation("TabItemCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tabItemId])
+  @@index([tenantId, createdAt])
+  @@map("tab_item_cancellations")
 }
 
 enum PaymentStatus {
@@ -660,6 +1010,10 @@ enum StockReferenceType {
   ORDER
   INVENTORY_COUNT
   PURCHASE
+  // B9: the SALE of a tab item, written when its round is sent to the kitchen.
+  TAB_ITEM
+  // B9: the REVERSAL of a cancellation whose units went back to the stock.
+  TAB_ITEM_CANCELLATION
 }
 
 model InventoryItem {
@@ -848,9 +1202,13 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  orders      Order[]
-  redemptions CouponRedemption[]
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders          Order[]
+  redemptions     CouponRedemption[]
+  loyaltyAccount  LoyaltyAccount?
+  cashbackAccount CashbackAccount?
+  creditAccount   CreditAccount?
+  receivables     Receivable[]
 
   @@index([tenantId, active, name])
   @@map("customers")
@@ -989,4 +1347,605 @@ model PurchaseItem {
   @@index([purchaseId])
   @@index([inventoryItemId])
   @@map("purchase_items")
+}
+
+// ---------------------------------------------------------------------------------------
+// Fidelidade (Fase 11, fatia 4): points. The LEDGER (loyalty_entries) is the source of truth;
+// LoyaltyAccount.balancePoints is its running total, changed only inside the transaction that
+// appends the entry, with the account row locked FOR UPDATE (same pattern as the stock ledger:
+// InventoryBalance + StockMovement.balanceAfter). Entries are append-only (trigger in SQL).
+// Rule (docs/LOYALTY.md): a concluded order (COMPLETED/DELIVERED) of a linked customer earns
+// floor((subtotal - discount) / 100) * pointsPerReal points; points are spent on rewards.
+// ---------------------------------------------------------------------------------------
+
+// One row per tenant; no row = program never configured = disabled.
+model LoyaltyProgram {
+  tenantId      String   @id
+  enabled       Boolean  @default(false)
+  // Points per whole R$ 1,00 of the items value actually paid. CHECK 1..1000.
+  pointsPerReal Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("loyalty_programs")
+}
+
+// What points can be exchanged for. Never deleted: deactivated, so past redemptions keep
+// pointing at the reward they were for.
+model LoyaltyReward {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  // CHECK >= 1.
+  pointsCost  Int
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entries LoyaltyEntry[]
+
+  @@index([tenantId, active, name])
+  @@map("loyalty_rewards")
+}
+
+// One per customer, created on the first movement. balancePoints = SUM(entries.points),
+// never negative (CHECK).
+model LoyaltyAccount {
+  id            String   @id @default(uuid())
+  tenantId      String
+  customerId    String   @unique
+  balancePoints Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  entries  LoyaltyEntry[]
+
+  @@index([tenantId])
+  @@map("loyalty_accounts")
+}
+
+enum LoyaltyEntryType {
+  // + points for a concluded order (orderId set; at most one per order: partial unique index)
+  EARN
+  // - points exchanged for a reward (rewardId set)
+  REDEEM
+  // +/- manual correction by management (reason mandatory)
+  ADJUSTMENT
+  // undoes exactly one earlier entry (reversedEntryId, unique: an entry is reversed once)
+  REVERSAL
+}
+
+model LoyaltyEntry {
+  id           String           @id @default(uuid())
+  tenantId     String
+  accountId    String
+  customerId   String
+  type         LoyaltyEntryType
+  // Signed: credit > 0, debit < 0, never 0 (CHECKs tie the sign to the type).
+  points       Int
+  // Account balance right after this entry (>= 0): the statement needs no recomputation.
+  balanceAfter Int
+
+  // Origin / reference of the movement.
+  orderId         String?
+  rewardId        String?
+  branchId        String?
+  reversedEntryId String?  @unique
+  reason          String?
+  // Client-generated, for the operations a user repeats by accident (redeem, adjust, reverse).
+  idempotencyKey  String?
+  // NULL = generated by the system on behalf of nobody (never the case today: the user who
+  // concluded the order is recorded).
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account       LoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  order         Order?         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  reward        LoyaltyReward? @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+  reversedEntry LoyaltyEntry?  @relation("LoyaltyEntryReversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversal      LoyaltyEntry?  @relation("LoyaltyEntryReversal")
+  createdBy     User?          @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([accountId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([orderId])
+  @@map("loyalty_entries")
+}
+
+// ---------------------------------------------------------------------------------------
+// Cashback (Fase 11, fatia 5): money, in integer cents. Same shape as the points ledger: the
+// LEDGER (cashback_entries) is the source of truth, CashbackAccount.balanceCents is its running
+// total changed only inside the transaction that appends an entry, with the account row locked
+// FOR UPDATE; entries are append-only (trigger in SQL).
+// Rule (docs/CASHBACK.md): a concluded order of a linked customer earns
+// floor((subtotal - discount - cashbackUsed) * earnRateBps / 10000) cents; the balance pays for
+// items of later orders (orders.cashbackUsedCents); a cancelled order gets what it used back;
+// an idle balance may expire.
+// ---------------------------------------------------------------------------------------
+
+// One row per tenant; no row = program never configured = disabled.
+model CashbackProgram {
+  tenantId        String   @id
+  enabled         Boolean  @default(false)
+  // Basis points of the items value actually paid: 500 = 5,00%. CHECK 1..5000.
+  earnRateBps     Int      @default(500)
+  // NULL = the balance never expires. Otherwise the whole balance expires after this many days
+  // without a credit or a use. CHECK 1..3650.
+  expireAfterDays Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("cashback_programs")
+}
+
+// One per customer, created on the first movement. balanceCents = SUM(entries.amountCents),
+// never negative (CHECK).
+model CashbackAccount {
+  id             String    @id @default(uuid())
+  tenantId       String
+  customerId     String    @unique
+  balanceCents   Int       @default(0)
+  // Last credit or use: what the expiration clock counts from.
+  lastActivityAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  entries  CashbackEntry[]
+
+  @@index([tenantId])
+  @@map("cashback_accounts")
+}
+
+enum CashbackEntryType {
+  // + cents for a concluded order (orderId set; at most one per order)
+  EARN
+  // - cents spent on an order (orderId set; at most one per order)
+  USE
+  // +/- manual correction by management (reason mandatory)
+  ADJUSTMENT
+  // undoes exactly one earlier entry (reversedEntryId, unique); also how a cancelled order
+  // gets back the cashback it used
+  REVERSAL
+  // - the whole idle balance, when the program has an expiration
+  EXPIRATION
+}
+
+model CashbackEntry {
+  id                String            @id @default(uuid())
+  tenantId          String
+  accountId         String
+  customerId        String
+  type              CashbackEntryType
+  // Signed cents: credit > 0, debit < 0, never 0 (CHECKs tie the sign to the type).
+  amountCents       Int
+  // Account balance right after this entry (>= 0).
+  balanceAfterCents Int
+
+  // Origin / reference of the movement.
+  orderId         String?
+  branchId        String?
+  reversedEntryId String?  @unique
+  reason          String?
+  idempotencyKey  String?
+  // NULL = written by the system (an expiration found while settling an account).
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account       CashbackAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  order         Order?          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  reversedEntry CashbackEntry?  @relation("CashbackEntryReversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversal      CashbackEntry?  @relation("CashbackEntryReversal")
+  createdBy     User?           @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([accountId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([orderId])
+  @@map("cashback_entries")
+}
+
+// ---------------------------------------------------------------------------------------
+// Fiado / contas a receber (Fase 11, fatia 6): money the CUSTOMER owes the restaurant, in
+// integer cents. Same ledger discipline as cashback: receivable_entries is the source of
+// truth and append-only; CreditAccount.balanceCents (the customer's open debt) is its running
+// total, changed only inside the transaction that appends an entry, with the account row
+// locked FOR UPDATE. A debt is never a bare mutable `debtBalance`.
+// Rule (docs/RECEIVABLES.md): a sale paid ON_ACCOUNT, or a manual charge, opens a Receivable
+// split in installments with due dates; payments (also partial) are allocated to installments,
+// oldest due first; a payment can be reversed; "overdue" is derived from the due date.
+// ---------------------------------------------------------------------------------------
+
+// One per customer, created when a limit is set or on the first charge.
+model CreditAccount {
+  id               String   @id @default(uuid())
+  tenantId         String
+  customerId       String   @unique
+  // 0 = this customer cannot buy on account. CHECK >= 0.
+  creditLimitCents Int      @default(0)
+  // Open debt = SUM(entries.amountCents). CHECK >= 0.
+  balanceCents     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer    Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  receivables Receivable[]
+  entries     ReceivableEntry[]
+
+  @@index([tenantId])
+  @@map("credit_accounts")
+}
+
+enum ReceivableStatus {
+  OPEN
+  PAID
+  CANCELLED
+}
+
+// One debt document: a sale on account (orderId set, unique) or a manual charge.
+// paidCents = SUM of its non-reversed payments; PAID exactly when paidCents = totalCents.
+model Receivable {
+  id          String           @id @default(uuid())
+  tenantId    String
+  branchId    String
+  customerId  String
+  accountId   String
+  orderId     String?          @unique
+  description String
+  totalCents  Int
+  paidCents   Int              @default(0)
+  status      ReceivableStatus @default(OPEN)
+
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  settledAt       DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch       Branch                  @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  customer     Customer                @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  account      CreditAccount           @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  order        Order?                  @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  createdBy    User                    @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  installments ReceivableInstallment[]
+  entries      ReceivableEntry[]
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, customerId, status])
+  @@index([tenantId, branchId, status])
+  @@map("receivables")
+}
+
+// A slice of the debt with its own due date. The amounts of the installments of a receivable
+// add up to its total. paidCents = what non-reversed payments allocated to it.
+model ReceivableInstallment {
+  id           String   @id @default(uuid())
+  tenantId     String
+  receivableId String
+  number       Int
+  dueDate      DateTime @db.Date
+  amountCents  Int
+  paidCents    Int      @default(0)
+
+  receivable  Receivable                    @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  allocations ReceivablePaymentAllocation[]
+
+  @@unique([receivableId, number])
+  @@index([tenantId, dueDate])
+  @@map("receivable_installments")
+}
+
+enum ReceivableEntryType {
+  // + the debt created by a sale on account or a manual charge
+  CHARGE
+  // - money received (paymentMethod set; a cash payment also has its cash movement)
+  PAYMENT
+  // undoes exactly one earlier entry (reversedEntryId, unique): a payment entered by mistake,
+  // or the charge of a cancelled receivable
+  REVERSAL
+}
+
+model ReceivableEntry {
+  id                String              @id @default(uuid())
+  tenantId          String
+  accountId         String
+  customerId        String
+  receivableId      String
+  type              ReceivableEntryType
+  // Signed cents, from the debt's point of view: CHARGE > 0, PAYMENT < 0, never 0.
+  amountCents       Int
+  // The customer's open debt right after this entry (>= 0).
+  balanceAfterCents Int
+
+  // How a PAYMENT was received (CASH, PIX or CARD), and where.
+  paymentMethod   PaymentMethod?
+  branchId        String?
+  cashMovementId  String?        @unique
+  reversedEntryId String?        @unique
+  reason          String?
+  idempotencyKey  String?
+  createdByUserId String
+  createdAt       DateTime       @default(now())
+
+  tenant        Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account       CreditAccount                 @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  receivable    Receivable                    @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  cashMovement  CashMovement?                 @relation(fields: [cashMovementId], references: [id], onDelete: Restrict)
+  reversedEntry ReceivableEntry?              @relation("ReceivableEntryReversal", fields: [reversedEntryId], references: [id], onDelete: Restrict)
+  reversal      ReceivableEntry?              @relation("ReceivableEntryReversal")
+  createdBy     User                          @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  allocations   ReceivablePaymentAllocation[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([accountId, createdAt])
+  @@index([receivableId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("receivable_entries")
+}
+
+// Which installments a PAYMENT entry paid, and how much of each: what a reversal undoes,
+// installment by installment. Append-only, like the entries.
+model ReceivablePaymentAllocation {
+  id            String @id @default(uuid())
+  entryId       String
+  installmentId String
+  amountCents   Int
+
+  entry       ReceivableEntry       @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  installment ReceivableInstallment @relation(fields: [installmentId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, installmentId])
+  @@index([installmentId])
+  @@map("receivable_payment_allocations")
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp assistant (assistente-whatsapp, 2026-11-12). One connection per restaurant, in the
+// shape of the WhatsApp Business Platform Cloud API (a phone number id of a WhatsApp Business
+// Account). SIMULATED connections never leave this server: the panel's simulator feeds them and
+// their replies are only stored. Sending through the Cloud API also needs WHATSAPP_CLOUD_ENABLED.
+// ---------------------------------------------------------------------------
+
+enum WhatsappConnectionMode {
+  SIMULATED
+  CLOUD
+}
+
+enum WhatsappConversationStatus {
+  // The assistant answers.
+  AI
+  // A person of the restaurant answers; the assistant stays quiet until it is given back.
+  HUMAN
+}
+
+enum WhatsappMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum WhatsappMessageAuthor {
+  CUSTOMER
+  ASSISTANT
+  AGENT
+  SYSTEM
+}
+
+enum WhatsappMessageStatus {
+  RECEIVED
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum WhatsappJobType {
+  // Answer what a conversation has not been answered yet (assistant).
+  REPLY
+  // Hand one outbound message to the provider.
+  SEND
+}
+
+enum WhatsappJobStatus {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+}
+
+model WhatsappConnection {
+  id                   String                 @id @default(uuid())
+  tenantId             String                 @unique
+  mode                 WhatsappConnectionMode @default(SIMULATED)
+  // Cloud API "phone_number_id": how a webhook finds its restaurant. Unique across the platform.
+  phoneNumberId        String                 @unique
+  displayPhoneNumber   String
+  wabaId               String?
+  // Cloud API access token, AES-256-GCM with WHATSAPP_TOKEN_ENCRYPTION_KEY. NULL when simulated.
+  accessTokenEncrypted String?
+  assistantEnabled     Boolean                @default(false)
+  greetingMessage      String?
+  // What the restaurant tells the assistant about its tone and rules (never prices: those come
+  // only from the catalogue).
+  behaviorInstructions String?
+  // Cost control: assistant replies per restaurant per day (restaurant time zone).
+  aiDailyReplyLimit    Int                    @default(300)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contacts WhatsappContact[]
+
+  @@map("whatsapp_connections")
+}
+
+model WhatsappContact {
+  id            String    @id @default(uuid())
+  tenantId      String
+  connectionId  String
+  // The customer's WhatsApp id (digits of the number, country code included).
+  waId          String
+  profileName   String?
+  // The customer asked not to receive messages ("parar"): nothing is sent to them any more.
+  optedOutAt    DateTime?
+  lastInboundAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenant       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  connection   WhatsappConnection    @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation?
+
+  @@unique([connectionId, waId])
+  @@index([tenantId])
+  @@map("whatsapp_contacts")
+}
+
+model WhatsappConversation {
+  id                          String                     @id @default(uuid())
+  tenantId                    String
+  contactId                   String                     @unique
+  status                      WhatsappConversationStatus @default(AI)
+  assignedUserId              String?
+  // The cart being put together: product and add-on ids with quantities only. Prices are always
+  // asked again from OrderCreationService.priceItems, never stored here.
+  cart                        Json?
+  cartVersion                 Int                        @default(0)
+  // Version of the cart whose summary was shown and waits for the customer's "sim".
+  awaitingConfirmationVersion Int?
+  // The local assistant's dialogue state (e.g. a product waiting for a required choice).
+  dialogState                 Json?
+  // Lease of the worker answering it, so one conversation is never answered twice at once.
+  processingUntil             DateTime?
+  lastInboundAt               DateTime?
+  lastMessageAt               DateTime?
+  unreadCount                 Int                        @default(0)
+  aiFailures                  Int                        @default(0)
+  createdAt                   DateTime                   @default(now())
+  updatedAt                   DateTime                   @updatedAt
+
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contact       WhatsappContact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  assignedUser  User?                  @relation("WhatsappAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  messages      WhatsappMessage[]
+  jobs          WhatsappJob[]
+  checkoutLinks WhatsappCheckoutLink[]
+
+  @@index([tenantId, lastMessageAt])
+  @@map("whatsapp_conversations")
+}
+
+model WhatsappMessage {
+  id                String                   @id @default(uuid())
+  tenantId          String
+  conversationId    String
+  direction         WhatsappMessageDirection
+  author            WhatsappMessageAuthor
+  authorUserId      String?
+  // Cloud API message id (wamid). Unique per restaurant: a webhook delivered twice stores once.
+  providerMessageId String?
+  type              String                   @default("text")
+  body              String
+  status            WhatsappMessageStatus
+  // When the customer sent it (webhook timestamp) or when we created it. Orders the thread, so a
+  // message delivered late still lands in its place.
+  providerTimestamp DateTime
+  // An assistant reply points at the last customer message it answers: UNIQUE, so the same
+  // messages are never answered twice, even when a job runs again.
+  inReplyToId       String?                  @unique
+  // When a customer message was answered (or left to a person).
+  handledAt         DateTime?
+  errorCode         String?
+  errorMessage      String?
+  aiProvider        String?
+  aiModel           String?
+  inputTokens       Int?
+  outputTokens      Int?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorUser   User?                @relation("WhatsappMessageAuthorUser", fields: [authorUserId], references: [id], onDelete: SetNull)
+  inReplyTo    WhatsappMessage?     @relation("WhatsappReply", fields: [inReplyToId], references: [id], onDelete: SetNull)
+  reply        WhatsappMessage?     @relation("WhatsappReply")
+
+  @@unique([tenantId, providerMessageId])
+  @@index([conversationId, providerTimestamp])
+  @@index([tenantId, author, createdAt])
+  @@map("whatsapp_messages")
+}
+
+// A webhook delivery as received. The payload itself is not kept: only its hash and what it
+// carried (LGPD: the messages live in whatsapp_messages, nowhere else).
+model WhatsappWebhookEvent {
+  id            String    @id @default(uuid())
+  payloadHash   String    @unique
+  messagesCount Int       @default(0)
+  statusesCount Int       @default(0)
+  duplicates    Int       @default(0)
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
+  error         String?
+
+  @@map("whatsapp_webhook_events")
+}
+
+// The queue: durable rows claimed with FOR UPDATE SKIP LOCKED and retried with backoff.
+model WhatsappJob {
+  id             String            @id @default(uuid())
+  tenantId       String
+  conversationId String
+  messageId      String?
+  type           WhatsappJobType
+  status         WhatsappJobStatus @default(PENDING)
+  attempts       Int               @default(0)
+  maxAttempts    Int               @default(5)
+  runAt          DateTime          @default(now())
+  lockedAt       DateTime?
+  lastError      String?
+  // The same work is queued once ("reply:<message id>", "send:<message id>").
+  dedupeKey      String            @unique
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@map("whatsapp_jobs")
+}
+
+// A link that opens the existing public checkout with the cart put together on WhatsApp. Only the
+// SHA-256 of the token is stored. Nothing is ordered until the customer confirms in the checkout.
+model WhatsappCheckoutLink {
+  id             String    @id @default(uuid())
+  tenantId       String
+  conversationId String
+  tokenHash      String    @unique
+  cart           Json
+  expiresAt      DateTime
+  openedAt       DateTime?
+  createdAt      DateTime  @default(now())
+
+  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation WhatsappConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("whatsapp_checkout_links")
 }

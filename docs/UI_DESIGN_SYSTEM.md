@@ -80,6 +80,17 @@ Regra: escolher `variant`, não sobrescrever cores por `className` (o Tailwind n
 - `md–xl`: sidebar colapsada por padrão.
 - `lg` (1024): PDV em duas colunas (catálogo + carrinho fixo).
 - `xl` (1280): sidebar expandida por padrão; KDS em 4 colunas.
+- `< sm` (640): KDS em uma coluna, cada status com a altura dos seus pedidos (o quadro rola inteiro).
+
+## Toque (`touch:`)
+
+Variante Tailwind própria (`tailwind.config.ts`): `touch:` = `@media (pointer: coarse)`, ou seja, celulares e tablets. Não depende da largura da tela.
+
+- `Button`: `sm` 32 → 40px, `md` 36 → 44px, `icon` 36 → 44px, `icon-sm` 28 → 40px.
+- `Input`, `Select`, `SearchInput`: 36 → 44px e texto de 16px (abaixo disso o iOS dá zoom ao focar).
+- Abas em pílula, chips clicáveis da barra superior, itens da barra lateral: 40–44px.
+- Controle novo que não use esses componentes deve declarar o seu `touch:h-10`/`touch:h-11`. Links dentro de uma frase ficam como texto.
+- Com mouse nada muda: a densidade compacta do desktop é mantida.
 
 ## Padrões
 

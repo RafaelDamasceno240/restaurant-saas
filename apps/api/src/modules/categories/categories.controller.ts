@@ -16,6 +16,7 @@ import { AuthenticatedRequestUser } from '../../common/types/authenticated-reque
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { ReorderCategoriesDto } from './dto/reorder-categories.dto';
 
 @ApiTags('categories')
 @ApiBearerAuth()
@@ -42,6 +43,14 @@ export class CategoriesController {
   @ApiOperation({ summary: 'Cria uma categoria' })
   create(@CurrentUser() user: AuthenticatedRequestUser, @Body() dto: CreateCategoryDto) {
     return this.categoriesService.create(user.tenantId, dto);
+  }
+
+  @Post('reorder')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('categories.update')
+  @ApiOperation({ summary: 'Define a ordem das categorias (lista completa)' })
+  reorder(@CurrentUser() user: AuthenticatedRequestUser, @Body() dto: ReorderCategoriesDto) {
+    return this.categoriesService.reorder(user.tenantId, dto.categoryIds);
   }
 
   @Patch(':id')

@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -176,7 +177,7 @@ describe('Delivery couriers - races (e2e)', () => {
     const c = await courier(ctx);
     await prisma().order.update({ where: { id: orderId }, data: { status: 'PENDING' } });
     const [cancel, assign] = await Promise.all([
-      request(server).patch(`/v1/orders/${orderId}/status`).set(auth(ctx.accessToken)).send({ status: 'CANCELLED' }),
+      request(server).patch(`/v1/orders/${orderId}/status`).set(auth(ctx.accessToken)).send(statusBody('CANCELLED')),
       put(ctx.accessToken, url(deliveryId), { courierUserId: c.id }),
     ]);
     expect(cancel.status).toBe(200);

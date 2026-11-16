@@ -150,6 +150,15 @@ export function producibleUnits(recipe: RecipeLine[], balances: Map<string, Deci
   return min === null ? null : min.toNumber();
 }
 
+// B9: the part of a tab item's consumption (`consumed`, written for all `units` of the item when its
+// round was sent) that belongs to `count` units after `before` units were already cancelled.
+// Taken as the difference of two cumulative shares, each rounded to the stock scale, so however
+// the units are cancelled - one by one or all at once - the slices add up to exactly `consumed`.
+export function cancelledUnitsShare(consumed: Decimal, units: number, before: number, count: number): Decimal {
+  const upTo = (n: number) => consumed.mul(n).div(units).toDecimalPlaces(QUANTITY_SCALE, Decimal.ROUND_HALF_UP);
+  return upTo(before + count).sub(upTo(before));
+}
+
 export function statusConsumesStock(status: string): boolean {
   return status !== 'PENDING' && status !== 'CANCELLED';
 }

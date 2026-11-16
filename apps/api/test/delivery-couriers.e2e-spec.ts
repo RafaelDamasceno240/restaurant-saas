@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -227,7 +228,7 @@ describe('Delivery couriers (e2e)', () => {
       await request(server)
         .patch(`/v1/orders/${orderId}/status`)
         .set(auth(ctx.accessToken))
-        .send({ status: 'CANCELLED' })
+        .send(statusBody('CANCELLED'))
         .expect(200);
       expect((await row(deliveryId)).courierUserId).toBe(c.id);
       const res = await del(ctx.accessToken, url(deliveryId)).expect(409);

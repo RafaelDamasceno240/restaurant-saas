@@ -1,4 +1,4 @@
-import { formatCents, parseBRLToCents } from './cash-api';
+import { formatCents, isCashOutflow, parseBRLToCents } from './cash-api';
 
 describe('cash-api money helpers', () => {
   it('parses BRL strings to integer cents without float math', () => {
@@ -19,5 +19,16 @@ describe('cash-api money helpers', () => {
     expect(formatCents(1050)).toBe('R$ 10,50');
     expect(formatCents(-90)).toBe('-R$ 0,90');
     expect(formatCents(null)).toBe('—');
+  });
+});
+
+describe('isCashOutflow', () => {
+  it('a withdrawal, a fiado refund and a sale refund take money out; the rest puts money in', () => {
+    expect(isCashOutflow('WITHDRAWAL')).toBe(true);
+    expect(isCashOutflow('RECEIVABLE_REFUND')).toBe(true);
+    expect(isCashOutflow('SALE_REFUND')).toBe(true);
+    expect(isCashOutflow('SALE')).toBe(false);
+    expect(isCashOutflow('SUPPLY')).toBe(false);
+    expect(isCashOutflow('RECEIVABLE_PAYMENT')).toBe(false);
   });
 });

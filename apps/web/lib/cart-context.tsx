@@ -25,10 +25,13 @@ interface CartContextValue {
   totalQuantity: number;
   subtotalCents: number;
   addItem: (item: AddItemInput, restaurant: RestaurantRef) => void;
-  increment: (productId: string) => void;
-  decrement: (productId: string) => void;
-  removeItem: (productId: string) => void;
+  // By cart line (lineId): the same product can be on several lines, with other add-ons.
+  increment: (lineId: string) => void;
+  decrement: (lineId: string) => void;
+  removeItem: (lineId: string) => void;
   clearCart: () => void;
+  // Puts a whole cart in place (the cart of a WhatsApp checkout link, already priced by the API).
+  replaceCart: (next: CartState) => void;
 }
 
 const CartContext = createContext<CartContextValue | undefined>(undefined);
@@ -79,10 +82,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
     totalQuantity: getTotalQuantity(state),
     subtotalCents: getSubtotalCents(state),
     addItem: handleAddItem,
-    increment: (productId) => setState((prev) => incrementItem(prev, productId)),
-    decrement: (productId) => setState((prev) => decrementItem(prev, productId)),
-    removeItem: (productId) => setState((prev) => removeItemPure(prev, productId)),
+    increment: (lineId) => setState((prev) => incrementItem(prev, lineId)),
+    decrement: (lineId) => setState((prev) => decrementItem(prev, lineId)),
+    removeItem: (lineId) => setState((prev) => removeItemPure(prev, lineId)),
     clearCart: () => setState(clearCartPure()),
+    replaceCart: (next) => setState(next),
   };
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

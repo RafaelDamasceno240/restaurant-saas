@@ -12,6 +12,7 @@ import {
   closeSession,
   formatCents,
   getCurrentSession,
+  isCashOutflow,
   openSession,
   parseBRLToCents,
 } from '@/lib/cash-api';
@@ -27,8 +28,22 @@ import { useToast } from '@/components/ds/Toast';
 
 type Panel = null | 'SUPPLY' | 'WITHDRAWAL' | 'CLOSE';
 
-const TYPE_LABEL: Record<string, string> = { SALE: 'Venda', SUPPLY: 'Suprimento', WITHDRAWAL: 'Sangria' };
-const TYPE_TONE = { SALE: 'success', SUPPLY: 'info', WITHDRAWAL: 'danger' } as const;
+const TYPE_LABEL: Record<string, string> = {
+  SALE: 'Venda',
+  SUPPLY: 'Suprimento',
+  WITHDRAWAL: 'Sangria',
+  RECEIVABLE_PAYMENT: 'Recebimento de fiado',
+  RECEIVABLE_REFUND: 'Estorno de fiado',
+  SALE_REFUND: 'Estorno de venda',
+};
+const TYPE_TONE = {
+  SALE: 'success',
+  SUPPLY: 'info',
+  WITHDRAWAL: 'danger',
+  RECEIVABLE_PAYMENT: 'success',
+  RECEIVABLE_REFUND: 'warning',
+  SALE_REFUND: 'warning',
+} as const;
 
 const PANEL_TITLE = { SUPPLY: 'Suprimento', WITHDRAWAL: 'Sangria', CLOSE: 'Fechar caixa' } as const;
 const PANEL_CONFIRM = { SUPPLY: 'Confirmar suprimento', WITHDRAWAL: 'Confirmar sangria', CLOSE: 'Fechar caixa' } as const;
@@ -78,6 +93,13 @@ export default function CaixaPage() {
       if (action === 'CLOSE') return closeSession(accessToken as string, session.id, cents);
       if (cents <= 0) throw new Error('O valor deve ser maior que zero.');
       if (action === 'WITHDRAWAL' && reason.trim().length < 3) throw new Error('Informe o motivo da sangria.');
+      // B4: the API refuses it anyway (and is the one that counts, with the drawer locked); this
+      // only saves a round trip when the screen already knows.
+      if (action === 'WITHDRAWAL' && cents > Math.max(0, session.expectedBalanceCents ?? 0)) {
+        throw new Error(
+          `A sangria não pode ser maior que o dinheiro no caixa. Disponível agora: ${formatCents(Math.max(0, session.expectedBalanceCents ?? 0))}.`,
+        );
+      }
       return addMovement(accessToken as string, session.id, {
         type: action as 'SUPPLY' | 'WITHDRAWAL',
         amountCents: cents,
@@ -189,9 +211,28 @@ export default function CaixaPage() {
       ) : (
         <>
           <section aria-label="Resumo do caixa" className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
               <StatCard label="Saldo inicial" value={formatCents(session.openingBalanceCents)} />
-              <StatCard label="Vendas em dinheiro" value={formatCents(session.totals.salesCents)} tone="success" />
+              <StatCard
+                label="Vendas em dinheiro"
+                value={formatCents(session.totals.salesCents)}
+                hint={
+                  session.totals.saleRefundsCents > 0
+                    ? `Estornos: − ${formatCents(session.totals.saleRefundsCents)}`
+                    : undefined
+                }
+                tone="success"
+              />
+              <StatCard
+                label="Fiado recebido"
+                value={formatCents(session.totals.receivablePaymentsCents)}
+                hint={
+                  session.totals.receivableRefundsCents > 0
+                    ? `Estornos: − ${formatCents(session.totals.receivableRefundsCents)}`
+                    : 'Dívidas pagas em dinheiro'
+                }
+                tone="success"
+              />
               <StatCard label="Suprimentos" value={formatCents(session.totals.suppliesCents)} tone="info" />
               <StatCard label="Sangrias" value={formatCents(session.totals.withdrawalsCents)} tone="danger" />
               <StatCard label="Saldo esperado" value={formatCents(session.expectedBalanceCents)} featured />
@@ -237,6 +278,12 @@ export default function CaixaPage() {
             <Card className="animate-pop-in">
               <form onSubmit={submit(panel)} className="space-y-3 p-5">
                 <h2 className="text-sm font-semibold text-foreground">{PANEL_TITLE[panel]}</h2>
+                {panel === 'WITHDRAWAL' && (
+                  <Alert tone="info">
+                    Disponível no caixa: <strong>{formatCents(Math.max(0, session.expectedBalanceCents ?? 0))}</strong>. A
+                    sangria não pode passar desse valor.
+                  </Alert>
+                )}
                 {panel === 'CLOSE' && (
                   <Alert tone="info">
                     Saldo esperado: <strong>{formatCents(session.expectedBalanceCents)}</strong>. Conte o dinheiro da
@@ -273,7 +320,7 @@ export default function CaixaPage() {
           )}
 
           <Card>
-            <CardHeader title="Movimentações" description="Vendas em dinheiro, suprimentos e sangrias da sessão" />
+            <CardHeader title="Movimentações" description="Vendas em dinheiro, fiado recebido, suprimentos e sangrias da sessão" />
             {session.movements.length === 0 ? (
               <p className="px-4 py-8 text-center text-sm text-muted-foreground">Nenhuma movimentação ainda.</p>
             ) : (
@@ -300,17 +347,17 @@ export default function CaixaPage() {
                         </Td>
                         <Td
                           className={`whitespace-nowrap text-right font-semibold ${
-                            m.type === 'WITHDRAWAL' ? 'text-danger' : 'text-success'
+                            isCashOutflow(m.type) ? 'text-danger' : 'text-success'
                           }`}
                         >
-                          {m.type === 'WITHDRAWAL' ? '−' : '+'}
+                          {isCashOutflow(m.type) ? '−' : '+'}
                           {formatCents(m.amountCents)}
                         </Td>
                         <Td className="text-muted-foreground">{m.reason ?? '—'}</Td>
                         <Td className="text-muted-foreground">{m.createdBy.name}</Td>
                         <Td>
                           {m.orderNumber ? (
-                            <Link className="font-medium text-accent hover:underline" href={`/dashboard/pedidos/${m.orderId}`}>
+                            <Link className="inline-flex items-center font-medium text-accent hover:underline touch:min-h-10" href={`/dashboard/pedidos/${m.orderId}`}>
                               #{m.orderNumber}
                             </Link>
                           ) : (

@@ -1,6 +1,6 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createActiveProductE2E, createTestApp, getPrisma, registerTenantE2E } from './test-app.util';
+import { createActiveProductE2E, createTestApp, getPrisma, registerTenantE2E, roundBody } from './test-app.util';
 
 describe('Tables (mesas) (e2e)', () => {
   let app: INestApplication;
@@ -120,9 +120,9 @@ describe('Tables (mesas) (e2e)', () => {
         .expect(201)
     ).body;
     await request(server)
-      .post(`/v1/tabs/${tab.id}/items`)
+      .post(`/v1/tabs/${tab.id}/rounds`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ productId: product.id, quantity: 1 })
+      .send(roundBody([{ productId: product.id, quantity: 1 }]))
       .expect(201);
     await request(server)
       .post(`/v1/tabs/${tab.id}/checkout`)

@@ -1,6 +1,12 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, uniqueSuffix, uniqueDocument } from './test-app.util';
+import {
+  createTestApp,
+  getPrisma,
+  provisionAndSignInE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 describe('Public orders (checkout) (e2e)', () => {
   let app: INestApplication;
@@ -29,7 +35,9 @@ describe('Public orders (checkout) (e2e)', () => {
       email: `owner-${suffix}@example.com`,
       password: 'Sup3rSecret!',
     };
-    const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const res = await provisionAndSignInE2E(app, payload);
+    // B11: delivery starts off for a new restaurant; these tests take delivery orders.
+    await getPrisma(app).branch.updateMany({ where: { tenant: { slug } }, data: { deliveryEnabled: true } });
     return { accessToken: res.body.accessToken as string, slug };
   }
 

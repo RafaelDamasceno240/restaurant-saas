@@ -21,6 +21,10 @@ import { Card, CardHeader } from '@/components/ds/Card';
 import { Page } from '@/components/ds/PageHeader';
 import { PAYMENT_LABEL, customerLabel } from '@/components/pedidos/OrderCard';
 import { SourceBadge, StatusBadge } from '@/components/pedidos/StatusBadge';
+import { OrderCustomerCard } from '@/components/customers/OrderCustomerCard';
+import { CancelOrderDialog } from '@/components/pedidos/CancelOrderDialog';
+import { cancellationEffects } from '@/lib/cancel-order-logic';
+import { hasPermission } from '@/lib/permissions';
 
 interface PageProps {
   params: { id: string };
@@ -60,10 +64,13 @@ const ACTIONS: Record<
 };
 
 export default function OrderDetailPage({ params }: PageProps) {
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
+  // B5: "Cancelar" only opens the confirmation; the order is cancelled from inside it, with a reason.
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const { data: order, isLoading, isError } = useQuery({
     queryKey: ['order', params.id],
@@ -78,6 +85,8 @@ export default function OrderDetailPage({ params }: PageProps) {
       setActionError(null);
       queryClient.invalidateQueries({ queryKey: ['order', params.id] });
       queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Cancelling a sale paid in cash writes a refund in the open cash session.
+      queryClient.invalidateQueries({ queryKey: ['cash-current'] });
       toast.success('Status do pedido atualizado.');
     },
     onError: (err) => {
@@ -87,12 +96,36 @@ export default function OrderDetailPage({ params }: PageProps) {
     },
   });
 
+  async function cancelOrder(reason: string): Promise<boolean> {
+    try {
+      await updateOrderStatus(accessToken as string, params.id, 'CANCELLED', reason);
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: ['order', params.id] });
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      // Cancelling a sale paid in cash writes a refund in the open cash session.
+      queryClient.invalidateQueries({ queryKey: ['cash-current'] });
+      toast.success('Pedido cancelado.');
+      return true;
+    } catch (err) {
+      setCancelError(err instanceof ApiError ? err.message : 'Não foi possível cancelar o pedido.');
+      return false;
+    }
+  }
+
+  // B12: moving an order along needs orders.update (management and the kitchen); cancelling needs
+  // orders.cancel (management). A cashier, a waiter or a courier sees the order without buttons the
+  // API would refuse.
+  const actions = order
+    ? (ACTIONS[order.status] ?? []).filter((action) =>
+        hasPermission(user?.roles, action.nextStatus === 'CANCELLED' ? 'orders.cancel' : 'orders.update'),
+      )
+    : [];
 
   return (
     <Page>
       <Link
         href="/dashboard/pedidos"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground touch:min-h-10"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden />
         Pedidos
@@ -161,17 +194,25 @@ export default function OrderDetailPage({ params }: PageProps) {
               <Card>
                 <CardHeader title="Itens" />
                 <ul className="divide-y divide-line">
-                  {order.items.map((item) => (
-                    <li key={item.productId} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+                  {order.items.map((item, index) => (
+                    <li key={`${item.productId}-${index}`} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
                       <span className="min-w-0 text-foreground">
                         <span className="font-semibold">{item.quantity}×</span> {item.name}
                         <span className="ml-1.5 text-xs text-subtle">({formatBRL(item.unitPrice)} un.)</span>
+                        {(item.options ?? []).map((option, i) => (
+                          <span key={i} className="block pl-5 text-xs text-muted-foreground">
+                            + {option.quantity > 1 ? `${option.quantity}× ` : ''}
+                            {option.name}
+                            {option.unitPrice > 0 ? ` (${formatBRL(option.unitPrice * option.quantity)})` : ''}
+                          </span>
+                        ))}
+                        {item.notes && <span className="block pl-5 text-xs italic text-warning">Obs.: {item.notes}</span>}
                       </span>
                       <span className="shrink-0 font-medium text-foreground">{formatBRL(item.subtotal)}</span>
                     </li>
                   ))}
                 </ul>
-                {(order.fulfillmentType === 'DELIVERY' || order.discount > 0) && (
+                {(order.fulfillmentType === 'DELIVERY' || order.discount > 0 || order.cashbackUsed > 0) && (
                   <div className="space-y-1 border-t border-line px-4 py-3 text-sm text-muted-foreground">
                     <div className="flex items-center justify-between">
                       <span>Subtotal</span>
@@ -181,6 +222,12 @@ export default function OrderDetailPage({ params }: PageProps) {
                       <div className="flex items-center justify-between text-success">
                         <span>Desconto{order.couponCode ? ` (${order.couponCode})` : ''}</span>
                         <span>− {formatBRL(order.discount)}</span>
+                      </div>
+                    )}
+                    {order.cashbackUsed > 0 && (
+                      <div className="flex items-center justify-between text-success">
+                        <span>Cashback usado</span>
+                        <span>− {formatBRL(order.cashbackUsed)}</span>
                       </div>
                     )}
                     {order.fulfillmentType === 'DELIVERY' && (
@@ -238,6 +285,8 @@ export default function OrderDetailPage({ params }: PageProps) {
                 </div>
               </Card>
 
+              <OrderCustomerCard order={order} />
+
               {actionError && <Alert tone="danger">{actionError}</Alert>}
 
               {/* A delivery order is finished by the Delivery flow (dispatch, then
@@ -251,9 +300,9 @@ export default function OrderDetailPage({ params }: PageProps) {
                 </Alert>
               )}
 
-              {ACTIONS[order.status]?.length > 0 && !(order.fulfillmentType === 'DELIVERY' && order.status === 'READY') && (
+              {actions.length > 0 && !(order.fulfillmentType === 'DELIVERY' && order.status === 'READY') && (
                 <div className="flex flex-col gap-2">
-                  {ACTIONS[order.status].map((action) => (
+                  {actions.map((action) => (
                     <Button
                       key={action.nextStatus}
                       size="lg"
@@ -261,7 +310,11 @@ export default function OrderDetailPage({ params }: PageProps) {
                       fullWidth
                       loading={mutation.isPending && mutation.variables === action.nextStatus}
                       disabled={mutation.isPending}
-                      onClick={() => mutation.mutate(action.nextStatus)}
+                      onClick={() =>
+                        action.nextStatus === 'CANCELLED'
+                          ? (setCancelError(null), setCancelOpen(true))
+                          : mutation.mutate(action.nextStatus)
+                      }
                     >
                       {action.label}
                     </Button>
@@ -270,6 +323,14 @@ export default function OrderDetailPage({ params }: PageProps) {
               )}
             </div>
           </div>
+          <CancelOrderDialog
+            open={cancelOpen}
+            orderNumber={order.orderNumber}
+            effects={cancellationEffects(order)}
+            error={cancelError}
+            onClose={() => setCancelOpen(false)}
+            onConfirm={cancelOrder}
+          />
         </>
       )}
     </Page>

@@ -228,4 +228,13 @@ describe('computeOrderTotalCents', () => {
     expect(() => computeOrderTotalCents(MAX_AMOUNT_CENTS, 0, 1)).toThrow(RangeError);
     expect(computeOrderTotalCents(MAX_AMOUNT_CENTS, 1, 1)).toBe(MAX_AMOUNT_CENTS);
   });
+
+  it('subtracts the cashback spent on the items, never below zero and never from the fee', () => {
+    expect(computeOrderTotalCents(10_000, 1_000, 500, 2_000)).toBe(7_500);
+    expect(computeOrderTotalCents(10_000, 1_000, 500, 9_000)).toBe(500); // items fully paid, fee remains
+    expect(computeOrderTotalCents(10_000, 0, 0, 0)).toBe(10_000);
+    expect(() => computeOrderTotalCents(10_000, 1_000, 500, 9_001)).toThrow(RangeError);
+    expect(() => computeOrderTotalCents(10_000, 0, 0, -1)).toThrow(RangeError);
+    expect(() => computeOrderTotalCents(10_000, 0, 0, 1.5)).toThrow(RangeError);
+  });
 });

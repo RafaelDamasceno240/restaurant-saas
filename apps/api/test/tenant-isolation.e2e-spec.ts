@@ -1,6 +1,11 @@
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { createTestApp, uniqueSuffix, uniqueDocument } from './test-app.util';
+import {
+  createTestApp,
+  provisionAndSignInE2E,
+  uniqueDocument,
+  uniqueSuffix,
+} from './test-app.util';
 
 // MANDATORY test per PROMPT 01, section 27: a user from tenant A must never
 // be able to read or modify tenant B's data, regardless of the id they try.
@@ -30,7 +35,7 @@ describe('Tenant isolation (e2e)', () => {
       email: `owner-${suffix}@example.com`,
       password: 'Sup3rSecret!',
     };
-    const res = await request(server).post('/v1/auth/register').send(payload).expect(201);
+    const res = await provisionAndSignInE2E(app, payload);
     return { accessToken: res.body.accessToken as string, user: res.body.user, payload };
   }
 

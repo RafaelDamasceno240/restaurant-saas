@@ -26,23 +26,41 @@ export function Dialog({
   size?: 'sm' | 'md' | 'lg';
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  // Callers pass onClose inline, so every render (every key typed in a form) brings a new
+  // function. The effect below must run only when the dialog opens and closes: re-running it
+  // moved the focus out of the field being typed in. Esc reads the latest onClose from here.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Where the focus was before the dialog opened, to give it back on close. Read while rendering
+  // the opening: by the time effects run, a field with autoFocus already has the focus.
+  const openedRef = useRef(false);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  if (open && !openedRef.current && typeof document !== 'undefined') {
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+  }
 
   useEffect(() => {
     if (!open) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    openedRef.current = true;
+    const previouslyFocused = returnFocusRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    panelRef.current?.focus();
+    const panel = panelRef.current;
+    if (panel && !panel.contains(document.activeElement)) panel.focus();
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') onCloseRef.current();
     }
     document.addEventListener('keydown', onKey);
     return () => {
+      openedRef.current = false;
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 

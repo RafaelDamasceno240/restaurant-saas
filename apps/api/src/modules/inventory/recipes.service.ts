@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
+import { publicImageUrl } from '../media/media-url';
 import {
   computeMargin,
   convertQuantity,
@@ -57,7 +58,9 @@ export class RecipesService {
       return {
         productId: product.id,
         name: product.name,
-        imageUrl: product.imageUrl,
+        // What the menu shows: the uploaded/imported photo, else the pasted link (never the raw
+        // imageUrl alone, which is empty for imported products).
+        imageUrl: publicImageUrl(product.imageMediaId, product.imageUrl),
         active: product.active,
         category: product.category,
         priceCents: product.priceCents,

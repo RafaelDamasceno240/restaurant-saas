@@ -20,9 +20,17 @@ export class CustomersController {
 
   @Get()
   @RequirePermissions('customers.read')
-  @ApiOperation({ summary: 'Lista clientes do restaurante, com busca, filtro ativo/inativo e paginação' })
+  @ApiOperation({ summary: 'Lista clientes do restaurante, com busca, filtro ativo/inativo, segmento, ordenação e paginação' })
   list(@CurrentUser() user: AuthenticatedRequestUser, @Query() query: ListCustomersQueryDto) {
     return this.customers.list(user, query);
+  }
+
+  // Declared before ':id' so "segments" is never taken for a customer id.
+  @Get('segments')
+  @RequirePermissions('customers.read')
+  @ApiOperation({ summary: 'Quantos clientes ativos há em cada segmento (novos, recorrentes, sem compra recente, inativos)' })
+  segments(@CurrentUser() user: AuthenticatedRequestUser) {
+    return this.customers.segmentSummary(user);
   }
 
   @Get(':id')

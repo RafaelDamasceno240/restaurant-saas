@@ -8,6 +8,7 @@ import {
   getPrisma,
   registerTenantE2E,
   uniqueSuffix,
+  statusBody,
 } from './test-app.util';
 
 type Json = Record<string, unknown>;
@@ -33,7 +34,7 @@ describe('Delivery hardening (e2e)', () => {
   const post = (token: string, path: string, body: Json = {}) => request(server).post(path).set(auth(token)).send(body);
   const put = (token: string, path: string, body: Json) => request(server).put(path).set(auth(token)).send(body);
   const cancelOrder = (token: string, orderId: string) =>
-    request(server).patch(`/v1/orders/${orderId}/status`).set(auth(token)).send({ status: 'CANCELLED' });
+    request(server).patch(`/v1/orders/${orderId}/status`).set(auth(token)).send(statusBody('CANCELLED'));
   const prisma = () => getPrisma(app);
 
   async function setup() {

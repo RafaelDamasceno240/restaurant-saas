@@ -17,6 +17,7 @@ import {
   toQuantity,
   UnitConversionError,
   wouldGoNegative,
+  cancelledUnitsShare,
 } from './inventory-calculations';
 
 const d = (v: string | number) => toQuantity(v);
@@ -211,3 +212,19 @@ describe('inventory-calculations', () => {
     });
   });
 });
+
+describe('cancelledUnitsShare (B9)', () => {
+  it('is the proportional share of the units cancelled', () => {
+    expect(cancelledUnitsShare(new Decimal('0.600'), 3, 0, 1).toFixed(3)).toBe('0.200');
+    expect(cancelledUnitsShare(new Decimal('2'), 2, 0, 2).toFixed(3)).toBe('2.000');
+  });
+
+  it('adds up to exactly what was consumed however the units are cancelled', () => {
+    const consumed = new Decimal('1.000');
+    const oneByOne = [0, 1, 2].map((before) => cancelledUnitsShare(consumed, 3, before, 1));
+    expect(oneByOne.map((d) => d.toFixed(3))).toEqual(['0.333', '0.334', '0.333']);
+    expect(oneByOne.reduce((a, b) => a.add(b), new Decimal(0)).toFixed(3)).toBe('1.000');
+    expect(cancelledUnitsShare(consumed, 3, 1, 2).add(cancelledUnitsShare(consumed, 3, 0, 1)).toFixed(3)).toBe('1.000');
+  });
+});
+

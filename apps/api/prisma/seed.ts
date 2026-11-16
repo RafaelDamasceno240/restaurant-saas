@@ -60,6 +60,21 @@ const PERMISSIONS: string[] = [
   'coupons.create',
   'coupons.update',
   'coupons.apply',
+  'loyalty.read',
+  'loyalty.redeem',
+  'loyalty.adjust',
+  'loyalty.configure',
+  'cashback.read',
+  'cashback.use',
+  'cashback.adjust',
+  'cashback.configure',
+  'receivables.read',
+  'receivables.receive',
+  'receivables.manage',
+  'reports.read',
+  'whatsapp.read',
+  'whatsapp.reply',
+  'whatsapp.configure',
 ];
 
 const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
@@ -116,6 +131,26 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'coupons.create',
     'coupons.update',
     'coupons.apply',
+    // Runs the program day to day; the rate and the rewards catalogue (loyalty.configure)
+    // stay with OWNER/ADMIN.
+    'loyalty.read',
+    'loyalty.redeem',
+    'loyalty.adjust',
+    // Same split for cashback: the percentage and the expiration (cashback.configure) stay
+    // with OWNER/ADMIN.
+    'cashback.read',
+    'cashback.use',
+    'cashback.adjust',
+    // Fiado that already exists (no new fiado is sold since remocao-fiado): receives, reverses a
+    // payment and cancels a debt.
+    'receivables.read',
+    'receivables.receive',
+    'receivables.manage',
+    // Sales, products, customers, stock, delivery and cash figures of the branches they run.
+    'reports.read',
+    // Reads and answers the WhatsApp conversations; the assistant's settings stay with OWNER/ADMIN.
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   CASHIER: [
     'orders.read',
@@ -135,6 +170,18 @@ const ROLE_PERMISSIONS: Record<RoleName, string[]> = {
     'customers.create',
     // Uses a coupon at the counter; administering coupons stays with management.
     'coupons.apply',
+    // Sees the balance and hands out a reward at the counter; never adjusts points by hand.
+    'loyalty.read',
+    'loyalty.redeem',
+    // Sees the balance and spends it on a sale; never adjusts it by hand.
+    'cashback.read',
+    'cashback.use',
+    // Receives payments of fiado that already exists at the counter; never reverses or cancels.
+    'receivables.read',
+    'receivables.receive',
+    // Answers WhatsApp at the counter and takes a conversation over from the assistant.
+    'whatsapp.read',
+    'whatsapp.reply',
   ],
   WAITER: [
     'orders.read',

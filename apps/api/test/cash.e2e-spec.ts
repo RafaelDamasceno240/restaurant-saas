@@ -76,7 +76,15 @@ describe('Cash register (e2e)', () => {
     await move(cashier, session.id, { type: 'SALE', amountCents: 999 }).expect(400); // SALE is backend-only
 
     const detail = (await request(server).get(`/v1/cash/sessions/${session.id}`).set(auth(cashier)).expect(200)).body;
-    expect(detail.totals).toEqual({ salesCents: 0, suppliesCents: 5000, withdrawalsCents: 3000 });
+    // The two receivable (fiado) totals exist since Fase 11 fatia 6; nothing of the kind happened here.
+    expect(detail.totals).toEqual({
+      salesCents: 0,
+      suppliesCents: 5000,
+      withdrawalsCents: 3000,
+      receivablePaymentsCents: 0,
+      receivableRefundsCents: 0,
+      saleRefundsCents: 0,
+    });
     expect(detail.expectedBalanceCents).toBe(12000);
   });
 

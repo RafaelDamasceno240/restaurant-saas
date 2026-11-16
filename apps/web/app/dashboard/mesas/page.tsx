@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { LayoutGrid, Plus, QrCode, Receipt } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '@/lib/auth-context';
+import { hasPermission } from '@/lib/permissions';
 import { ApiError } from '@/lib/api-client';
 import { DiningTable, tablesApi } from '@/lib/tables-api';
 import { formatCentsAsBRL } from '@/lib/money';
@@ -33,7 +34,9 @@ type StatusFilter = 'ALL' | 'OCCUPIED' | 'AVAILABLE';
 // derived from the same list — there is no separate tabs-listing endpoint.
 export default function MesasPage() {
   const router = useRouter();
-  const { accessToken } = useAuth();
+  const { accessToken, user } = useAuth();
+  // B12: registering tables is for management (tables.create); waiters and cashiers only use them.
+  const canCreateTable = hasPermission(user?.roles, 'tables.create');
   const { branchId } = useActiveBranch();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -112,9 +115,11 @@ export default function MesasPage() {
                 Mostrar atalhos QR
               </Button>
             </Tooltip>
-            <Button icon={<Plus className="h-4 w-4" />} onClick={() => setShowForm(true)} disabled={!branchId}>
-              Cadastrar mesas
-            </Button>
+            {canCreateTable && (
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setShowForm(true)} disabled={!branchId}>
+                Cadastrar mesas
+              </Button>
+            )}
           </>
         }
       />
@@ -161,11 +166,17 @@ export default function MesasPage() {
         <EmptyState
           icon={<LayoutGrid />}
           title="Nenhuma mesa cadastrada ainda"
-          description="Cadastre as mesas do salão para abrir comandas e lançar pedidos."
+          description={
+            canCreateTable
+              ? 'Cadastre as mesas do salão para abrir comandas e lançar pedidos.'
+              : 'O responsável pelo restaurante ainda não cadastrou as mesas do salão.'
+          }
           action={
-            <Button icon={<Plus className="h-4 w-4" />} onClick={() => setShowForm(true)}>
-              Cadastrar mesas
-            </Button>
+            canCreateTable ? (
+              <Button icon={<Plus className="h-4 w-4" />} onClick={() => setShowForm(true)}>
+                Cadastrar mesas
+              </Button>
+            ) : undefined
           }
         />
       ) : view === 'mesas' ? (

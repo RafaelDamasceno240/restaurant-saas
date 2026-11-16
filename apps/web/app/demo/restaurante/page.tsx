@@ -4,5 +4,12 @@ import { RestaurantProfileView } from '@/components/restaurante/RestaurantProfil
 import { demoRestaurantProfile } from '@/lib/demo/restaurant-profile';
 
 export default function DemoRestaurantePage() {
-  return <RestaurantProfileView profile={demoRestaurantProfile} editable />;
+  return (
+    <RestaurantProfileView
+      profile={demoRestaurantProfile}
+      logoUrl="/brand/doce-logo.png"
+      logoImageClassName="scale-[1.28] object-contain"
+      editable
+    />
+  );
 }

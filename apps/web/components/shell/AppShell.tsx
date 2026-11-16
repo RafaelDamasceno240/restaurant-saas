@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { findActiveItem, NavGroup } from './nav';
 import { Sidebar, SidebarUser } from './Sidebar';
 import { Topbar } from './Topbar';
+import { OfflineBanner } from '@/components/pwa/PwaControls';
 
 const STORAGE_KEY = 'restaurant-saas:sidebar-collapsed';
 
@@ -16,7 +17,9 @@ export function AppShell({
   brandHref,
   brandName,
   brandSubtitle,
+  brandLogoUrl,
   user,
+  onChangePassword,
   onLogout,
   topbarChips,
   banner,
@@ -26,7 +29,9 @@ export function AppShell({
   brandHref: string;
   brandName: string;
   brandSubtitle?: string;
+  brandLogoUrl?: string | null;
   user: SidebarUser;
+  onChangePassword?: () => void;
   onLogout?: () => void;
   topbarChips?: ReactNode;
   banner?: ReactNode;
@@ -83,7 +88,9 @@ export function AppShell({
     brandHref,
     brandName,
     brandSubtitle,
+    brandLogoUrl,
     user,
+    onChangePassword,
     onLogout,
   };
 
@@ -113,6 +120,7 @@ export function AppShell({
         <Topbar title={findActiveItem(groups, pathname)?.label} onOpenMenu={() => setDrawerOpen(true)}>
           {topbarChips}
         </Topbar>
+        <OfflineBanner />
         {banner}
         <main id="main" tabIndex={-1} className="min-h-0 flex-1 overflow-y-auto outline-none">
           {children}

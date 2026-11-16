@@ -63,11 +63,11 @@ continuam sempre preenchendo os dois (obrigatório no DTO de checkout). Ver
 
 ## Modelos adicionados depois da Fase 01
 
-Existem no schema atual (10 migrations em `prisma/migrations`):
+Existem no schema atual (18 migrations em `prisma/migrations`, da `20260928001733_initial_mvp_schema` à `20261017150000_restaurant_profile`):
 
 - **Pedidos:** `Order` (com `branchId`, `source`, `idempotencyKey` único por tenant) e `OrderItem`, com snapshots de nome e preço.
 - **Pagamento:** `Payment` (`orderId` único, `provider` só `INTERNAL`).
-- **Caixa:** `CashRegisterSession` e `CashMovement`.
+- **Caixa:** `CashRegisterSession` e `CashMovement`. Movimentos são só de inclusão (trigger). `orderId` único liga a venda (`SALE`) ao pedido; `refundedOrderId` único liga o estorno de venda (`SALE_REFUND`) ao pedido cancelado, e um CHECK garante que só o estorno tem essa coluna preenchida.
 - **Salão:** `DiningTable`, `Tab`, `TabItem`.
 - **Estoque:** `InventoryItem`, `InventoryBalance`, `StockMovement`, `ProductRecipe`, `ProductRecipeItem`, `InventoryCount`, `InventoryCountItem`.
 - **Compras:** `Supplier`, `Purchase`, `PurchaseItem` e `PurchaseSequence` (migration `20260930100000_purchases`). `Purchase` é único por `(tenantId, purchaseNumber)`, tem índices por unidade, data e status, e CHECKs de valores não negativos (`purchases`) e quantidade positiva (`purchase_items`). O enum `StockReferenceType` inclui `PURCHASE`, usado como referência das entradas de estoque de cada item de compra.
@@ -76,7 +76,15 @@ Existem no schema atual (10 migrations em `prisma/migrations`):
 - **CRM:** `Customer` (`customers`, por tenant: `name`, `phone` só dígitos, `email` minúsculo, `cpf` 11 dígitos, `notes`, `active`) e `orders.customerId` nullable (FK `ON DELETE SET NULL`, índice `(tenantId, customerId, createdAt)`). Migration `20261001100000_customers` (aditiva, sem backfill). Índices únicos parciais criados em SQL: `customers_tenantId_phone_active_key` (`(tenantId, phone) WHERE active`) e `customers_tenantId_cpf_key` (`(tenantId, cpf) WHERE cpf IS NOT NULL`), mais `CHECK`s de formato (telefone 8–15 dígitos, CPF 11 dígitos, e-mail minúsculo, nome, observações ≤ 500). O snapshot `customerName/customerPhone` do pedido não é reescrito pelo CRM.
 - **Cupons:** `Coupon` (`coupons`, por tenant: `code` canônico, `discountType` PERCENTAGE/FIXED, `value`, `minOrderCents`, `maxDiscountCents`, `startsAt/endsAt`, `active`, `usageLimit/usageCount`, `perCustomerLimit`, `branchId` opcional), `CouponRedemption` (`coupon_redemptions`, `orderId` único) e `orders.discountCents` (padrão 0), `couponId` (FK `SET NULL`), `couponCode` (snapshot). Migration `20261002100000_coupons` (aditiva). Índice único parcial `coupons_tenantId_code_active_key` (`(tenantId, code) WHERE active`) criado em SQL, mais `CHECK`s: código canônico, percentual 1–100 / fixo ≥ 1, mínimo ≥ 0, teto só para percentual, `endsAt > startsAt`, limites ≥ 1, `usageCount <= usageLimit` e, em `orders`, `0 <= discountCents <= subtotalCents` e `totalCents = subtotalCents - discountCents + deliveryFeeCents`. Os 3 `CHECK`s de `orders` validam as linhas existentes ao serem criados (lock curto). Detalhes em `docs/CRM.md`.
 
-Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`.
+- **Fidelidade:** `LoyaltyProgram` (`loyalty_programs`, uma linha por tenant), `LoyaltyReward` (`loyalty_rewards`), `LoyaltyAccount` (`loyalty_accounts`, `customerId` único, `balancePoints`) e `LoyaltyEntry` (`loyalty_entries`, o ledger de pontos: `type` EARN/REDEEM/ADJUSTMENT/REVERSAL, `points` com sinal, `balanceAfter`, origem e `idempotencyKey`). Migration `20261005001215_loyalty`. Em SQL: tabela append-only por trigger, CHECKs de saldo não negativo, sinal por tipo, origem por tipo e motivo obrigatório, índice único parcial de um `EARN` por pedido. Ver `docs/LOYALTY.md`.
+
+- **Cashback:** `CashbackProgram` (`cashback_programs`), `CashbackAccount` (`cashback_accounts`, `customerId` único, `balanceCents`, `lastActivityAt`) e `CashbackEntry` (`cashback_entries`, o ledger em centavos: `type` EARN/USE/ADJUSTMENT/REVERSAL/EXPIRATION, `amountCents` com sinal, `balanceAfterCents`, origem e `idempotencyKey`); `orders.cashbackUsedCents`. Migration `20261005003323_cashback`. Em SQL: tabela append-only por trigger, CHECKs de saldo, sinal, origem e motivo, índices únicos parciais de um `EARN` e um `USE` por pedido, e o `CHECK orders_total_formula` recriado (`total = subtotal - discount - cashbackUsed + deliveryFee`) com `orders_cashback_range`. Ver `docs/CASHBACK.md`.
+
+- **Fiado / contas a receber:** `CreditAccount` (`credit_accounts`, `customerId` único, `creditLimitCents`, `balanceCents` = dívida em aberto), `Receivable` (`receivables`: cliente, unidade, `orderId` único e opcional, `totalCents`, `paidCents`, `status` OPEN/PAID/CANCELLED), `ReceivableInstallment` (`receivable_installments`: `number`, `dueDate` do tipo `DATE`, `amountCents`, `paidCents`), `ReceivableEntry` (`receivable_entries`, o ledger: `type` CHARGE/PAYMENT/REVERSAL, `amountCents` com sinal, `balanceAfterCents`, forma de pagamento, `cashMovementId`, `reversedEntryId`, `idempotencyKey`) e `ReceivablePaymentAllocation` (`receivable_payment_allocations`: quanto de cada pagamento abateu cada parcela). `PaymentMethod` ganhou `ON_ACCOUNT`; `CashMovementType` ganhou `RECEIVABLE_PAYMENT` e `RECEIVABLE_REFUND`; `tenants.timezone` (`NOT NULL DEFAULT 'America/Sao_Paulo'`). Migration `20261005005645_receivables`. Em SQL: ledger e alocações append-only por trigger, CHECKs de limite e dívida não negativos, `paidCents` entre 0 e o valor, status coerente com o que foi pago, sinal por tipo, forma de pagamento obrigatória e real em pagamentos (`IS NOT NULL AND IN (...)`, porque `NULL IN (...)` passaria no CHECK), origem e motivo no estorno. Ver `docs/RECEIVABLES.md`.
+
+- **Perfil do restaurante:** `tenants.description` e `tenants.instagram` (sem "@"); `branches.whatsapp` (só dígitos, como `phone`) e `branches.openingHours` (`JSONB`, nulo = não informado). Telefone, e-mail e endereço da unidade já existiam e passam a ser editáveis. Migration `20261017150000_restaurant_profile` (aditiva: quatro colunas nulas, nenhuma linha alterada). O formato dos horários é validado pela API, não pelo banco (`modules/tenants/opening-hours.ts`): lista de `{ weekday 0-6, opens, closes }`, sem sobreposição; um valor fora da regra é lido como "não informado". Ver `docs/RESTAURANT_PROFILE.md`.
+
+Valores monetários são `Int` em centavos; quantidades de estoque são `Decimal(14,3)`; pontos são `Int`.
 
 Os índices parciais (um caixa `OPEN` por unidade, uma comanda `OPEN` por mesa)
 e o trigger que torna `cash_movements` imutável estão na migration
@@ -86,13 +94,15 @@ válidos e idempotentes.
 
 ## O que NÃO existe
 
-Customer/CRM, entregador e rastreamento de entregas, FiscalDocument (NFC-e), gateway de
+Rastreamento de entregas por mapa/GPS, FiscalDocument (NFC-e), gateway de
 pagamento, cobrança SaaS, horários e endereço do restaurante (perfil), pedidos
-de compra e contas a pagar.
+de compra, contas a pagar, inscrições de push e tabelas de resumo para relatórios
+(os relatórios agregam direto das tabelas de operação).
 
 ## Seed
 
 `prisma/seed.ts` cria **apenas** os 8 `Role`s do enum, o catálogo de
 `Permission`s e o vínculo `RolePermission` de cada papel. Nenhum tenant,
-usuário ou dado de negócio fictício é criado pelo seed — cadastros reais
-acontecem via `POST /auth/register`.
+usuário ou dado de negócio fictício é criado pelo seed. Não há cadastro público
+(desde 2026-10-28): restaurantes são criados pelo comando `tenant:provision` (docs/PROVISIONING.md), que usa `TenantProvisioningService`, sem rota HTTP
+(ver docs/authentication.md, "Sem cadastro público").

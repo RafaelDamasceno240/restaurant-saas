@@ -12,9 +12,14 @@ import {
   computeCashTotals,
   computeDifferenceCents,
   computeExpectedBalanceCents,
+  withdrawalExceedsBalance,
 } from './cash-calculations';
 
 type Tx = Prisma.TransactionClient;
+
+// "R$ 1.234,56" with a plain space (Intl puts a non-breaking one after "R$").
+const formatBRL = (cents: number) =>
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100).replace(/\s/g, ' ');
 
 const sessionDetailInclude = {
   branch: { select: { name: true } },
@@ -25,6 +30,7 @@ const sessionDetailInclude = {
     include: {
       createdBy: { select: { id: true, name: true } },
       order: { select: { orderNumber: true } },
+      refundedOrder: { select: { orderNumber: true } },
     },
   },
 } satisfies Prisma.CashRegisterSessionInclude;
@@ -36,10 +42,10 @@ type SessionWithDetail = Prisma.CashRegisterSessionGetPayload<{ include: typeof 
 //  - every money value is integer cents, computed server-side only;
 //  - opening is serialized per branch (SELECT ... FOR UPDATE on the branch row)
 //    + a partial unique index as DB-level backstop (prisma/sql/...);
-//  - closing / adding a movement / recording a CASH sale all lock the SESSION
-//    row FOR UPDATE and re-check status inside the transaction, so a movement
-//    can never land in a session that is being closed, and a session can
-//    never be closed twice;
+//  - closing / adding a movement / recording a CASH sale or its refund all lock
+//    the SESSION row FOR UPDATE and re-check status inside the transaction, so a
+//    movement can never land in a session that is being closed, and a session
+//    can never be closed twice;
 //  - movements are append-only (no update/delete path exists; DB trigger too);
 //  - tenantId always from the JWT; branch always re-validated via
 //    BranchAccessService.
@@ -170,6 +176,19 @@ export class CashRegisterService {
 
     const movement = await this.prisma.$transaction(async (tx) => {
       await this.lockSessionAndAssertOpen(tx, session.id, 'CASH_SESSION_CLOSED');
+      // B4: a sangria cannot take out more than the drawer holds. The balance is recomputed
+      // AFTER the session lock, from the committed movements: two sangrias at the same time
+      // queue on that lock and the second one sees the first.
+      if (dto.type === 'WITHDRAWAL') {
+        const expected = await this.expectedBalanceInTx(tx, session.id);
+        if (withdrawalExceedsBalance(dto.amountCents, expected)) {
+          throw new ConflictException({
+            code: 'WITHDRAWAL_EXCEEDS_BALANCE',
+            message: `A sangria não pode ser maior que o dinheiro no caixa. Disponível agora: ${formatBRL(Math.max(0, expected))}.`,
+            details: { availableCents: Math.max(0, expected) },
+          });
+        }
+      }
       return tx.cashMovement.create({
         data: {
           sessionId: session.id,
@@ -200,16 +219,7 @@ export class CashRegisterService {
     const result = await this.prisma.$transaction(async (tx) => {
       // Second concurrent close blocks here, then sees CLOSED and fails.
       await this.lockSessionAndAssertOpen(tx, session.id, 'CASH_SESSION_ALREADY_CLOSED');
-      const fresh = await tx.cashRegisterSession.findUniqueOrThrow({
-        where: { id: session.id },
-        select: { openingBalanceCents: true },
-      });
-      const movements = await tx.cashMovement.findMany({
-        where: { sessionId: session.id },
-        select: { type: true, amountCents: true },
-      });
-      const totals = computeCashTotals(movements);
-      const expected = computeExpectedBalanceCents(fresh.openingBalanceCents, totals);
+      const expected = await this.expectedBalanceInTx(tx, session.id);
       const difference = computeDifferenceCents(dto.countedClosingBalanceCents, expected);
       await tx.cashRegisterSession.update({
         where: { id: session.id },
@@ -245,20 +255,51 @@ export class CashRegisterService {
 
   // ---------------------------------------------------------------------
   // PDV integration — called INSIDE OrderCreationService's transaction, so
-  // the Order and its SALE movement commit or roll back together.
+  // the Order and its SALE movement commit or roll back together. Also used,
+  // with recordSale, when an online cash order is concluded (B3, below).
   // ---------------------------------------------------------------------
-  async lockOpenSessionForSale(tx: Tx, tenantId: string, branchId: string): Promise<string> {
+  async lockOpenSessionForSale(
+    tx: Tx,
+    tenantId: string,
+    branchId: string,
+    message = 'Não há caixa aberto nesta unidade. Abra o caixa antes de vender em dinheiro.',
+  ): Promise<string> {
     const rows = await tx.$queryRaw<{ id: string }[]>`
       SELECT id FROM "cash_register_sessions"
       WHERE "tenantId" = ${tenantId} AND "branchId" = ${branchId} AND "status" = 'OPEN'
       FOR UPDATE`;
     if (rows.length === 0) {
-      throw new ConflictException({
-        code: 'CASH_REGISTER_NOT_OPEN',
-        message: 'Não há caixa aberto nesta unidade. Abra o caixa antes de vender em dinheiro.',
-      });
+      throw new ConflictException({ code: 'CASH_REGISTER_NOT_OPEN', message });
     }
     return rows[0].id;
+  }
+
+  // Fiado (Fase 11, fatia 6): cash received for a receivable, or handed back when such a
+  // payment is reversed. Called INSIDE the receivables transaction, after the session was
+  // locked with lockOpenSessionForSale(): the ledger entry and the drawer movement commit or
+  // roll back together, and a concurrent close waits for them.
+  recordReceivableCash(
+    tx: Tx,
+    input: {
+      sessionId: string;
+      tenantId: string;
+      type: 'RECEIVABLE_PAYMENT' | 'RECEIVABLE_REFUND';
+      amountCents: number;
+      reason: string;
+      userId: string;
+    },
+  ) {
+    return tx.cashMovement.create({
+      data: {
+        sessionId: input.sessionId,
+        tenantId: input.tenantId,
+        type: input.type,
+        amountCents: input.amountCents,
+        reason: input.reason,
+        createdByUserId: input.userId,
+      },
+      select: { id: true },
+    });
   }
 
   recordSale(
@@ -281,6 +322,85 @@ export class CashRegisterService {
   }
 
   // ---------------------------------------------------------------------
+  // B3 (piloto 2026-10-23): an order paid in cash that did NOT put money in the drawer when it
+  // was taken (online checkout: paid on pickup or to the courier) does it when it is concluded,
+  // COMPLETED (OrdersService) or DELIVERED (DeliveryService) - the moment the money is received.
+  // Called INSIDE those transactions, right after the order row lock and BEFORE the delivery
+  // lock (lock order ORDER -> CASH SESSION -> DELIVERY, the same as a cancellation). Returns the
+  // OPEN session to write the SALE into, or null when there is nothing to record: not cash, a
+  // zero total, or a SALE already exists (a PDV cash sale entered the drawer when it was made;
+  // a repeated conclusion finds its own SALE). CashMovement.orderId is UNIQUE: a second SALE for
+  // the same order is refused by the database itself. No open session = no conclusion, the same
+  // rule as selling or refunding in cash.
+  // ---------------------------------------------------------------------
+  async lockSessionForCashOnConclusion(
+    tx: Tx,
+    input: { tenantId: string; branchId: string; orderId: string; paymentMethod: string; totalCents: number },
+  ): Promise<string | null> {
+    if (input.paymentMethod !== 'CASH' || input.totalCents <= 0) return null;
+    const sale = await tx.cashMovement.findUnique({ where: { orderId: input.orderId }, select: { id: true } });
+    if (sale) return null;
+    return this.lockOpenSessionForSale(
+      tx,
+      input.tenantId,
+      input.branchId,
+      'Não há caixa aberto nesta unidade. Abra o caixa para concluir um pedido pago em dinheiro: o valor recebido entra no caixa.',
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Cancellation of a cash sale — called INSIDE OrdersService's transaction, which already
+  // holds the order row lock. A sale that put money in the drawer gives it back when it is
+  // cancelled: a SALE_REFUND for the same amount, in the session that is OPEN in the order's
+  // branch NOW (not necessarily the one that took the sale: the money leaves the drawer that
+  // exists today). Same rule as a reversed fiado payment: no open session, no cancellation.
+  //
+  // Returns null when there is nothing to give back: the order has no SALE movement (Pix, card,
+  // fiado, an online cash order not concluded yet), the sale was of zero, or it was refunded
+  // already (unreachable under the order lock; the unique key on refundedOrderId is the backstop).
+  // ---------------------------------------------------------------------
+  async lockSessionForSaleRefund(
+    tx: Tx,
+    input: { tenantId: string; branchId: string; orderId: string },
+  ): Promise<{ sessionId: string; amountCents: number } | null> {
+    const sale = await tx.cashMovement.findUnique({
+      where: { orderId: input.orderId },
+      select: { amountCents: true, tenantId: true },
+    });
+    if (!sale || sale.tenantId !== input.tenantId || sale.amountCents <= 0) return null;
+    const refunded = await tx.cashMovement.findUnique({
+      where: { refundedOrderId: input.orderId },
+      select: { id: true },
+    });
+    if (refunded) return null;
+    const sessionId = await this.lockOpenSessionForSale(
+      tx,
+      input.tenantId,
+      input.branchId,
+      'Não há caixa aberto nesta unidade. Abra o caixa para cancelar uma venda paga em dinheiro: o valor é devolvido pelo caixa.',
+    );
+    return { sessionId, amountCents: sale.amountCents };
+  }
+
+  recordSaleRefund(
+    tx: Tx,
+    input: { sessionId: string; tenantId: string; orderId: string; orderNumber: string; amountCents: number; userId: string },
+  ) {
+    return tx.cashMovement.create({
+      data: {
+        sessionId: input.sessionId,
+        tenantId: input.tenantId,
+        type: 'SALE_REFUND',
+        amountCents: input.amountCents,
+        refundedOrderId: input.orderId,
+        reason: `Estorno da venda ${input.orderNumber} (pedido cancelado)`,
+        createdByUserId: input.userId,
+      },
+      select: { id: true },
+    });
+  }
+
+  // ---------------------------------------------------------------------
 
   private async findSessionForWrite(user: AuthenticatedRequestUser, sessionId: string) {
     const session = await this.prisma.cashRegisterSession.findFirst({
@@ -290,6 +410,20 @@ export class CashRegisterService {
     if (!session) throw this.notFound();
     await this.branchAccess.assertAccess(user, session.branchId);
     return session;
+  }
+
+  // Expected balance of a session from its committed movements. Call it with the session row
+  // locked (lockSessionAndAssertOpen), so no movement can land between the read and the write.
+  private async expectedBalanceInTx(tx: Tx, sessionId: string): Promise<number> {
+    const fresh = await tx.cashRegisterSession.findUniqueOrThrow({
+      where: { id: sessionId },
+      select: { openingBalanceCents: true },
+    });
+    const movements = await tx.cashMovement.findMany({
+      where: { sessionId },
+      select: { type: true, amountCents: true },
+    });
+    return computeExpectedBalanceCents(fresh.openingBalanceCents, computeCashTotals(movements));
   }
 
   private async lockSessionAndAssertOpen(tx: Tx, sessionId: string, closedCode: string) {
@@ -329,8 +463,9 @@ export class CashRegisterService {
         type: m.type,
         amountCents: m.amountCents,
         reason: m.reason,
-        orderId: m.orderId,
-        orderNumber: m.order?.orderNumber ?? null,
+        // For a SALE_REFUND these point to the cancelled order it gives back.
+        orderId: m.orderId ?? m.refundedOrderId,
+        orderNumber: m.order?.orderNumber ?? m.refundedOrder?.orderNumber ?? null,
         createdBy: m.createdBy,
         createdAt: m.createdAt,
       })),

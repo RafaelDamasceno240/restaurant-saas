@@ -5,6 +5,9 @@ import { AuditService } from '../audit/audit.service';
 import { BranchAccessService } from '../branches/branch-access.service';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
 import { Tx } from '../inventory/stock-ledger.service';
+import { OrderEffectsService } from '../order-effects/order-effects.service';
+import { CashRegisterService } from '../cash/cash-register.service';
+import { isConcludedOrderStatus } from '../../common/util/order-conclusion.util';
 import {
   courierNotEligible,
   courierNotFound,
@@ -61,6 +64,9 @@ type DeliveryRow = Prisma.DeliveryGetPayload<{ include: typeof listInclude }>;
 interface LockedOrder {
   status: OrderStatus;
   orderNumber: string;
+  branchId: string;
+  paymentMethod: string;
+  totalCents: number;
 }
 
 interface LockedDelivery {
@@ -105,6 +111,8 @@ export class DeliveryService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly branchAccess: BranchAccessService,
+    private readonly effects: OrderEffectsService,
+    private readonly cashRegister: CashRegisterService,
   ) {}
 
   async list(user: AuthenticatedRequestUser, query: ListDeliveriesQueryDto) {
@@ -370,7 +378,7 @@ export class DeliveryService {
     await this.branchAccess.assertAccess(user, query.branchId);
     const branch = await this.prisma.branch.findFirstOrThrow({
       where: { id: query.branchId, tenantId: user.tenantId },
-      select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+      select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true, deliveryFreeAboveCents: true },
     });
     return this.toSettings(branch);
   }
@@ -380,7 +388,7 @@ export class DeliveryService {
     const branch = await this.prisma.$transaction(async (tx) => {
       const before = await tx.branch.findFirstOrThrow({
         where: { id: dto.branchId, tenantId: user.tenantId },
-        select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+        select: { deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true, deliveryFreeAboveCents: true },
       });
       const updated = await tx.branch.update({
         where: { id: dto.branchId },
@@ -388,8 +396,9 @@ export class DeliveryService {
           deliveryEnabled: dto.enabled,
           deliveryFeeCents: dto.feeCents,
           deliveryMinOrderCents: dto.minOrderCents,
+          ...(dto.freeAboveCents !== undefined ? { deliveryFreeAboveCents: dto.freeAboveCents } : {}),
         },
-        select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true },
+        select: { id: true, deliveryEnabled: true, deliveryFeeCents: true, deliveryMinOrderCents: true, deliveryFreeAboveCents: true },
       });
       await this.audit.recordTx(tx, {
         tenantId: user.tenantId,
@@ -401,8 +410,14 @@ export class DeliveryService {
           enabled: before.deliveryEnabled,
           feeCents: before.deliveryFeeCents,
           minOrderCents: before.deliveryMinOrderCents,
+          freeAboveCents: before.deliveryFreeAboveCents,
         },
-        afterData: { enabled: dto.enabled, feeCents: dto.feeCents, minOrderCents: dto.minOrderCents },
+        afterData: {
+          enabled: dto.enabled,
+          feeCents: dto.feeCents,
+          minOrderCents: dto.minOrderCents,
+          freeAboveCents: updated.deliveryFreeAboveCents,
+        },
       });
       return updated;
     }, TRANSACTION_OPTIONS);
@@ -410,8 +425,9 @@ export class DeliveryService {
   }
 
   // The operational moves: the delivery row and its order move together, in ONE
-  // transaction. Lock order is always ORDER first, then DELIVERY (the same order
-  // OrdersService uses when it cancels), so the two can never deadlock. The state is
+  // transaction. Lock order is always ORDER first, then (only to conclude an order paid in
+  // cash, B3) the CASH SESSION, then DELIVERY - the same order OrdersService uses when it
+  // cancels - so the two can never deadlock. The state is
   // re-read AFTER the locks: a duplicate or concurrent request finds the target state
   // already reached and answers as a replay (200, idempotentReplay=true, nothing written);
   // an impossible move is a 409. Idempotency is by STATE, not by attempt: a stale
@@ -422,6 +438,19 @@ export class DeliveryService {
 
     const replay = await this.prisma.$transaction(async (tx) => {
       const order = await this.lockOrder(tx, user.tenantId, scoped.orderId);
+      // B3: delivering an order paid in cash is when the courier receives the money: it enters
+      // the drawer now (an open session is required, as for any cash in or out). Asked only when
+      // this request can really deliver it; a repeat finds the SALE already written.
+      const cashSaleSessionId =
+        step === 'complete' && order.status === rule.orderFrom
+          ? await this.cashRegister.lockSessionForCashOnConclusion(tx, {
+              tenantId: user.tenantId,
+              branchId: order.branchId,
+              orderId: scoped.orderId,
+              paymentMethod: order.paymentMethod,
+              totalCents: order.totalCents,
+            })
+          : null;
       const current = await this.lockDelivery(tx, user.tenantId, id);
 
       // PENDING is also the initial state: only a delivery that already had an attempt
@@ -453,6 +482,33 @@ export class DeliveryService {
       await tx.delivery.update({ where: { id }, data });
       if (rule.orderFrom !== rule.orderTo) {
         await tx.order.update({ where: { id: scoped.orderId }, data: { status: rule.orderTo } });
+        // DELIVERED concludes the sale: its benefits (loyalty points...) are credited in this
+        // same transaction, under the order lock taken above.
+        if (isConcludedOrderStatus(rule.orderTo)) {
+          await this.effects.onOrderConcludedInTx(tx, {
+            tenantId: user.tenantId,
+            orderId: scoped.orderId,
+            actorUserId: user.userId,
+          });
+        }
+      }
+      // B3: ...and the cash the courier received enters the drawer, linked to the order.
+      if (cashSaleSessionId) {
+        const sale = await this.cashRegister.recordSale(tx, {
+          sessionId: cashSaleSessionId,
+          tenantId: user.tenantId,
+          orderId: scoped.orderId,
+          amountCents: order.totalCents,
+          userId: user.userId,
+        });
+        await this.audit.recordTx(tx, {
+          tenantId: user.tenantId,
+          userId: user.userId,
+          action: 'CASH_MOVEMENT_CREATED',
+          entity: 'CashMovement',
+          entityId: sale.id,
+          afterData: { type: 'SALE', orderId: scoped.orderId, sessionId: cashSaleSessionId, amountCents: order.totalCents, reason: 'ORDER_DELIVERED' },
+        });
       }
 
       await this.audit.recordTx(tx, {
@@ -519,7 +575,8 @@ export class DeliveryService {
 
   private async lockOrder(tx: Tx, tenantId: string, orderId: string): Promise<LockedOrder> {
     const rows = await tx.$queryRaw<LockedOrder[]>`
-      SELECT "status", "orderNumber" FROM "orders" WHERE "id" = ${orderId} AND "tenantId" = ${tenantId} FOR UPDATE`;
+      SELECT "status", "orderNumber", "branchId", "paymentMethod", "totalCents"
+      FROM "orders" WHERE "id" = ${orderId} AND "tenantId" = ${tenantId} FOR UPDATE`;
     if (rows.length === 0) throw deliveryNotFound();
     return rows[0];
   }
@@ -549,12 +606,14 @@ export class DeliveryService {
     deliveryEnabled: boolean;
     deliveryFeeCents: number;
     deliveryMinOrderCents: number;
+    deliveryFreeAboveCents: number | null;
   }) {
     return {
       branchId: branch.id,
       enabled: branch.deliveryEnabled,
       feeCents: branch.deliveryFeeCents,
       minOrderCents: branch.deliveryMinOrderCents,
+      freeAboveCents: branch.deliveryFreeAboveCents,
     };
   }
 

@@ -75,9 +75,9 @@ O CASHIER lê e cadastra porque o PDV precisa encontrar/criar o cliente no balc�
 
 ## Limitações desta fatia
 
-- O vínculo com o pedido só existe no **PDV** (a API aceita `customerId`; a **tela do PDV ainda não tem seletor de cliente**). Checkout público, comanda/mesa e delivery não vinculam.
+- O vínculo com o pedido nasce no **PDV** e no **fechamento de mesa**; pedidos online e de delivery são vinculados depois por um funcionário (ver "CRM avançado", no fim deste documento). O checkout público continua sem identificar cliente.
 - Sem importação, sem mesclar duplicados, sem exclusão, sem endereços de entrega no cadastro.
-- Sem segmentação, cashback, fidelidade, cupons ou campanhas (a base foi pensada para recebê-los: `customerId` já está no pedido).
+- Sem campanhas nem automações. Segmentação, cupons, fidelidade, cashback e fiado são tratados nas seções e documentos seguintes.
 - Métricas por consulta agregada (sem tabela de resumo): suficiente para o volume de uma base de restaurante; revisar se uma base tiver centenas de milhares de pedidos por cliente.
 - Telefone aceita qualquer número de 8 a 15 dígitos; não há validação de DDD/celular.
 
@@ -208,11 +208,72 @@ Não existe `DELETE`: cupons usados mantêm o histórico. As respostas de pedido
 ## Limitações conhecidas
 
 - **Cancelar o pedido não devolve a utilização do cupom.** Pedidos cancelados contam no limite global e no limite por cliente (decisão desta fatia: nunca ultrapassa o limite, no máximo fica conservador).
-- Cupom com limite por cliente só é exercitável pela API do PDV: a tela do PDV ainda não tem seletor de cliente.
+- Cupom com limite por cliente exige cliente vinculado: use o seletor de cliente do PDV (a prévia do cupom considera o cliente escolhido). O checkout público nunca identifica cliente.
 - Um cupom por pedido; sem restrição por produto/categoria; sem cupom em mesa/comanda; sem exclusão física.
-- O lock por cupom serializa os pedidos que usam **o mesmo** cupom (aceito).
+- O lock por cupom serializa os pedidos que usam **o mesmo** cupom (aceito). A transação de criação do pedido tem orçamento explícito (20 s para concluir, 10 s para obter conexão), como os demais módulos transacionais; medido: 40 pedidos simultâneos no mesmo cupom com limite 7 terminam em 7 criados e 33 recusados (`409 COUPON_USAGE_LIMIT_REACHED`), sem nenhum erro 5xx. Cargas maiores não foram medidas.
+- Venda em dinheiro com desconto de 100% é uma venda válida de total 0: grava um movimento `SALE` de R$ 0,00 no caixa (mantém a regra "sem pedido sem SALE") e o fechamento continua batendo (testado).
 - A busca da lista usa `contains` sem índice trigram.
 
 ## Deploy
 
 Migration `20261002100000_coupons` (aditiva): `prisma migrate deploy`. Ela adiciona 3 `CHECK`s em `orders`, que validam as linhas existentes sob lock curto da tabela. As permissões `coupons.*` entram pelo seed: **rode `pnpm db:seed` e faça login de novo**, senão MANAGER e CASHIER não terão acesso.
+
+---
+
+# CRM avançado — segmentos, rankings e vínculo de pedidos (Fase 11, fatia 3)
+
+Estado real implementado em 2026-10-04. Sem migration: tudo é derivado dos pedidos existentes.
+
+## Segmentação
+
+Calculada no backend a partir dos pedidos **válidos** do cliente (todos exceto `CANCELLED`, a mesma regra das métricas). Nada é armazenado: o segmento muda sozinho com o passar do tempo e com novos pedidos.
+
+| Segmento | Regra | Nome na tela |
+|---|---|---|
+| `NEW` | primeira compra nos últimos 30 dias | Novos |
+| `RECURRING` | 2 ou mais compras, a última nos últimos 60 dias | Recorrentes |
+| `AT_RISK` | já comprou, mas a última compra foi há mais de 60 e no máximo 180 dias | Sem compra recente |
+| `LOST` | nunca comprou, ou não compra há mais de 180 dias | Inativos (180+ dias) |
+
+- Um cliente pode ser `NEW` e `RECURRING` ao mesmo tempo. `AT_RISK` e `LOST` são mutuamente exclusivos e não convivem com os outros dois. Um cliente com uma única compra entre 31 e 60 dias atrás não está em nenhum segmento.
+- `LOST` é o "inativo" comercial; **não** é o campo `active` do cadastro (as abas Ativos/Inativos da tela), que continua sendo um filtro independente.
+- Os limites (30, 60 e 180 dias) são constantes do código (`customer-segments.ts`), iguais para todos os restaurantes. São durações contadas a partir de agora, então não dependem de fuso horário.
+- A regra existe em um lugar só (`classifyCustomer`) e o filtro SQL é o seu espelho; a suíte e2e confere que toda linha devolvida por um filtro é classificada naquele segmento.
+- **"Maior gasto" e "maior ticket" não são segmentos: são ordenações da lista.**
+
+## Endpoints novos ou ampliados
+
+| Método e rota | Permissão | O que mudou |
+|---|---|---|
+| `GET /v1/customers?segment=&sort=` | `customers.read` | `segment` = `NEW`, `RECURRING`, `AT_RISK`, `LOST`; `sort` = `name` (padrão), `spent`, `ticket`, `orders`, `recent`. Cada linha ganhou `averageTicketCents`, `firstOrderAt` e `segments`. Os contadores das abas seguem a busca **e** o segmento |
+| `GET /v1/customers/segments` | `customers.read` | quantos clientes **ativos** há em cada segmento, e o total |
+| `GET /v1/customers/:id` | `customers.read` | ganhou `segments` e `topProducts` (até 5 produtos mais comprados: `quantity`, `totalCents` dos itens antes de desconto, `timesOrdered`) |
+| `PATCH /v1/orders/:id/customer` | `orders.update` **e** `customers.read` | corpo `{ "customerId": "<uuid>" \| null }`: vincula um pedido existente a um cliente, ou desvincula |
+| `GET /v1/orders/:id/customer-suggestions` | `orders.read` **e** `customers.read` | clientes ativos cujo telefone é o digitado no pedido (sugestão) |
+| `POST /v1/tabs/:id/checkout` | `tabs.close` (+ `customers.read` se enviar cliente) | aceita `customerId` opcional |
+
+Pedidos passaram a expor `customerId` (só o id) nas respostas autenticadas de lista e detalhe.
+
+## Como a lista é calculada
+
+Uma única consulta SQL parametrizada decide a página: os clientes do tenant com `LEFT JOIN` no agregado dos seus pedidos válidos. Busca, filtro de segmento, ordenação por gasto/ticket/pedidos/recência e paginação acontecem no banco, sem N+1 e sem ordenar a base em memória. A ordenação sempre desempata por nome e id (páginas não se sobrepõem). Para usuário limitado a filiais, o agregado considera só as filiais que ele acessa. Custo: o agregado percorre os pedidos com cliente do tenant a cada requisição (índice `orders(tenantId, customerId, createdAt)`); revisar se um restaurante passar de centenas de milhares de pedidos vinculados.
+
+## Vínculo de pedidos a clientes
+
+- **PDV:** seletor de cliente na tela (busca por nome, telefone ou CPF, ou cadastro na hora). Com cliente escolhido só o `customerId` é enviado.
+- **Mesa:** o fechamento da comanda aceita um cliente; o nome digitado na comanda prevalece no pedido e o cadastro preenche o que faltar.
+- **Pedido existente (online, delivery, qualquer origem):** um funcionário vincula ou desvincula no detalhe do pedido. A tela sugere os clientes com o mesmo telefone, mas **nada é atribuído automaticamente**: qualquer pessoa pode digitar qualquer telefone no checkout público.
+- Regras do vínculo: cliente do mesmo tenant e ativo (`404`/`409`); pedido do tenant e de filial acessível (`404`); a linha do pedido é travada e a auditoria (`ORDER_CUSTOMER_LINKED` / `ORDER_CUSTOMER_UNLINKED`, só ids) é gravada na mesma transação; repetir o mesmo vínculo não grava nada. O nome e o telefone digitados no pedido **nunca** são reescritos.
+- O resgate de cupom mantém o cliente com que foi registrado: o limite por cliente é sobre quem resgatou, não sobre a quem o pedido foi atribuído depois.
+- Pedido que já creditou pontos (`docs/LOYALTY.md`) ou movimentou cashback (`docs/CASHBACK.md`) não troca de cliente enquanto a movimentação estiver de pé (`409`).
+
+## Permissões
+
+Nenhuma permissão nova. Segmentos e rankings: `customers.read` (OWNER, ADMIN, MANAGER, CASHIER). Vincular pedido existente: `orders.update` + `customers.read`, ou seja, OWNER, ADMIN e MANAGER (o CASHIER não tem `orders.update`; a cozinha não tem `customers.read`). Garçom fecha comanda, mas não pode informar cliente.
+
+## Limitações
+
+- Limites de segmento fixos no código (sem configuração por restaurante).
+- Sem exportação, sem campanhas, sem mesclar clientes duplicados.
+- A busca do seletor usa `GET /customers?search=`: o texto buscado (nome, telefone, CPF) vai na query string; os logs da aplicação o omitem, os da plataforma de hospedagem não.
+- Trocar o cliente de um pedido não move resgates de cupom já registrados.

@@ -34,6 +34,7 @@ export interface ProfileMetric {
   hint: string;
 }
 
+// What the profile screen shows (real or demonstration).
 export interface RestaurantProfile {
   name: string;
   category: string;
@@ -59,57 +60,104 @@ export interface RestaurantProfile {
   };
 }
 
-export interface CurrentTenant {
-  id: string;
+// Same contract as the API (modules/tenants/opening-hours.ts): weekday 0 = Sunday; a "closes"
+// earlier than "opens" ends after midnight.
+export interface OpeningInterval {
+  weekday: number;
+  opens: string;
+  closes: string;
+}
+
+// GET/PATCH /tenants/current/profile. Phones and CEP come as digits; Instagram without "@".
+export interface RestaurantProfileData {
   name: string;
-  legalName: string | null;
-  document: string | null;
+  legalName: string;
+  document: string;
   slug: string;
-  status: string;
-}
-
-export function getCurrentTenant(accessToken: string): Promise<CurrentTenant> {
-  return apiFetch<CurrentTenant>('/tenants/current', { accessToken });
-}
-
-function clean(value: string | null | undefined): string | null {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
-
-export function mergeTenantIntoProfile(base: RestaurantProfile, tenant: CurrentTenant): RestaurantProfile {
-  return {
-    ...base,
-    name: clean(tenant.name) ?? base.name,
-    legalName: clean(tenant.legalName) ?? 'Não informado',
-    document: clean(tenant.document) ?? 'Não informado',
-    slug: clean(tenant.slug) ?? base.slug,
+  timezone: string;
+  description: string | null;
+  instagram: string | null;
+  // Look of the public menu: main color ("#RRGGBB", null = default), logo and cover.
+  brandColor?: string | null;
+  logoUrl?: string | null;
+  coverUrl?: string | null;
+  branch: {
+    id: string;
+    name: string;
+    phone: string | null;
+    whatsapp: string | null;
+    email: string | null;
+    address: string | null;
+    number: string | null;
+    complement: string | null;
+    neighborhood: string | null;
+    city: string | null;
+    state: string | null;
+    zipCode: string | null;
+    openingHours: OpeningInterval[] | null;
   };
+  openNow: boolean | null;
 }
 
-const DAY_INDEX = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-
-function toMinutes(value: string): number {
-  const [h, m] = value.split(':').map(Number);
-  return (h ?? 0) * 60 + (m ?? 0);
+// Only the keys sent change; null clears (except name and legal name).
+export interface RestaurantProfilePatch {
+  name?: string;
+  legalName?: string;
+  description?: string | null;
+  instagram?: string | null;
+  brandColor?: string | null;
+  phone?: string | null;
+  whatsapp?: string | null;
+  email?: string | null;
+  address?: string | null;
+  number?: string | null;
+  complement?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
+  openingHours?: OpeningInterval[] | null;
 }
 
-function parseRange(label: string): [number, number] | null {
-  const match = label.match(/(\d{1,2}:\d{2})\s*[—–-]\s*(\d{1,2}:\d{2})/);
-  if (!match) return null;
-  const start = toMinutes(match[1]);
-  let end = toMinutes(match[2]);
-  if (end <= start) end += 24 * 60;
-  return [start, end];
+export function getRestaurantProfile(accessToken: string): Promise<RestaurantProfileData> {
+  return apiFetch<RestaurantProfileData>('/tenants/current/profile', { accessToken });
 }
 
-export function computeOpenStatus(hours: ProfileHour[], now: Date): OpenStatus {
-  const minutes = now.getHours() * 60 + now.getMinutes();
-  const today = DAY_INDEX[now.getDay()];
-  const yesterday = DAY_INDEX[(now.getDay() + 6) % 7];
-  const todayRange = parseRange(hours.find((h) => h.day === today)?.label ?? '');
-  if (todayRange && minutes >= todayRange[0] && minutes < todayRange[1]) return 'open';
-  const yesterdayRange = parseRange(hours.find((h) => h.day === yesterday)?.label ?? '');
-  if (yesterdayRange && yesterdayRange[1] > 24 * 60 && minutes + 24 * 60 < yesterdayRange[1]) return 'open';
-  return 'closed';
+export function updateRestaurantProfile(
+  accessToken: string,
+  patch: RestaurantProfilePatch,
+): Promise<RestaurantProfileData> {
+  return apiFetch<RestaurantProfileData>('/tenants/current/profile', {
+    method: 'PATCH',
+    body: patch,
+    accessToken,
+  });
+}
+
+// Logo or cover of the public menu: a JPEG, PNG or WebP of up to 3 MB (checked by the API from the
+// file's bytes). Answers with the whole profile, so the screen shows the new picture at once.
+export type BrandImageKind = 'logo' | 'cover';
+
+export function uploadBrandImage(
+  accessToken: string,
+  kind: BrandImageKind,
+  file: Blob,
+): Promise<RestaurantProfileData> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiFetch<RestaurantProfileData>(`/tenants/current/${kind}`, {
+    method: 'PUT',
+    body: form,
+    accessToken,
+  });
+}
+
+export function removeBrandImage(
+  accessToken: string,
+  kind: BrandImageKind,
+): Promise<RestaurantProfileData> {
+  return apiFetch<RestaurantProfileData>(`/tenants/current/${kind}`, {
+    method: 'DELETE',
+    accessToken,
+  });
 }

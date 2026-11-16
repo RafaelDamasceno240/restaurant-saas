@@ -15,23 +15,19 @@ async function call(method, path, token, body) {
 }
 
 async function main() {
+  // There is no public sign-up (2026-10-28): the restaurant of this account must already have
+  // been provisioned. The script only fills it with the sample inventory, once.
   let token;
   try {
-    token = (
-      await call('POST', '/auth/register', null, {
-        tenantName: 'Burger Dev',
-        legalName: 'Burger Dev LTDA',
-        document: String(Date.now()).padStart(14, '0').slice(-14),
-        slug: `burger-dev-${Date.now()}`,
-        branchName: 'Matriz',
-        userName: 'Dev Estoque',
-        email: EMAIL,
-        password: PASSWORD,
-      })
-    ).accessToken;
+    token = (await call('POST', '/auth/login', null, { email: EMAIL, password: PASSWORD })).accessToken;
   } catch (error) {
-    if (!String(error.message).includes('409')) throw error;
-    console.log(`Conta já existe. ${DEV_CREDENTIALS_NOTE}`);
+    if (!String(error.message).includes('401')) throw error;
+    console.log(`Não foi possível entrar com ${EMAIL}: o restaurante dessa conta precisa ser provisionado antes (não há cadastro público). ${DEV_CREDENTIALS_NOTE}`);
+    process.exitCode = 1;
+    return;
+  }
+  if ((await call('GET', '/products', token)).length > 0) {
+    console.log(`Dados já existem. Login: ${EMAIL}. ${DEV_CREDENTIALS_NOTE}`);
     return;
   }
 

@@ -1,5 +1,6 @@
 import { ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { AuthenticatedRequestUser } from '../../common/types/authenticated-request-user';
+import { CustomerLookupService } from '../customers/customer-lookup.service';
 import { PosOrdersService } from './pos-orders.service';
 
 // Customer linking in the PDV (Fase 11). The HTTP-level cases live in
@@ -27,7 +28,9 @@ describe('PosOrdersService customer linking', () => {
       { createOrder } as never,
       { findOneForTenant: jest.fn().mockResolvedValue({ id: 'o1' }) } as never,
       { assertAccess: jest.fn().mockResolvedValue(undefined) } as never,
-      { customer: { findFirst } } as never,
+      // The real lookup (the rule under test lives there since it is shared with the table
+      // checkout and the order link), over a stubbed database.
+      new CustomerLookupService({ customer: { findFirst } } as never),
     );
     return { service, findFirst, createOrder };
   }
@@ -51,6 +54,32 @@ describe('PosOrdersService customer linking', () => {
     await expect(service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1' }) as never)).rejects.toBeInstanceOf(NotFoundException);
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'c1', tenantId: 'tenant-1' } }));
     expect(createOrder).not.toHaveBeenCalled();
+  });
+
+  it('refuses to spend cashback without cashback.use, before any lookup or sale', async () => {
+    const { service, findFirst, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: true });
+    await expect(
+      service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1', cashbackToUseCents: 500 }) as never),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(createOrder).not.toHaveBeenCalled();
+  });
+
+  it('passes the requested cashback on, and null when none was asked for', async () => {
+    const { service, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: true });
+    const allowed = user(['pos.create', 'customers.read', 'cashback.use']);
+    await service.createOrder(allowed, dto({ customerId: 'c1', cashbackToUseCents: 500 }) as never);
+    expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ customerId: 'c1', cashbackToUseCents: 500 }));
+    await service.createOrder(allowed, dto({ customerId: 'c1' }) as never);
+    expect(createOrder).toHaveBeenLastCalledWith(expect.objectContaining({ cashbackToUseCents: null }));
+  });
+
+  it('never passes credit terms on: fiado is not sold any more (the order refuses ON_ACCOUNT)', async () => {
+    const { service, createOrder } = build({ id: 'c1', name: 'Ana', phone: '11987654321', active: true });
+    await service.createOrder(user(['pos.create', 'customers.read']), dto({ customerId: 'c1', creditTerms: { installments: 2 } }) as never);
+    const sent = createOrder.mock.calls[createOrder.mock.calls.length - 1][0];
+    expect(sent).toMatchObject({ paymentMethod: 'PIX' });
+    expect(sent).not.toHaveProperty('creditTerms');
   });
 
   it('refuses an inactive customer', async () => {

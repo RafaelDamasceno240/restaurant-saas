@@ -2,7 +2,6 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
-  IsEnum,
   IsIn,
   IsInt,
   IsOptional,
@@ -19,13 +18,42 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { FulfillmentType, PaymentMethod } from '@prisma/client';
 import { AllowExtraFields } from '../../../common/decorators/allow-extra-fields.decorator';
+import { MAX_UNITS_MESSAGE, MAX_UNITS_PER_PRODUCT } from '../../../common/util/item-quantity.util';
+import { OrderLineOptionDto } from '../../order-creation/dto/order-line.dto';
+import { SALE_PAYMENT_METHODS } from '../../../common/util/payment-methods';
+
+// What a guest can pay with: the same methods as every sale (fiado is never one of them).
+const PUBLIC_PAYMENT_METHODS = SALE_PAYMENT_METHODS;
+
+// One add-on chosen for each unit of the line. Only the id and how many: the price, the group and
+// whether it belongs to this product at all are decided by the server (option-pricing.ts). The
+// same shape the staff flows (PDV, table rounds) send.
+export class OrderItemOptionInputDto extends OrderLineOptionDto {}
 
 export class OrderItemInputDto {
   @ApiProperty() @IsUUID() productId!: string;
 
-  // Quantity cap is a deliberate abuse guard (public, unauthenticated
-  // endpoint) — not a business rule about basket size.
-  @ApiProperty({ example: 2 }) @IsInt() @Min(1) @Max(50) quantity!: number;
+  // Quantity cap: an abuse guard on this public endpoint and, since B7, the same per-product
+  // limit as the PDV and the tab (OrderCreationService also adds up repeated lines).
+  @ApiProperty({ example: 2, maximum: MAX_UNITS_PER_PRODUCT })
+  @IsInt()
+  @Min(1)
+  @Max(MAX_UNITS_PER_PRODUCT, { message: MAX_UNITS_MESSAGE })
+  quantity!: number;
+
+  @ApiPropertyOptional({ type: [OrderItemOptionInputDto] })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => OrderItemOptionInputDto)
+  @ArrayMaxSize(50)
+  options?: OrderItemOptionInputDto[];
+
+  // "Sem cebola": what the kitchen needs to know about THIS line.
+  @ApiPropertyOptional({ example: 'Sem cebola' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(140)
+  notes?: string;
 }
 
 export class CustomerInputDto {
@@ -91,8 +119,10 @@ export class CreateOrderDto {
   @Type(() => AddressInputDto)
   address?: AddressInputDto;
 
-  @ApiProperty({ enum: PaymentMethod })
-  @IsEnum(PaymentMethod)
+  // Only what a guest can actually pay with. ON_ACCOUNT (fiado) is a staff decision about a
+  // registered customer with a credit limit: the public checkout never accepts it.
+  @ApiProperty({ enum: PUBLIC_PAYMENT_METHODS })
+  @IsIn(PUBLIC_PAYMENT_METHODS)
   paymentMethod!: PaymentMethod;
 
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(500) notes?: string;

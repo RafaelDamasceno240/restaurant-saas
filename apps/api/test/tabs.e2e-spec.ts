@@ -32,22 +32,12 @@ describe('Tabs (comandas) (e2e)', () => {
   function openTab(token: string, body: Record<string, unknown>) {
     return request(server).post('/v1/tabs').set('Authorization', `Bearer ${token}`).send(body);
   }
-  function addItem(token: string, tabId: string, body: Record<string, unknown>) {
+  // B9: items reach a tab only in rounds sent to the kitchen. One item per round here.
+  function addItem(token: string, tabId: string, item: Record<string, unknown>) {
     return request(server)
-      .post(`/v1/tabs/${tabId}/items`)
+      .post(`/v1/tabs/${tabId}/rounds`)
       .set('Authorization', `Bearer ${token}`)
-      .send(body);
-  }
-  function updateItem(token: string, tabId: string, itemId: string, body: Record<string, unknown>) {
-    return request(server)
-      .patch(`/v1/tabs/${tabId}/items/${itemId}`)
-      .set('Authorization', `Bearer ${token}`)
-      .send(body);
-  }
-  function removeItem(token: string, tabId: string, itemId: string) {
-    return request(server)
-      .delete(`/v1/tabs/${tabId}/items/${itemId}`)
-      .set('Authorization', `Bearer ${token}`);
+      .send({ idempotencyKey: `round-${uniqueSuffix()}`, items: [item] });
   }
   // Fatia 10: closing a tab = checking it out (the old /close route is gone).
   // A fresh key per call, so a second call is a new attempt, not a replay.
@@ -109,7 +99,7 @@ describe('Tabs (comandas) (e2e)', () => {
     expect(res.body.totalCents).toBe(5980);
   });
 
-  // AddTabItemDto has no price field at all (structural guarantee, same as
+  // TabRoundItemDto has no price field at all (structural guarantee, same as
   // OrderCreationService/PosOrdersService) — a client-supplied price is
   // rejected outright by the global strict ValidationPipe, exactly like the
   // authenticated PDV (pos.e2e-spec.ts "MANDATORY: rejects smuggled
@@ -148,31 +138,18 @@ describe('Tabs (comandas) (e2e)', () => {
     expect(res.body.code).toBe('PRODUCT_UNAVAILABLE');
   });
 
-  it('changes item quantity and recalculates the total', async () => {
+  it('B9: a sent item cannot be edited or deleted - the old item routes no longer exist', async () => {
     const { accessToken, branchId, table } = await setup();
     const product = await createActiveProductE2E(server, accessToken, 'Produto', 10);
     const tab = (await openTab(accessToken, { branchId, tableId: table.id }).expect(201)).body;
-    const withItem = (await addItem(accessToken, tab.id, { productId: product.id, quantity: 1 }).expect(201)).body;
-    const itemId = withItem.items[0].id;
+    const itemId = (await addItem(accessToken, tab.id, { productId: product.id, quantity: 1 }).expect(201)).body.items[0].id;
+    const auth = { Authorization: `Bearer ${accessToken}` };
 
-    const res = await updateItem(accessToken, tab.id, itemId, { quantity: 4 }).expect(200);
-    expect(res.body.items[0].quantity).toBe(4);
-    expect(res.body.totalCents).toBe(4000);
-  });
-
-  it('removes an item from the tab', async () => {
-    const { accessToken, branchId, table } = await setup();
-    const p1 = await createActiveProductE2E(server, accessToken, 'Produto 1', 10);
-    const p2 = await createActiveProductE2E(server, accessToken, 'Produto 2', 20);
-    const tab = (await openTab(accessToken, { branchId, tableId: table.id }).expect(201)).body;
-    await addItem(accessToken, tab.id, { productId: p1.id, quantity: 1 }).expect(201);
-    const withItem2 = (await addItem(accessToken, tab.id, { productId: p2.id, quantity: 1 }).expect(201)).body;
-    const item1Id = withItem2.items.find((i: { productId: string }) => i.productId === p1.id).id;
-
-    const res = await removeItem(accessToken, tab.id, item1Id).expect(200);
-    expect(res.body.items).toHaveLength(1);
-    expect(res.body.items[0].productId).toBe(p2.id);
-    expect(res.body.totalCents).toBe(2000);
+    await request(server).post(`/v1/tabs/${tab.id}/items`).set(auth).send({ productId: product.id, quantity: 1 }).expect(404);
+    await request(server).patch(`/v1/tabs/${tab.id}/items/${itemId}`).set(auth).send({ quantity: 4 }).expect(404);
+    await request(server).delete(`/v1/tabs/${tab.id}/items/${itemId}`).set(auth).expect(404);
+    const item = await getPrisma(app).tabItem.findUniqueOrThrow({ where: { id: itemId } });
+    expect(item).toMatchObject({ quantity: 1, cancelledQuantity: 0, status: 'SENT' });
   });
 
   it('computes total correctly across multiple items and quantities', async () => {
@@ -197,8 +174,7 @@ describe('Tabs (comandas) (e2e)', () => {
     const emptyClose = await closeTab(accessToken, tab.id).expect(409);
     expect(emptyClose.body.code).toBe('TAB_EMPTY');
 
-    const withItem = (await addItem(accessToken, tab.id, { productId: product.id, quantity: 1 }).expect(201)).body;
-    const itemId = withItem.items[0].id;
+    await addItem(accessToken, tab.id, { productId: product.id, quantity: 1 }).expect(201);
 
     const closed = await closeTab(accessToken, tab.id).expect(200);
     expect(closed.body.status).toBe('CLOSED');
@@ -206,9 +182,8 @@ describe('Tabs (comandas) (e2e)', () => {
     expect(closed.body.order).not.toBeNull();
 
     // No further mutation is allowed once CLOSED.
-    await addItem(accessToken, tab.id, { productId: product.id, quantity: 1 }).expect(409);
-    await updateItem(accessToken, tab.id, itemId, { quantity: 5 }).expect(409);
-    await removeItem(accessToken, tab.id, itemId).expect(409);
+    const late = await addItem(accessToken, tab.id, { productId: product.id, quantity: 1 }).expect(409);
+    expect(late.body.code).toBe('TAB_CLOSED');
     const secondClose = await closeTab(accessToken, tab.id).expect(409);
     expect(secondClose.body.code).toBe('TAB_ALREADY_CLOSED');
 
